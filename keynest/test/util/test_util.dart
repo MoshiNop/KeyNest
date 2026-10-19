@@ -1,0 +1,143 @@
+import 'dart:convert';
+
+import 'package:file/file.dart';
+import 'package:file/local.dart';
+import 'package:kdbx/kdbx.dart';
+import 'package:keynest/bloc/analytics.dart';
+import 'package:keynest/bloc/kdbx_bloc.dart';
+import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
+import 'package:keynest/env/_base.dart';
+import 'package:keynest/utils/path_util.dart';
+import 'package:logging/logging.dart';
+import 'package:mockito/annotations.dart';
+import 'package:mockito/mockito.dart';
+
+final _logger = Logger('test_util');
+
+const fs = LocalFileSystem();
+
+@GenerateMocks([KdbxBloc])
+class TestUtil {
+  late final kdbxFormat = KdbxFormat();
+
+  static Directory basePath() {
+    final dir = fs.currentDirectory;
+    if (dir.path.endsWith('test')) {
+      return dir.parent;
+    }
+    return dir;
+  }
+
+  static File filePath(String relativePath) {
+    return basePath().childFile(relativePath);
+  }
+
+  static Future<Env> createEnv() async {
+    final secretsFile = filePath('test/_testSecrets.json');
+    _logger.fine('Using ${secretsFile.absolute}');
+    final secretJson = secretsFile.existsSync()
+        ? await secretsFile.readAsString()
+        : '{}';
+
+    return TestEnv(
+      EnvSecretsFake.fromJson(json.decode(secretJson) as Map<String, dynamic>),
+    );
+  }
+
+  KdbxFile createFile() {
+    return kdbxFormat.create(
+      Credentials(ProtectedValue.fromString('asdf')),
+      'asdf',
+    );
+  }
+}
+
+class MockAnalytics implements Analytics {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class CloudStorageHelperMock implements CloudStorageHelperBase {
+  CloudStorageHelperMock();
+
+  @override
+  final Analytics analytics = MockAnalytics();
+
+  File get _file => TestUtil.filePath('test/_cloudStorageHelper.json');
+  Map<String, String>? __storage;
+  Future<Map<String, String>> _storage() async =>
+      __storage ??= await (() async {
+        final storage = <String, String>{};
+        if (_file.existsSync()) {
+          _logger.fine('Loading from $_file');
+          storage.addAll(
+            (json.decode(await _file.readAsString()) as Map)
+                .cast<String, String>(),
+          );
+        } else {
+          _logger.severe(
+            'Unable to find cloud storage file at ${_file.absolute}',
+          );
+        }
+        return storage;
+      })();
+
+  @override
+  Future<String?> loadCredentials(String cloudStorageId) async {
+    return (await _storage())[cloudStorageId];
+  }
+
+  @override
+  Future<void> saveCredentials(String cloudStorageId, String data) async {
+    _logger.info('Saving for $cloudStorageId: $data');
+    final storage = await _storage();
+    storage[cloudStorageId] = data;
+    await _file.writeAsString(json.encode(storage));
+  }
+
+  @override
+  final PathUtil pathUtil = TestPathUtil();
+}
+
+class TestPathUtil extends PathUtil {
+  Directory? _tempDirector;
+
+  @override
+  Future<Directory> getTemporaryDirectory({String? subNamespace}) async {
+    return _tempDirector ??= await fs.systemTempDirectory.createTemp();
+  }
+
+  @override
+  Future<Directory> getCacheDirectory({String? subNamespace}) async =>
+      getTemporaryDirectory(subNamespace: subNamespace);
+}
+
+class EnvSecretsFake extends Fake implements EnvSecrets {
+  EnvSecretsFake(this.microsoftClientId);
+  EnvSecretsFake.fromJson(Map<String, dynamic> map)
+    : microsoftClientId = map['microsoftClientId'] as String?;
+
+  @override
+  final String? microsoftClientId;
+}
+
+class TestEnv extends Env {
+  TestEnv(this.secrets) : super(EnvType.development);
+
+  @override
+  Future<AppInfo> getAppInfo() {
+    throw UnimplementedError();
+  }
+
+  @override
+  String get oauthRedirectUri => 'https://test.keynest.app/oauth';
+
+  @override
+  bool get oauthRedirectUriSupported => true;
+
+  @override
+  final EnvSecrets secrets;
+
+  @override
+  String get storageNamespaceFromEnvironment => '';
+}

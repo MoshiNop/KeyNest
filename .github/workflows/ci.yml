@@ -1,0 +1,41 @@
+name: KeyNest CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Dependencies
+        run: |
+          cd autofill_shared && dart pub get && cd ..
+          cd autofill_module && flutter pub get && cd ..
+          cd deps/autofill_service && flutter pub get && cd ../..
+          cd keynest && flutter pub get && cd ..
+
+      - name: Run Static Code Analysis
+        run: |
+          cd keynest
+          flutter analyze --no-fatal-infos
+
+      - name: Run Automated Test Suite
+        run: |
+          cd keynest
+          flutter test --reporter=expanded

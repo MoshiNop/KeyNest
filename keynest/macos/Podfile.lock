@@ -1,0 +1,59 @@
+PODS:
+  - argon2_ffi (0.0.1):
+    - FlutterMacOS
+  - biometric_storage (0.0.1):
+    - FlutterMacOS
+  - file_picker_writable (0.0.1):
+    - FlutterMacOS
+  - FlutterMacOS (1.0.0)
+  - HotKey (0.2.1)
+  - hotkey_manager_macos (0.0.1):
+    - FlutterMacOS
+    - HotKey
+  - macos_secure_bookmarks (0.0.3):
+    - FlutterMacOS
+  - window_manager (0.0.1):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - argon2_ffi (from `Flutter/ephemeral/.symlinks/plugins/argon2_ffi/macos`)
+  - biometric_storage (from `Flutter/ephemeral/.symlinks/plugins/biometric_storage/macos`)
+  - file_picker_writable (from `Flutter/ephemeral/.symlinks/plugins/file_picker_writable/macos`)
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - hotkey_manager_macos (from `Flutter/ephemeral/.symlinks/plugins/hotkey_manager_macos/macos`)
+  - macos_secure_bookmarks (from `Flutter/ephemeral/.symlinks/plugins/macos_secure_bookmarks/macos`)
+  - window_manager (from `Flutter/ephemeral/.symlinks/plugins/window_manager/macos`)
+
+SPEC REPOS:
+  trunk:
+    - HotKey
+
+EXTERNAL SOURCES:
+  argon2_ffi:
+    :path: Flutter/ephemeral/.symlinks/plugins/argon2_ffi/macos
+  biometric_storage:
+    :path: Flutter/ephemeral/.symlinks/plugins/biometric_storage/macos
+  file_picker_writable:
+    :path: Flutter/ephemeral/.symlinks/plugins/file_picker_writable/macos
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  hotkey_manager_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/hotkey_manager_macos/macos
+  macos_secure_bookmarks:
+    :path: Flutter/ephemeral/.symlinks/plugins/macos_secure_bookmarks/macos
+  window_manager:
+    :path: Flutter/ephemeral/.symlinks/plugins/window_manager/macos
+
+SPEC CHECKSUMS:
+  argon2_ffi: 20e03371f5e7a1b56d26caaea7630e273aec6818
+  biometric_storage: 9de0cb4e591e52329ca0da7df42e964db6c526cf
+  file_picker_writable: 016b61062ce0bfdd9f4e6cc43109a9d12c5023e7
+  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  HotKey: 400beb7caa29054ea8d864c96f5ba7e5b4852277
+  hotkey_manager_macos: a4317849af96d2430fa89944d3c58977ca089fbe
+  macos_secure_bookmarks: e096d8ec49de2d25ea47e1061b85e5f2f1520fef
+  window_manager: aa7e07de924901a1806684a05cc4a190f0628fbd
+
+PODFILE CHECKSUM: 872f2af73557795753ab09f727503e39a2dcceb5
+
+COCOAPODS: 1.16.2

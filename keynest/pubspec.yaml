@@ -1,0 +1,365 @@
+name: keynest
+description: KeyNest - Password Manager with support for kdbx 3.x and 4.x
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+#  kdbx: ^2.4.1
+#  kdbx:
+#    path: ../deps/kdbx.dart
+  # 2.5.0 for TransformedKeyCredentials + kdfFingerprint, which the autofill
+  # extension needs to open a vault without argon2.
+  kdbx: ^2.5.0
+#  argon2_ffi: ^1.0.0+2
+  argon2_ffi:
+    git:
+      url: https://github.com/authpass/argon2_ffi.git
+      ref: 45e4d63f37f4acaa4e4dc381bd3d83abc378744f
+  argon2_ffi_base: ^1.1.1
+  simple_form_field_validator: ^1.0.0
+#    git:
+#      url: https://github.com/hpoul/flutter_utils.git
+#      path: packages/simple_form_field_validator
+#      ref: 4158191244681ac259a7bb060ef0b8a98db502d2
+  logging: ^1.2.0
+  logging_appenders: ^1.3.0-dev.2
+  openapi_base: ^2.0.0
+#  diac_client:
+#    path: ../deps/diac/diac_client
+
+  synchronized: ^3.0.0
+  base32: ^2.1.1
+  file_picker_writable: ^2.1.0+1
+  json_annotation: ^4.9.0
+  freezed_annotation: ^3.0.0
+  built_value: ^8.0.6
+  built_collection: ^5.1.1
+  simple_json_persistence: ^2.0.1
+  provider: ^6.0.0
+  flutter_hooks: ^0.21.3
+#  http: '>=0.13.0 <2.0.0'
+  http: ^1.2.0
+  meta: '>=1.0.0 <2.0.0'
+  clock: ^1.1.0
+  intl: ^0.20.0
+  path: ^1.8.0
+  file: ^7.0.0
+  web: ^1.0.0
+#  clipboard_manager: ^0.0.4
+
+  flutter_async_utils: ^1.0.0+1
+  flutter_svg: ^2.0.0
+#  matomo_tracker: ^5.0.0-dev.2
+
+  matomo_tracker: ^6.0.0
+#    git:
+#      url: https://github.com/Floating-Dartists/matomo-tracker.git
+#      ref: ff10c2c52d2e7cc2fd4688ab4e87eebb5d3931ae
+#    git:
+#      url: https://github.com/hpoul/matomo-tracker.git
+#      ref: uuid-dep-update
+#  #usage: ^3.4.1
+#  usage:
+#    git:
+#      url: https://github.com/hpoul/usage.git
+#      ref: custom-user-agent-rebased
+  package_info_plus: ^9.0.0
+#  package_info: ^0.4.0+13
+#  package_info_macos:
+#    git:
+#      url: https://github.com/authpass/package_info_macos.git
+##    path: ../deps/package_info_macos
+  device_info_plus: ^12.3.0
+  path_provider: ^2.0.1
+  # Directly, for getContainerPath: the app group container the autofill
+  # extension reads is not reachable through path_provider's own api.
+  path_provider_foundation: ^2.6.0
+#  path_provider_macos: ^0.0.4+4
+#  path_provider_linux: ">=0.0.1 <2.0.0"
+  #path_provider_windows: '>=0.0.1+2 <2.0.0'
+  analytics_event: ^1.0.0
+  autofill_service:
+    path: ../deps/autofill_service
+
+  flutter_colorpicker: ^1.1.0
+  flutter_speed_dial: ^7.0.0
+  flutter_email_sender: ^8.0.0
+  flutter_store_listing: ^1.1.0
+
+#  biometric_storage: ^5.1.1-dev.1
+  # 5.2.0-dev.1 for darwinKeychainAccessGroup, so the extension can read the
+  # keys the app caches.
+  biometric_storage: ^5.2.0-dev.1
+  uuid: ^4.3.3
+  url_launcher: ^6.0.2
+  font_awesome_flutter: ^11.0.0
+  otp: ^3.0.0-nullsafety.0
+  otpauth_migration: #^0.0.7
+    git:
+      url: https://github.com/authpass/otpauth_migration.git
+      ref: 56e9e7d64d7fa111924dae72188145c9851b9e17
+  pointycastle: ^4.0.0
+  crypto: ^3.0.3
+  zxcvbn: ^1.0.0
+#  zxcvbn: # null-safety https://github.com/careapp-inc/zxcvbn-dart/pull/7
+#    git:
+#      url: https://github.com/authpass/zxcvbn-dart.git
+#      ref: 7f000c71c176162bbfc32a45a0800bca47ffb1a0
+
+
+  # UI Utilities and Widgets
+  badges: ^3.1.1
+  qr_flutter: ^4.0.0
+  another_flushbar: ^1.10.20
+  filesystem_picker: ^4.1.0
+  #tinycolor: ^1.0.3
+  tinycolor: # null-safety https://github.com/FooStudio/tinycolor/pull/13
+    git:
+      url: https://github.com/authpass/tinycolor.git
+      ref: 87f654ce7b79daddfbe7cdf7b7d9bb27574a8b89
+
+  # (Small) utility packages
+  quiver: ">=3.2.0 <4.0.0"
+  tuple: ^2.0.0
+  rxdart: ^0.28.0
+  charcode: ^1.1.3
+  recase: ^4.0.0
+  # collection utilities:
+  flinq: ^2.0.2
+  supercharged: ^2.0.0
+  archive: ^4.0.0
+
+  string_literal_finder_annotations: ^1.0.0
+  autofill_shared:
+    path: ../autofill_shared
+
+  # eTLD+1 matching for autofill. The rule list itself is vendored, see
+  # _tools/update_public_suffix_list.dart
+  public_suffix: ^3.0.0
+
+  # WebDAV
+  http_auth: ^1.0.0
+  xml: ">=5.5.0 <7.0.0"
+
+  # google drive
+  googleapis: ^15.0.0
+  googleapis_auth: ^2.0.0
+  google_sign_in: ^7.0.0
+  google_sign_in_web: ^1.0.0
+  extension_google_sign_in_as_googleapis_auth: ^3.0.0
+
+  # dropbox
+  #oauth2: ^1.3.0
+  oauth2:
+    #path: /Users/herbert/dev/patches/oauth2
+    git:
+      url: https://github.com/authpass/oauth2.git
+      ref: 0ed21e7c572bff503cccab926814209a8189dd45
+
+  # FDE
+  file_selector: ^1.0.0
+
+  macos_secure_bookmarks: ^0.2.0
+
+  # UI Utils
+  percent_indicator: ^4.2.2
+
+  # Plugins
+  #flutter_barcode_scanner: ^0.1.7
+#  barcode_scan: ^3.0.1 <-- not working (protobuf damnit)
+#  barcode_scan:
+#    git:
+#      url: https://github.com/RohitKumarMishra/flutter_barcode_reader.git
+#      ref: 85cfc7efee91c3444d24435486cf292a32f04499
+  mobile_scanner: ^7.0.1
+#  barcode_scan2: ^4.5.1
+#  barcode_scan2:
+#    git:
+#      url: https://github.com/david-danihel/barcode_scan2.git
+#      ref: 2a3a3b859b254b6fd65031c873e62afea6a4373d
+#  zxing_scanner: ^1.0.0
+#  flutter_zxing: ^1.5.2
+#    path: ../deps/flutter_zxing
+#  flutter_zxing:
+#    git:
+#      url: https://github.com/authpass/flutter_zxing.git
+#      ref: 036c3e387d32d3c8b2f5b3a3ebedb55c6eb69c30
+  # https://github.com/crazecoder/open_file/pull/258
+  open_file: ^3.5.10
+#  open_filex: ^4.7.0
+#  open_file:
+#    git:
+#      url: https://github.com/kishormainali/open_file.git
+#      ref: d74d15121ede2e5739df314cae2525a595f5cde0
+#  flutter_windowmanager: ^0.2.0
+  flutter_windowmanager:
+    git:
+      url: https://github.com/authpass/flutter_windowmanager.git
+      ref: 3b5405dd3c40a411fab41a951bc435a8dd98cf6d
+
+  mime: ^2.0.0
+  ffi: ^2.1.0
+  # Email viewer deps
+  enough_mail: ^2.1.7
+  flutter_widget_from_html: ^0.17.0
+#  flutter_html: #^2.0.0-nullsafety.1
+#    git:
+#      url: https://github.com/Sub6Resources/flutter_html.git
+#      ref: 957c9f833e70d6a74ae7969d6d7e341d765046d6
+  flutter_linkify: ^6.0.0
+#  openapi_base: ^0.1.5+5
+  flutter_cache_manager: ^3.3.1
+  cached_network_image: ^3.3.1
+  # windows updater
+  winsparkle_flutter:
+    git:
+      url: https://github.com/authpass/winsparkle_flutter.git
+      ref: 73224333fa2dfe057a2ad48d2dfb88b56b12c5aa
+  share_plus: ^12.0.0
+  collection: ^1.15.0-nullsafety.4
+
+  flutter_markdown_plus: ^1.0.7
+
+  hotkey_manager: ^0.2.3
+#    git:
+#      url: https://github.com/hpoul/hotkey_manager.git
+#      ref: uuid-dep-update
+#  window_manager: ^0.0.3
+  xdg_directories: ^1.0.3
+  window_manager:
+    git:
+      url: https://github.com/authpass/window_manager.git
+      ref: remove-web
+
+dev_dependencies:
+  integration_test:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  flutter_driver:
+    sdk: flutter
+  test: any
+  mockito: ^5.0.7
+#   https://github.com/flutter/flutter/issues/62240
+#  analyzer: ^0.39.17
+  json_serializable: ^6.2.0
+  build_runner: ^2.7.0
+#  builder_static_text: ^0.1.0
+  built_value_generator: ^8.3.3
+  analytics_event_gen: ^2.0.0-dev.1
+  freezed: ^3.2.4
+  plugin_platform_interface: ^2.0.0
+  msix: ^3.6.2
+  string_literal_finder: ^1.1.0+2
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+  yaml: any
+dependency_overrides:
+#  ffi: ^2.0.0
+  # enough_mail still has 0.17 pinned. remove this once enough_mail is updated.
+#  intl: ^0.18.0
+#  # Just enforce http 1.0.0 until all dependencies are updated.
+#  http: ^1.0.0
+  # https://github.com/creativecreatorormaybenot/wakelock/pull/203
+#  analytics_event_gen:
+#    path: /Users/herbert/dev/analytics_events/analytics_event_gen
+#  kdbx:
+#    path: ../deps/kdbx.dart
+#  openapi_base:
+#    path: /Users/herbert/dev/openapi_dart/packages/openapi_base
+#  flutter_async_utils:
+#    path: /Users/herbert/dev/flutter_async_utils
+
+#  url_launcher_fde:
+#    path: /Users/herbert/dev/flutter/flutter-desktop-embedding/plugins/flutter_plugins/url_launcher_fde
+#  file_chooser:
+#    path: /Users/herbert/dev/flutter/flutter-desktop-embedding/plugins/file_chooser
+#  biometric_storage:
+#    path: ../deps/biometric_storage
+#  macos_secure_bookmarks:
+#    path: /Users/herbert/dev/macos_secure_bookmarks
+
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+  generate: true
+
+  # To add assets to your application, add an assets section, like this:
+  assets:
+    - assets/images/
+  #  - images/a_dot_ham.jpeg
+
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.otf
+        - asset: assets/fonts/Inter-Light.otf
+          weight: 300
+        - asset: assets/fonts/Inter-Medium.otf
+          weight: 500
+        - asset: assets/fonts/Inter-Bold.otf
+          weight: 700
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/jetbrains/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/jetbrains/JetBrainsMono-Bold.ttf
+          weight: 700
+    - family: KeyNestIcons
+      fonts:
+       - asset: assets/fonts/KeyNestIcons.ttf
+msix_config:
+  display_name: KeyNest
+  publisher_display_name: KeyNest
+  identity_name: KeyNest.PasswordManager
+  msix_version: 1.7.12.151
+#  certificate_path: C:\<PathToCertificate>\<MyCertificate.pfx>
+#  certificate_password: 1234 (require if using .pfx certificate)
+  publisher: CN=9A3091A5-8ED6-447B-8681-7F59FF7FE2BE
+  logo_path: assets/images/app_icon_squircle.png
+  start_menu_icon_path: assets/images/app_icon_squircle.png
+  tile_icon_path: assets/images/app_icon_squircle.png
+#  vs_generated_images_folder_path: C:\<PathToFolder>\icons
+  icons_background_color: transparent
+  architecture: x64
+  capabilities: 'internetClient'
+  store: true
+  languages: 'en-us,de,fr,he,id,it,pt-BR,sk,es,zh-CN,zh-TW'
+  file_extension: '.kdbx'
+  build_windows: false
+
+flutter_launcher_icons:
+  image_path: "assets/images/app_icon_full_bleed.png"
+  android: "ic_launcher"
+  image_path_android: "assets/images/app_icon_full_bleed.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_icon_foreground.png"
+  ios: true
+  image_path_ios: "assets/images/app_icon_full_bleed.png"
+  macos:
+    generate: true
+    image_path: "assets/images/app_icon_squircle.png"
+  windows:
+    generate: true
+    image_path: "assets/images/app_icon_squircle.png"
+    icon_size: 48
+  web:
+    generate: true
+    image_path: "assets/images/app_icon_squircle.png"
+    background_color: "#FFFFFF"
+    theme_color: "#FFFFFF"

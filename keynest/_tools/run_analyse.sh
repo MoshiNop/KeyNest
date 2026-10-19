@@ -1,0 +1,54 @@
+#!/bin/bash
+
+set -xeu
+
+root="${0%/*}/.."
+
+pushd $root
+
+pushd ..
+reporoot="$(pwd)"
+popd
+
+#_tools/flutter_run.sh pub global activate string_literal_finder
+_tools/flutter_run.sh pub run \
+  string_literal_finder \
+  --path lib \
+  --exclude-path l10n/ \
+  --annotations-output-file "${reporoot}/annotations.json" --annotations-path-root "${reporoot}" \
+  --metrics-output-file metrics.json || true
+
+cat "${reporoot}/annotations.json" | jq -c '.[:50]' >"${reporoot}/annotations_first_50.json"
+cat "${reporoot}/annotations.json" | jq -c '[.[] | {message, annotation_level: .level, start_line: .line.start, end_line: .line.end, start_column: .column.start, end_column: .column.end, path} | if .start_line == .end_line then . else del(.start_column) | del(.end_column) end]' >"${reporoot}/annotations_github.json"
+
+total_annotations=$(cat "${reporoot}/annotations.json" | jq -c '. | length')
+
+echo "::set-output name=total_annotations::${total_annotations}"
+
+# From the environment, via `cux_ship secrets exec`. Absent on a fork's pull
+# request, where there is no key to decrypt it — so this stays optional rather
+# than failing a build that has nothing to push with.
+# `:+set` rather than `:-`, and xtrace off before the value is used: this runs
+# under `set -x`, which prints commands after expansion.
+if test -n "${ARTIFACT_TOKEN:+set}"; then
+  set +x
+  curl --request POST \
+    --url "${ARTIFACT_PUSH_URL:-https://data.keynest.app/data/artifact.push}" \
+    --fail \
+    --form token="${ARTIFACT_TOKEN}" \
+    --form metrics="$(cat metrics.json)"
+fi
+
+fail=()
+
+_tools/flutter_run.sh pub get
+
+_tools/flutter_run.sh analyze || fail+=('analyze')
+
+_tools/flutter_run.sh dart format --set-exit-if-changed $(find . -name "*.dart"  \! -name "secrets.dart" \! -name "generated_plugin_registrant.dart" \! -path "./.dart_tool*" \! -path "./lib/l10n-generated/*" | xargs) || fail+=('format')
+
+if [ ${#fail[@]} -ne 0 ]; then
+  echo "Errors: ${fail[*]}"
+  exit 1
+fi
+

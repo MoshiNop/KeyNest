@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools" tools:targetApi="p"
+    android:settingsActivity="com.moshinop.autofill_service.SettingsActivity">
+    <!--
+    Modern browsers (Chrome, Firefox, Edge, Opera, Samsung Internet) fully support
+    native Android Autofill APIs.
+    We do NOT declare compatibility-package tags here because compatibility mode
+    forces the platform to install an accessibility bridge in browsers, which competes
+    with the browser's native virtual view structure and input connection, causing
+    the software keyboard to open and immediately close.
+    -->
+</autofill-service>
