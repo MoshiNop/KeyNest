@@ -1,0 +1,241 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_async_utils/flutter_async_utils.dart';
+import 'package:hotkey_manager/hotkey_manager.dart';
+import 'package:keynest/l10n-generated/app_localizations.dart';
+import 'package:keynest/ui/widgets/shortcut/keynest_intents.dart';
+import 'package:keynest/ui/widgets/shortcut/shortcuts.dart';
+import 'package:keynest/utils/constants.dart';
+import 'package:keynest/utils/dialog_utils.dart';
+import 'package:keynest/utils/platform.dart';
+import 'package:logging/logging.dart';
+import 'package:provider/provider.dart';
+import 'package:string_literal_finder_annotations/string_literal_finder_annotations.dart';
+import 'package:window_manager/window_manager.dart';
+
+final _logger = Logger('keyboard_handler');
+
+class KeyboardHandler extends StatefulWidget {
+  const KeyboardHandler({
+    super.key,
+    required this.systemWideShortcuts,
+    required this.child,
+  });
+
+  final Widget child;
+  final bool systemWideShortcuts;
+
+  static bool get supportsSystemWideShortcuts =>
+      KeyNestPlatform.isMacOS ||
+      KeyNestPlatform.isWindows ||
+      KeyNestPlatform.isLinux;
+
+  @override
+  _KeyboardHandlerState createState() => _KeyboardHandlerState();
+}
+
+class _KeyboardHandlerState extends State<KeyboardHandler> {
+  final _keyboardShortcutEvents = KeyboardShortcutEvents();
+  final _actionsKey = GlobalKey();
+  late HotKey _hotKey;
+
+  final FocusNode _focusNode = FocusNode(
+    debugLabel: nonNls('KeyNestKeyboardFocus'),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+
+    _hotKey = HotKey(
+      key: LogicalKeyboardKey.keyF,
+      modifiers: [HotKeyModifier.control, HotKeyModifier.alt],
+      scope: HotKeyScope.system, // Set as system-wide hotkey.
+    );
+
+    if (widget.systemWideShortcuts) {
+      _registerSystemWideShortcuts();
+    }
+
+    _keyboardShortcutEvents._changeNotifier.addListener(() {
+      SchedulerBinding.instance.addPostFrameCallback((timeStamp) {
+        if (!mounted) {
+          _logger.warning(
+            'Got keyboard shortcut event, but was no longer mounted.',
+          );
+          return;
+        }
+        setState(() {
+          _logger.fine('actions changed.');
+        });
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant KeyboardHandler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.systemWideShortcuts != oldWidget.systemWideShortcuts) {
+      if (widget.systemWideShortcuts) {
+        _registerSystemWideShortcuts();
+      } else {
+        _disposeSystemWideShortcuts();
+      }
+    }
+  }
+
+  void _registerSystemWideShortcuts() {
+    if (KeyboardHandler.supportsSystemWideShortcuts) {
+      HotKeyManager.instance.register(
+        _hotKey,
+        keyDownHandler: (hotKey) {
+          _logger.fine('received global hotkey $hotKey');
+          WindowManager.instance.show();
+          final context = _actionsKey.currentContext;
+          if (context == null) {
+            _logger.warning('Unable to find context to invoke global action.');
+            return;
+          }
+          Actions.maybeInvoke(context, const SearchIntent());
+        },
+      );
+    }
+  }
+
+  void _disposeSystemWideShortcuts() {
+    if (KeyboardHandler.supportsSystemWideShortcuts) {
+      HotKeyManager.instance.unregister(_hotKey);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _logger.info('didChange');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = defaultKeyNestShortcuts;
+    final theme = Theme.of(context);
+    final shortcuts = Map.fromEntries(
+      s.map((e) => MapEntry(e.triggerForPlatform(theme.platform), e.intent)),
+    );
+    final loc = AppLocalizations.of(context);
+    final showHelpShortcut = <Type, Action<Intent>>{
+      KeyboardShortcutHelpIntent: CallbackAction(
+        onInvoke: (_) {
+          final descr = s
+              .map(
+                (e) => [
+                  e.triggerForPlatform(theme.platform).debugDescribeKeys(),
+                  e.label(loc),
+                ].join(CharConstants.colon + CharConstants.space),
+              )
+              .join(CharConstants.newLine);
+          DialogUtils.showSimpleAlertDialog(
+            context,
+            loc.shortcutHelpTitle,
+            descr,
+            routeAppend: 'shortcuts',
+          );
+          return null;
+        },
+      ),
+    };
+    return Shortcuts.manager(
+      manager: LoggingShortcutManager(shortcuts: shortcuts),
+      child: Provider<KeyboardShortcutEvents>.value(
+        value: _keyboardShortcutEvents,
+        child: Actions(
+          key: _actionsKey,
+          actions: {
+            ..._keyboardShortcutEvents._intentActionsMap,
+            ...showHelpShortcut,
+          },
+          dispatcher: LoggingActionDispatcher(),
+          child: Focus(
+            focusNode: _focusNode,
+            autofocus: true,
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _keyboardShortcutEvents.dispose();
+    _disposeSystemWideShortcuts();
+    super.dispose();
+  }
+}
+
+class KeyboardShortcutEvents with StreamSubscriberBase {
+  KeyboardShortcutEvents();
+
+  final _changeNotifier = ChangeNotifier();
+  final List<MapEntry<Type, Action<Intent>>> _intentActions = [];
+  Map<Type, Action<Intent>> _intentActionsMap = {};
+
+  IntentActionRegistration registerActions(Map<Type, Action<Intent>> actions) {
+    final newEntries = actions.entries.toList();
+    _intentActions.addAll(newEntries);
+    _intentActionsMap = Map.fromEntries(_intentActions);
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    _changeNotifier.notifyListeners();
+    return IntentActionRegistration._(this, newEntries);
+  }
+
+  void _removeActions(IntentActionRegistration registration) {
+    registration._registeredActions.forEach(_intentActions.remove);
+    // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+    _changeNotifier.notifyListeners();
+  }
+
+  void dispose() {
+    cancelSubscriptions();
+  }
+}
+
+class IntentActionRegistration {
+  IntentActionRegistration._(this._registrar, this._registeredActions);
+
+  final KeyboardShortcutEvents _registrar;
+  final List<MapEntry<Type, Action<Intent>>> _registeredActions;
+
+  void dispose() {
+    _registrar._removeActions(this);
+  }
+}
+
+/// A ShortcutManager that logs all keys that it handles.
+class LoggingShortcutManager extends ShortcutManager {
+  LoggingShortcutManager({required super.shortcuts});
+
+  @override
+  KeyEventResult handleKeypress(
+    BuildContext context,
+    KeyEvent event, {
+    LogicalKeySet? keysPressed,
+  }) {
+    final KeyEventResult result = super.handleKeypress(context, event);
+    _logger.info('handleKeyPress($event, $keysPressed) result: $result');
+    return result;
+  }
+}
+
+/// An ActionDispatcher that logs all the actions that it invokes.
+class LoggingActionDispatcher extends ActionDispatcher {
+  @override
+  Object? invokeAction(
+    covariant Action<Intent> action,
+    covariant Intent intent, [
+    BuildContext? context,
+  ]) {
+    _logger.fine('Action invoked: $action($intent) from $context');
+    return super.invokeAction(action, intent, context);
+  }
+}

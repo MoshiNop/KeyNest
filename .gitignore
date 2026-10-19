@@ -1,0 +1,278 @@
+.dart_tool/
+**/.dart_tool/
+.packages
+**/.packages
+.pub/
+**/.pub/
+.pub-cache/
+**/.pub-cache/
+.flutter-plugins
+**/.flutter-plugins
+.flutter-plugins-dependencies
+**/.flutter-plugins-dependencies
+
+# Flutter build directories
+build/
+**/build/
+**/doc/api/
+.build/
+.buildlog/
+.widget_preview/
+**/.widget_preview/
+
+# Symbolication & Obfuscation artifacts
+app.*.symbols
+**/app.*.symbols
+app.*.map.json
+**/app.*.map.json
+
+# Local Cloud Configuration (OAuth IDs & App Keys)
+cloud_config.json
+**/cloud_config.json
+
+# ------------------------------------------------------------------------------
+# 2. Android
+# ------------------------------------------------------------------------------
+.gradle/
+**/.gradle/
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/**/GeneratedPluginRegistrant.kt
+**/android/**/gradle-wrapper.jar
+settings_aar.gradle
+_debug-full-r8-config.txt
+
+# Gradle home daemon / caches
+**/gradle_home/caches/
+**/gradle_home/daemon/
+**/gradle_home/native/
+**/gradle_home/wrapper/
+**/gradle_home/notifications/
+
+# ------------------------------------------------------------------------------
+# 3. iOS & macOS
+# ------------------------------------------------------------------------------
+**/ios/**/Pods/
+**/ios/**/.symlinks/
+**/ios/**/DerivedData/
+**/ios/**/xcuserdata/
+**/ios/**/.generated/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/.last_build_id
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/ios/vendor/
+**/ios/build/
+
+**/macos/Pods/
+**/macos/DerivedData/
+**/macos/xcuserdata/
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/Generated.xcconfig
+**/macos/Flutter/flutter_assets/
+**/macos/Runner/GeneratedPluginRegistrant.*
+**/macos/dgph
+
+# Flutter Ephemeral build trees
+**/Flutter/ephemeral/
+**/flutter/ephemeral/
+
+# macOS / iOS Application bundles & packages
+/KeyNest.app*
+/KeyNest.pkg
+Runner.app.dSYM.zip
+Runner.ipa
+Flutter.podspec
+flutter_export_environment.sh
+
+# Xcode user state & caches
+**/ios/**/*.mode1v3
+**/ios/**/*.mode2v3
+**/ios/**/*.moved-aside
+**/ios/**/*.pbxuser
+**/ios/**/*.perspectivev3
+**/ios/**/*sync/
+**/ios/**/.sconsign.dblite
+**/ios/**/.tags*
+**/ios/**/.vagrant/
+**/ios/**/Icon?
+**/ios/**/profile
+**/macos/**/*.mode1v3
+**/macos/**/*.mode2v3
+**/macos/**/*.moved-aside
+**/macos/**/*.pbxuser
+**/macos/**/*.perspectivev3
+**/macos/**/*sync/
+**/macos/**/.sconsign.dblite
+**/macos/**/.tags*
+
+# Preserve default Xcode configs
+!**/ios/**/default.mode1v3
+!**/ios/**/default.mode2v3
+!**/ios/**/default.pbxuser
+!**/ios/**/default.perspectivev3
+!**/macos/**/default.mode1v3
+!**/macos/**/default.mode2v3
+!**/macos/**/default.pbxuser
+!**/macos/**/default.perspectivev3
+
+# Autofill test fixtures / throwaways
+**/KeyNestAutofill/Fixtures/
+
+# ------------------------------------------------------------------------------
+# 4. Windows & Linux Desktop
+# ------------------------------------------------------------------------------
+**/windows/flutter/ephemeral/
+**/windows/flutter/Generated.config
+**/windows/.gradle/
+**/windows/x64/
+**/windows/x86/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+**/linux/flutter/ephemeral/
+**/linux/flutter/generated.config
+
+# Snapcraft
+/*.snap
+/parts
+/stage
+/prime
+/snap/.snapcraft
+
+# ------------------------------------------------------------------------------
+# 5. Secrets, Keys, Certificates & Sensitive Configuration
+# ------------------------------------------------------------------------------
+# Keystores, certificates and key files
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.key
+*.keyx
+*.pem
+*.cer
+*.crt
+*.der
+*token.txt
+key.properties
+*.key.properties
+
+# Environment variables & local developer configurations
+.env
+.env.*
+*.env
+local.properties
+**/local.properties
+
+# Vault databases & backups
+*.kdbx
+*.kdb
+*.pwd
+*.kdbx.bak
+
+# Project-specific secret paths & environment overrides
+**/_tools/secrets/
+**/_tools/deploy-key/github-deploy-key
+**/lib/env/secrets.dart
+**/lib/env/secrets.g.dart
+development_hp.dart
+**/test/_testSecrets.json
+**/test/_cloudStorageHelper.json
+**/*secret*.json
+cloud_config.json
+**/cloud_config.json
+!cloud_config.json.example
+!**/cloud_config.json.example
+api-project-*.json
+ApiKey_*.p8
+AuthKey_*.p8
+
+# Blackbox / GPG
+/.blackbox/pubring.gpg~
+/.blackbox/pubring.kbx~
+/.blackbox/secring.gpg
+.blackbox/random_seed
+
+# ------------------------------------------------------------------------------
+# 6. IDEs & Editors
+# ------------------------------------------------------------------------------
+# Visual Studio Code
+.vscode/
+**/.vscode/
+
+# JetBrains / Android Studio / IntelliJ
+.idea/
+**/.idea/
+*.iml
+**/*.iml
+*.ipr
+*.iws
+out/
+**/out/
+
+# Other editors
+.atom/
+.history/
+.svn/
+.swiftpm/
+
+# ------------------------------------------------------------------------------
+# 7. Testing, Coverage, Logs & CI Tooling
+# ------------------------------------------------------------------------------
+coverage/
+**/coverage/
+report.xml
+**/report.xml
+metrics.json
+/annotations*.json
+git-buildnumber.sh
+/test/cloud_storage/docker.share/
+
+# Fastlane
+**/fastlane/screenshots/**/*.png
+**/fastlane/framed
+**/metadata/framed
+.bundle/
+
+# Installed by cux_ship deps install
+/.bin/
+/flutter/
+/stargazers/
+/tmp/
+
+# JavaScript / Node.js
+node_modules/
+**/node_modules/
+
+# ------------------------------------------------------------------------------
+# 8. Operating System & Miscellaneous
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+*.class
+*.log
+*.pyc
+*.swp
+*~
+*.bak

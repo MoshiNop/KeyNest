@@ -1,0 +1,254 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
+
+def keystorePath = System.getenv('ANDROID_KEYSTORE_PATH') ?:
+        System.getenv('KEYSTORE_PATH') ?:
+        keystoreProperties.getProperty('storeFile') ?:
+        keystoreProperties.getProperty('keynest.storeFile') ?:
+        localProperties.getProperty('storeFile') ?:
+        localProperties.getProperty('keynest.storeFile')
+
+def keystorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD') ?:
+        System.getenv('KEYSTORE_PASSWORD') ?:
+        System.getenv('STORE_PASSWORD') ?:
+        keystoreProperties.getProperty('storePassword') ?:
+        keystoreProperties.getProperty('keynest.storePassword') ?:
+        localProperties.getProperty('storePassword') ?:
+        localProperties.getProperty('keynest.storePassword')
+
+def targetKeyAlias = System.getenv('ANDROID_KEY_ALIAS') ?:
+        System.getenv('KEY_ALIAS') ?:
+        keystoreProperties.getProperty('keyAlias') ?:
+        keystoreProperties.getProperty('keynest.keyAlias') ?:
+        localProperties.getProperty('keyAlias') ?:
+        localProperties.getProperty('keynest.keyAlias') ?:
+        'keynest'
+
+def targetKeyPassword = System.getenv('ANDROID_KEY_PASSWORD') ?:
+        System.getenv('KEY_PASSWORD') ?:
+        keystoreProperties.getProperty('keyPassword') ?:
+        keystoreProperties.getProperty('keynest.keyPassword') ?:
+        localProperties.getProperty('keyPassword') ?:
+        localProperties.getProperty('keynest.keyPassword') ?:
+        keystorePassword
+
+def resolvedKeystoreFile = (keystorePath != null && !keystorePath.trim().isEmpty()) ? file(keystorePath.trim()) : null
+def hasValidKeystore = resolvedKeystoreFile != null && resolvedKeystoreFile.exists() && keystorePassword != null && !keystorePassword.isEmpty()
+def allowDebugSigningFallback = project.hasProperty('allowDebugSigningFallback') ||
+        (System.getenv('KEYNEST_ALLOW_DEBUG_SIGNING') ?: '').equalsIgnoreCase('true')
+
+kotlin {
+    jvmToolchain(17)
+}
+
+android {
+    namespace 'com.moshinop.keynest'
+    compileSdk 36
+//    buildToolsVersion "29.0.2"
+    ndkVersion System.getProperty("com.moshinop.keynest.ndkVersion", "28.2.13676358")
+
+
+    defaultConfig {
+        applicationId "com.moshinop.keynest"
+        minSdk 24
+        targetSdk 36
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // Filter for architectures supported by Flutter.
+            // https://github.com/flutter/flutter/issues/83596#issuecomment-1082781598
+            // https://docs.flutter.dev/development/add-to-app/android/project-setup
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    signingConfigs {
+        release {
+            if (hasValidKeystore) {
+                storeFile resolvedKeystoreFile
+                storePassword keystorePassword
+                keyAlias targetKeyAlias
+                keyPassword targetKeyPassword
+            } else if (allowDebugSigningFallback) {
+                logger.warn("**********************************************************************************")
+                logger.warn("WARNING: KeyNest Android release variant is being signed with the DEBUG keystore!")
+                logger.warn("Reason: Explicit fallback requested via -PallowDebugSigningFallback or KEYNEST_ALLOW_DEBUG_SIGNING.")
+                logger.warn("DO NOT publish or distribute this build for production!")
+                logger.warn("**********************************************************************************")
+                initWith(signingConfigs.debug)
+            }
+        }
+    }
+
+    flavorDimensions = ["hpdist"]
+
+    productFlavors {
+        samsungapps {
+            // Assigns this product flavor to the "version" flavor dimension.
+            // If you are using only one dimension, this property is optional,
+            // and the plugin automatically assigns all the module's flavors to
+            // that dimension.
+            dimension "hpdist"
+            applicationIdSuffix ".samsungapps"
+//            minSdkVersion 23
+//            targetSdkVersion 29
+            signingConfig signingConfigs.release
+        }
+        huawei {
+            dimension "hpdist"
+            applicationIdSuffix ".huawei"
+            signingConfig signingConfigs.release
+        }
+        amazon {
+            dimension "hpdist"
+            applicationIdSuffix ".amazon"
+            // Signed with whatever `secrets exec --keystore amazon` supplied.
+            signingConfig signingConfigs.release
+        }
+        playstore {
+            dimension "hpdist"
+            signingConfig signingConfigs.release
+        }
+        playstoredev {
+            dimension "hpdist"
+            applicationIdSuffix ".dev"
+            signingConfig signingConfigs.release
+        }
+        fdroid {
+            dimension "hpdist"
+            project.flutter.target = 'lib/env/fdroid.dart'
+            applicationIdSuffix = '.fdroid'
+            // https://issuetracker.google.com/issues/197430188
+            signingConfig?.setConfig(null)
+        }
+        // Binary distribution for direct release through github.
+        sideload {
+            dimension "hpdist"
+            project.flutter.target = 'lib/env/production.dart'
+            applicationIdSuffix = '.sideload'
+            signingConfig signingConfigs.release
+            
+        }
+
+    }
+
+
+    buildTypes {
+        release {
+//            minification is enabled by flutter build command, so nothing we need to do here.
+//            NOTE: only `flutter build apk/appbundle` will enable it,
+//            BUT NOT `flutter run --release`!!
+            minifyEnabled true
+            shrinkResources false
+            proguardFiles getDefaultProguardFile(
+                    'proguard-android-optimize.txt'),'proguard-rules.pro'
+        }
+        debug {
+            project.flutter.target = 'lib/env/development.dart'
+            applicationIdSuffix = '.debug'
+            signingConfig signingConfigs.debug
+        }
+    }
+    lint {
+        checkReleaseBuilds false
+        disable 'InvalidPackage'
+    }
+}
+
+android.applicationVariants.all { variant ->
+    if (variant.flavorName == "fdroid" && variant.buildType.name == "release") {
+        variant.outputs.all { output ->
+            output.outputFileName = "app-fdroid-release.apk"
+        }
+    }
+}
+
+
+flutter {
+    source '../..'
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+
+    implementation "androidx.appcompat:appcompat:1.6.1"
+    implementation "androidx.fragment:fragment-ktx:1.6.2"
+    implementation "androidx.documentfile:documentfile:1.0.1"
+
+    // logging
+    implementation "org.slf4j:slf4j-api:2.0.7"
+    implementation "io.github.microutils:kotlin-logging:1.7.6"
+    implementation "uk.uuid.slf4j:slf4j-android:2.0.7-0"
+
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    def hasReleaseSigningTask = taskGraph.allTasks.any { task ->
+        task.name.toLowerCase().contains("release") &&
+        (task.name.startsWith("assemble") || task.name.startsWith("bundle") || task.name.startsWith("package")) &&
+        !task.name.toLowerCase().contains("fdroid") &&
+        !task.name.toLowerCase().contains("lint") &&
+        !task.name.toLowerCase().contains("test")
+    }
+
+    if (hasReleaseSigningTask && !hasValidKeystore && !allowDebugSigningFallback) {
+        def detailReason = ""
+        if (keystorePath == null || keystorePath.trim().isEmpty()) {
+            detailReason = "No keystore path provided (storeFile in key.properties or ANDROID_KEYSTORE_PATH)."
+        } else if (resolvedKeystoreFile != null && !resolvedKeystoreFile.exists()) {
+            detailReason = "Keystore file does not exist at specified path: ${resolvedKeystoreFile.absolutePath}"
+        } else if (keystorePassword == null || keystorePassword.isEmpty()) {
+            detailReason = "Keystore password is missing (storePassword in key.properties or ANDROID_KEYSTORE_PASSWORD)."
+        }
+
+        throw new IllegalStateException(
+            "\n[KeyNest Build Error] Android production release signing is not configured!\n" +
+            "Reason: ${detailReason}\n" +
+            "KeyNest strictly prevents silently signing production releases with the debug key.\n\n" +
+            "To configure release signing, specify credentials via either:\n" +
+            "  1. A local 'android/key.properties' file (recommended, untracked):\n" +
+            "       storeFile=C:/Users/Moshiur/keystores/keynest-release.jks\n" +
+            "       storePassword=<keystore-password>\n" +
+            "       keyAlias=keynest\n" +
+            "       keyPassword=<key-password>\n" +
+            "  2. Environment variables:\n" +
+            "       ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD\n\n" +
+            "For local testing ONLY, you may explicitly opt-in to debug-signed release builds with:\n" +
+            "  ./gradlew assemblePlaystoreRelease -PallowDebugSigningFallback=true\n" +
+            "  or by exporting KEYNEST_ALLOW_DEBUG_SIGNING=true\n"
+        )
+    }
+}

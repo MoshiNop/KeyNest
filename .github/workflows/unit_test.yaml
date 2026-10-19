@@ -1,0 +1,46 @@
+name: unit test with coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  unit_test:
+    runs-on: ubuntu-latest
+
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      webdav:
+        # Docker Hub image
+        image: bytemark/webdav
+        ports:
+          - "10280:80"
+        env:
+          AUTH_TYPE: Digest
+          USERNAME: keynest
+          PASSWORD: keyne5t
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      # The key is what puts test/_testSecrets.json on disk. Absent — on a
+      # fork's pull request — the tests that need it are the ones that skip.
+      - name: ci-install-deps
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: "./keynest/_tools/ci-install-deps.sh android"
+      - run: keynest/_tools/test-coverage.sh
+      - name: Coveralls
+        uses: coverallsapp/github-action@master
+        env:
+          COVERALLS_FLAG_NAME: Unit
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: keynest/coverage/lcov.info
+          base-path: keynest

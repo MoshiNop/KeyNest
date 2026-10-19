@@ -1,0 +1,39 @@
+name: keynest_ship
+description: >-
+  Resolves the release tooling. One directory for it to be run from, and one
+  place to bump the version.
+publish_to: 'none'
+version: 1.0.0
+
+# https://pub.dev/packages/cux_ship — a plain hosted dependency since 1.6.0,
+# which was its first release on pub. Before that it was consumed as a git ref,
+# and this wrapper existed partly to keep that ref in one place.
+#
+# The wrapper still earns its keep: it gives the release scripts a directory to
+# run `dart run cux_ship` from, and keeps the tooling's dependencies out of the
+# app's own lockfile.
+#
+# TO BUMP: change the one constraint below, then `dart pub upgrade` here.
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  # 3.5.0: --beta-group carries an external TestFlight group through beta
+  # review (description reasserted from store/appstore/listings/, idempotent
+  # submission, externalBuildState read back), and `appstore beta-release`
+  # releases a build CI already uploaded — the whole external beta is one
+  # command. 3.4.2 brought the windows support and the same-commit tag race
+  # fix.
+  # 3.6.0: `appstore beta-groups` prints the group names --beta-group needs
+  # (the kind with them — internal or external decides what a release costs),
+  # a lookup that misses names what exists, and a group kind Apple did not
+  # report is refused at release rather than guessed. 3.5.1 brought the
+  # symlink-aware committed-notes guard this repo's root CHANGELOG.md needs.
+  cux_ship: ^3.6.0
+  # The git-buildnumber port, invoked through ship.sh's `buildnumber`
+  # dispatch. Replaces the shell script release.sh used to curl from the
+  # mutable `stable` branch and execute — unpinned, unhashed, run on a CI
+  # machine holding push credentials. A separate package from cux_ship (an
+  # allocator whose only dependency is git should not pull googleapis), but
+  # pinned by the same lockfile so there is exactly one place to bump.
+  cux_buildnumber: ^0.1.0-dev.1

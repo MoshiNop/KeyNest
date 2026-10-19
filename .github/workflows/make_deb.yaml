@@ -1,0 +1,88 @@
+name: make_deb
+
+on:
+#  push:
+#    branches:
+#      - 'main'
+#      - 'linux**'
+  workflow_run:
+    workflows: ["build linux"]
+    types: [completed]
+  workflow_dispatch:
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      # The only job here that never builds the app: it repackages a published
+      # tarball, so there is no Flutter SDK to borrow a Dart from and no
+      # ci-install-deps step to install sops. Both, and nothing else.
+      - uses: dart-lang/setup-dart@v1
+      - name: install sops
+        run: ./keynest/_tools/ship.sh deps install
+      - id: build
+        run: |
+          path=debian/opt/keynest
+          base="${ARTIFACT_BASE_URL:-https://keynest-data.codeux.design/data/artifacts}"
+          # The sidecar first, then the artifact: the two uploads are not
+          # atomic, so fetching in this order turns a mid-publish skew into a
+          # digest mismatch — loud and retryable — rather than a manifest
+          # describing bytes we do not have. Tolerated when absent: the server
+          # only recently learned to accept manifests, and a tarball published
+          # before that has none.
+          wget "${base}/keynest-linux-latest.tar.gz.manifest.json" \
+            || echo "WARNING: no manifest beside the tarball — the deb will carry no provenance record"
+          wget "${base}/keynest-linux-latest.tar.gz"
+          src=keynest-linux-latest.tar.gz
+          if [ -f keynest-linux-latest.tar.gz.manifest.json ]; then
+            # Restore the versioned names the manifest records: a reader
+            # refuses a sidecar whose stem disagrees with its artifact field,
+            # and the parent digest check finds the artifact by that name.
+            src=$(jq -r .artifact keynest-linux-latest.tar.gz.manifest.json)
+            mv keynest-linux-latest.tar.gz.manifest.json "${src}.manifest.json"
+            mv keynest-linux-latest.tar.gz "${src}"
+          fi
+          tar -zxvf "${src}" -C "${path}" --strip-components=1 keynest
+          version=$(cat "${path}/version.txt")
+          version_name=${version/+/_}
+          filename="keynest-linux-${version_name}.deb"
+          sed -i "s/^Version=1.0/Version=${version}/g" debian/usr/share/applications/keynest.desktop
+          sed -i "s/^Version: 1.0/Version: ${version}/g" debian/DEBIAN/control
+          dpkg-deb --build --root-owner-group ./debian
+          mv debian.deb $filename
+          if [ -f "${src}.manifest.json" ]; then
+            # The deb inherits the tarball's build facts — gitSha, dirty,
+            # version, build number — and records its own packaging step:
+            # this checkout is the default branch at trigger time, derivable
+            # from nothing afterwards, and a broken Depends: line's
+            # provenance is this commit, not the tarball's. The tarball sits
+            # beside its manifest here, so the parent digest is verified in
+            # the same call. upload-artifact.sh then ships the deb's sidecar
+            # beside the deb on its own.
+            ./keynest/_tools/ship.sh manifest write \
+              --artifact "${PWD}/${filename}" --platform linux --format deb \
+              --derived-from "${PWD}/${src}.manifest.json" \
+              --packaging "gitSha=$(git rev-parse HEAD)" \
+              --packaging "dirty=false"
+          fi
+          echo "::set-output name=outputfilename::${filename}"
+          echo "::set-output name=outputpath::${filename}"
+      - name: upload artifact
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: >-
+          ./keynest/_tools/ship.sh secrets exec --keystore upload --api-key upload --
+          ./keynest/_tools/upload-artifact.sh ${{ steps.build.outputs.outputfilename }}
+      - uses: docker://lpenz/ghaction-packagecloud:0.4
+        with:
+          files: ${{ steps.build.outputs.outputpath }}
+          repository: keynest/debian/stretch
+        env:
+          PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.outputfilename }}
+          path: ${{ steps.build.outputs.outputpath }}
+          if-no-files-found: error

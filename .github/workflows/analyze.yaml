@@ -1,0 +1,59 @@
+name: analyze
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - main
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: ci-install-deps
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: "./keynest/_tools/ci-install-deps.sh android"
+      - run: |
+          cd keynest
+          ~/deps/flutter/bin/flutter pub get
+          _tools/run_analyse.sh
+        id: analyse
+#      - uses: LouisBrunner/checks-action@v0.1.0
+#        if: always()
+#        with:
+#          token: ${{ secrets.GITHUB_TOKEN }}
+#          name: Test XYZ
+#          conclusion: ${{ job }}
+#          output:
+#            summary: ${{ steps.test.outputs.summary }}
+#            text_description: ${{ steps.test.outputs.description }}
+#      - name: Annotate
+#        uses: Attest/annotations-action@master
+#        if: ${{ github.head_ref == '' }}
+#        with:
+#          secret: ${{ github.token }}
+#          #token: ${{ github.token }}
+#          path: './annotations_first_50.json'
+#          #input: './annotations_first_50.json'
+#          title: 'String Literals (total: ${{ steps.analyse.outputs.total_annotations }})'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: annotations_github
+          path: ./annotations_github.json
+      - name: Upload typing results
+        uses: kibalabs/github-action-create-annotations@main
+        if: ${{ github.head_ref == '' }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+#          json-file-path: ./annotations_first_50.json
+          json-file-path: ./annotations_github.json
+          #check-name: 'String Literals (total: ${{ steps.analyse.outputs.total_annotations }})'
+          check-name: 'String Literals'
+          fail-on-error: false

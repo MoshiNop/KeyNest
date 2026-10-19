@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://www.google-analytics.com https://*.googletagmanager.com; connect-src 'self' https: blob: data:; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self';">
+  <meta name="description" content="KeyNest - Manage all your passwords across all your devices. Available on Mac, Windows, iPhone, iPad, Android, Chromebooks and the Web.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="KeyNest">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="shortcut icon" type="image/png" href="favicon.png"/>
+
+  <title>KeyNest - Free password manager for all devices.</title>
+  <link rel="manifest" href="manifest.json">
+  
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=UA-91100035-7"></script>
+  <script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-91100035-7');
+</script>
+
+  <style>
+    .loading {
+    width: 100%;
+      text-align: center;
+      font-family: sans-serif;
+      margin: 0;
+      position: absolute;
+      top: 40%;
+      -ms-transform: translateY(-50%);
+      transform: translateY(-50%);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 0;
+    }
+    h2 {
+      color: #999;
+      font-size: 12pt;
+      margin-top: 4px;
+    }
+  </style>
+
+</head>
+<body>
+  <div class="loading">
+    <img src="icons/keynest-launcher-512.png" align="center" width="200" height="200" />
+    <h1>KeyNest</h1>
+    <h2>Free Password Manager, cross platform available for all your devices.</h2>
+    <p>Loading …</p>
+  </div>
+  <script src="flutter_bootstrap.js" async></script>
+  <script src="js/argon2-bundled.min.js" type="application/javascript"></script>
+  <!-- This script installs service_worker.js to provide PWA functionality to
+       application. For more information, see:
+       https://developers.google.com/web/fundamentals/primers/service-workers -->
+</body>
+</html>
