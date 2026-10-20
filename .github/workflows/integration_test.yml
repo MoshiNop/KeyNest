@@ -50,7 +50,7 @@ jobs:
         export PATH="$HOME/deps/flutter/bin:$PATH"
         ./autofill_module/build_ios_framework.sh Debug
     - name: 'Start Simulator'
-      uses: futureware-tech/simulator-action@v4
+      uses: futureware-tech/simulator-action@v6
       with:
         model: ${{ matrix.device }}
 #    - name: List all simulators
