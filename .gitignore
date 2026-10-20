@@ -46,6 +46,8 @@ settings_aar.gradle
 _debug-full-r8-config.txt
 *.apk
 *.aab
+*SUMS.txt
+checksums.txt
 
 # Gradle home daemon / caches
 **/gradle_home/caches/
