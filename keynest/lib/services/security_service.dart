@@ -312,12 +312,17 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   SecurityLifecycleManager._();
   static final SecurityLifecycleManager instance = SecurityLifecycleManager._();
 
-  DateTime? _pausedAt;
-  DateTime? _lastInteractionAt;
-  Timer? _inactivityCheckTimer;
+  DateTime? pausedAt;
+  DateTime? lastInteractionAt;
+  Timer? inactivityCheckTimer;
   KdbxBloc? _kdbxBloc;
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _initialized = false;
+
+  void dispose() {
+    inactivityCheckTimer?.cancel();
+    inactivityCheckTimer = null;
+  }
 
   void init({
     required KdbxBloc kdbxBloc,
@@ -325,13 +330,13 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   }) {
     _kdbxBloc = kdbxBloc;
     _navigatorKey = navigatorKey;
-    _lastInteractionAt = DateTime.now();
+    lastInteractionAt = DateTime.now();
     if (!_initialized) {
       WidgetsBinding.instance.addObserver(this);
       try {
         WidgetsBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
       } catch (_) {}
-      _inactivityCheckTimer = Timer.periodic(
+      inactivityCheckTimer = Timer.periodic(
         const Duration(seconds: 5),
         (_) => _checkForegroundInactivity(),
       );
@@ -341,12 +346,12 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   }
 
   void _onPointerEvent(PointerEvent event) {
-    _lastInteractionAt = DateTime.now();
+    lastInteractionAt = DateTime.now();
   }
 
   void _checkForegroundInactivity() {
     // Only check foreground inactivity when app is not paused/in background
-    if (_pausedAt != null) {
+    if (pausedAt != null) {
       return;
     }
     final kdbxBloc = _kdbxBloc;
@@ -357,8 +362,8 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
       return;
     }
     final timeout = SecuritySettingsStore.instance.autoLockSeconds;
-    if (timeout > 0 && _lastInteractionAt != null) {
-      final elapsed = DateTime.now().difference(_lastInteractionAt!).inSeconds;
+    if (timeout > 0 && lastInteractionAt != null) {
+      final elapsed = DateTime.now().difference(lastInteractionAt!).inSeconds;
       if (elapsed >= timeout) {
         _logger.info(
           'Vault foreground inactivity auto-lock triggered ($elapsed s >= $timeout s)',
@@ -371,17 +376,10 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   @visibleForTesting
   void checkForegroundInactivityForTesting() => _checkForegroundInactivity();
 
-  /// Exposed for testing or external checks.
-  DateTime? get pausedAt => _pausedAt;
-  set pausedAt(DateTime? value) => _pausedAt = value;
-
-  DateTime? get lastInteractionAt => _lastInteractionAt;
-  set lastInteractionAt(DateTime? value) => _lastInteractionAt = value;
-
   /// Evaluates whether the auto-lock timeout has elapsed since the app was paused/backgrounded.
   /// If expired, executes the lock operation and returns true.
   bool checkAutoLock({DateTime? nativeActiveTime}) {
-    final paused = _pausedAt;
+    final paused = pausedAt;
     if (paused != null) {
       DateTime effectivePaused = paused;
       if (nativeActiveTime != null && nativeActiveTime.isAfter(effectivePaused)) {
@@ -394,7 +392,7 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
           _logger.info(
             'Vault auto-lock timeout triggered ($diff s >= $timeout s)',
           );
-          _pausedAt = null;
+          pausedAt = null;
           _lockVaultNow();
           return true;
         }
@@ -413,16 +411,16 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
         state == AppLifecycleState.hidden) {
       // Only record the pause timestamp if we were not already paused/inactive/hidden.
       // This prevents the foreground-entry `inactive` event from wiping out the background elapsed time!
-      if (_pausedAt == null) {
-        _pausedAt = DateTime.now();
+      if (pausedAt == null) {
+        pausedAt = DateTime.now();
         if (_kdbxBloc != null) {
           unawaited(KeyNestCloudSyncManager.instance.flushPendingSync(_kdbxBloc!));
         }
       }
     } else if (state == AppLifecycleState.resumed) {
-      final paused = _pausedAt;
-      _pausedAt = null;
-      _lastInteractionAt = DateTime.now();
+      final paused = pausedAt;
+      pausedAt = null;
+      lastInteractionAt = DateTime.now();
       if (_kdbxBloc != null) {
         unawaited(
           KeyNestCloudSyncManager.instance.recoverPendingSync(_kdbxBloc!),

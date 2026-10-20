@@ -2,9 +2,6 @@ import 'package:autofill_service/autofill_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:keynest/l10n-generated/app_localizations.dart';
-import 'package:keynest/theme.dart';
-import 'package:keynest/ui/design_system/design_tokens.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
