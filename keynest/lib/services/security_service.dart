@@ -313,6 +313,8 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   static final SecurityLifecycleManager instance = SecurityLifecycleManager._();
 
   DateTime? _pausedAt;
+  DateTime? _lastInteractionAt;
+  Timer? _inactivityCheckTimer;
   KdbxBloc? _kdbxBloc;
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _initialized = false;
@@ -323,29 +325,104 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   }) {
     _kdbxBloc = kdbxBloc;
     _navigatorKey = navigatorKey;
+    _lastInteractionAt = DateTime.now();
     if (!_initialized) {
       WidgetsBinding.instance.addObserver(this);
+      try {
+        WidgetsBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
+      } catch (_) {}
+      _inactivityCheckTimer = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => _checkForegroundInactivity(),
+      );
       _initialized = true;
       SecuritySettingsStore.instance.load();
     }
   }
 
+  void _onPointerEvent(PointerEvent event) {
+    _lastInteractionAt = DateTime.now();
+  }
+
+  void _checkForegroundInactivity() {
+    // Only check foreground inactivity when app is not paused/in background
+    if (_pausedAt != null) {
+      return;
+    }
+    final kdbxBloc = _kdbxBloc;
+    final hasOpenVault =
+        (kdbxBloc != null && kdbxBloc.openedFilesKdbx.isNotEmpty) ||
+        QuickUnlockStorage.hasSessionCredentials;
+    if (!hasOpenVault) {
+      return;
+    }
+    final timeout = SecuritySettingsStore.instance.autoLockSeconds;
+    if (timeout > 0 && _lastInteractionAt != null) {
+      final elapsed = DateTime.now().difference(_lastInteractionAt!).inSeconds;
+      if (elapsed >= timeout) {
+        _logger.info(
+          'Vault foreground inactivity auto-lock triggered ($elapsed s >= $timeout s)',
+        );
+        _lockVaultNow();
+      }
+    }
+  }
+
+  @visibleForTesting
+  void checkForegroundInactivityForTesting() => _checkForegroundInactivity();
+
+  /// Exposed for testing or external checks.
+  DateTime? get pausedAt => _pausedAt;
+  set pausedAt(DateTime? value) => _pausedAt = value;
+
+  DateTime? get lastInteractionAt => _lastInteractionAt;
+  set lastInteractionAt(DateTime? value) => _lastInteractionAt = value;
+
+  /// Evaluates whether the auto-lock timeout has elapsed since the app was paused/backgrounded.
+  /// If expired, executes the lock operation and returns true.
+  bool checkAutoLock({DateTime? nativeActiveTime}) {
+    final paused = _pausedAt;
+    if (paused != null) {
+      DateTime effectivePaused = paused;
+      if (nativeActiveTime != null && nativeActiveTime.isAfter(effectivePaused)) {
+        effectivePaused = nativeActiveTime;
+      }
+      final timeout = SecuritySettingsStore.instance.autoLockSeconds;
+      if (timeout >= 0) {
+        final diff = DateTime.now().difference(effectivePaused).inSeconds;
+        if (timeout == 0 || diff >= timeout) {
+          _logger.info(
+            'Vault auto-lock timeout triggered ($diff s >= $timeout s)',
+          );
+          _pausedAt = null;
+          _lockVaultNow();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void lockVault() => _lockVaultNow();
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _logger.finer('AppLifecycleState changed: $state');
     if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
-      _pausedAt = DateTime.now();
-      QuickUnlockStorage.touchSession();
-      if (_kdbxBloc != null) {
-        unawaited(KeyNestCloudSyncManager.instance.flushPendingSync(_kdbxBloc!));
-      }
-      if (KeyNestPlatform.isAndroid) {
-        unawaited(AutofillService().touchActive());
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      // Only record the pause timestamp if we were not already paused/inactive/hidden.
+      // This prevents the foreground-entry `inactive` event from wiping out the background elapsed time!
+      if (_pausedAt == null) {
+        _pausedAt = DateTime.now();
+        if (_kdbxBloc != null) {
+          unawaited(KeyNestCloudSyncManager.instance.flushPendingSync(_kdbxBloc!));
+        }
       }
     } else if (state == AppLifecycleState.resumed) {
       final paused = _pausedAt;
       _pausedAt = null;
+      _lastInteractionAt = DateTime.now();
       if (_kdbxBloc != null) {
         unawaited(
           KeyNestCloudSyncManager.instance.recoverPendingSync(_kdbxBloc!),
@@ -371,35 +448,31 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
     }
   }
 
-  void _lockVaultNow() {
+  Future<void> _lockVaultNow() async {
     final kdbxBloc = _kdbxBloc;
     final navKey = _navigatorKey;
-    if (kdbxBloc == null || navKey == null) {
-      return;
-    }
 
-    if (kdbxBloc.isSaving) {
+    if (kdbxBloc != null && kdbxBloc.isSaving) {
       _logger.info(
         'Auto-lock deferred because a vault save is actively in progress.',
       );
       return;
     }
 
-    if (kdbxBloc.openedFilesWithSources.isNotEmpty ||
-        QuickUnlockStorage.isSessionValid()) {
-      _logger.info('Auto-locking vault due to security policy.');
-      KeyNestClipboard.clearNow();
-      QuickUnlockStorage.clearSession();
-      KeyNestPendingLoginMemory.instance.clear();
-      if (KeyNestPlatform.isAndroid) {
-        unawaited(AutofillService().clearCredentials());
-        unawaited(AutofillService().clearPendingSaveRequest());
-      }
-      unawaited(kdbxBloc.closeAllFiles(clearQuickUnlock: false));
-      navKey.currentState?.pushAndRemoveUntil(
-        LockedScreen.route(),
-        (_) => false,
-      );
+    _logger.info('Auto-locking vault due to security policy.');
+    KeyNestClipboard.clearNow();
+    QuickUnlockStorage.clearSession();
+    KeyNestPendingLoginMemory.instance.clear();
+    if (KeyNestPlatform.isAndroid) {
+      unawaited(AutofillService().clearCredentials());
+      unawaited(AutofillService().clearPendingSaveRequest());
     }
+    if (kdbxBloc != null) {
+      await kdbxBloc.closeAllFiles(clearQuickUnlock: false);
+    }
+    navKey?.currentState?.pushAndRemoveUntil(
+      LockedScreen.route(),
+      (_) => false,
+    );
   }
 }

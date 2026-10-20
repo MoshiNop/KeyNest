@@ -136,6 +136,7 @@ Future<void> startApp(Env env) async {
 
   WidgetsFlutterBinding.ensureInitialized();
   await SecuritySettingsStore.instance.load();
+  await KeyNestVaultScope.instance.init();
   final deps = Deps(env: env);
   deps.kdbxBloc.delegate = KdbxBlocDelegateHandler(navigatorKey);
 
@@ -248,10 +249,16 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
     _appData = _deps.appDataBloc.store.cachedValue;
     handleSubscription(
       _deps.appDataBloc.store.onValueChangedAndLoad.listen((appData) {
-        if (_appData != appData) {
+        final current = _appData;
+        if (current == null ||
+            current.theme != appData.theme ||
+            current.themeFontSizeFactor != appData.themeFontSizeFactor ||
+            current.localeOverride != appData.localeOverride) {
           setState(() {
             _appData = appData;
           });
+        } else {
+          _appData = appData;
         }
       }),
     );
@@ -262,6 +269,7 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
           if (nav == null) {
             return;
           }
+          SecurityLifecycleManager.instance.checkAutoLock();
           // Remove any stale autofill sheets before presenting new request
           nav.popUntil((route) => route.isFirst);
           var isUnlocked = _deps.kdbxBloc.openedFilesKdbx.isNotEmpty;

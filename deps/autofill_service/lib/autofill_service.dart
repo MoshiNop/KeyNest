@@ -438,6 +438,17 @@ class AutofillService {
     return (await _channel.invokeMethod<bool>('touchActive')) ?? false;
   }
 
+  Future<DateTime?> getLastActiveTimestamp() async {
+    if (!isAndroidPlatform) {
+      return null;
+    }
+    final millis = await _channel.invokeMethod<int>('getLastActiveTimestamp');
+    if (millis == null || millis <= 0) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
   Future<bool> cacheSessionTokens(Map<String, String> tokens) async {
     if (!isAndroidPlatform) {
       return false;

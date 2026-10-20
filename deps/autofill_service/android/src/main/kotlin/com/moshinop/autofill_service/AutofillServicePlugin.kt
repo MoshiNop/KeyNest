@@ -428,6 +428,9 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 AutofillCredentialStore.touchActive()
                 result.success(true)
             }
+            "getLastActiveTimestamp" -> {
+                result.success(AutofillCredentialStore.lastActiveTimestamp)
+            }
             "setAutoLockDuration" -> {
                 val sec = call.argument<Int>("seconds") ?: 300
                 AutofillCredentialStore.setAutoLockSettings(sec)
