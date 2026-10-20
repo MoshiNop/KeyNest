@@ -1,17 +1,15 @@
 # KeyNest Asset Repository
 
-This directory contains visual brand assets, logos, and screenshots for the KeyNest project.
+This directory contains visual brand assets and logos for the KeyNest project.
 
 ## Directory Structure
 
 ```text
 docs/assets/
 ├── banner.png                  # Official wide KeyNest repository hero banner
-├── logo/
-│   ├── README.md               # Logo specifications, colors, and usage guidelines
-│   └── keynest-logo.png        # Official KeyNest squircle application icon
-└── screenshots/
-    └── README.md               # Screenshot guidelines, naming conventions, and manifest
+└── logo/
+    ├── README.md               # Logo specifications, colors, and usage guidelines
+    └── keynest-logo.png        # Official KeyNest squircle application icon
 ```
 
 ## Guidelines

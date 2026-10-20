@@ -22,9 +22,7 @@ KeyNest is a modern, zero-knowledge credential manager built with Flutter. It pu
 
 ## Screenshot Showcase
 
-The gallery below presents the core interface across desktop and mobile. 
-
-> **Screenshot Note:** To display your own app captures on GitHub, save your screenshots to [`docs/assets/screenshots/`](docs/assets/screenshots/) using the filenames listed below. GitHub renders them automatically upon push. See the [Screenshot Gallery Manifest](docs/assets/screenshots/README.md) for dimensions and guidelines.
+The gallery below presents the core interface across desktop and mobile.
 
 <table>
   <tr>

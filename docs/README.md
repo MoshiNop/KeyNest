@@ -40,7 +40,6 @@ Specifications, dependencies, and compatibility tables:
 
 ### 4. [Assets & Branding](assets/README.md)
 - [Logo Specifications](assets/logo/README.md) - Official logos, colors, and iconography.
-- [Screenshot Repository & Manifest](assets/screenshots/README.md) - Screenshot specifications, naming conventions, and gallery guide.
 
 ---
 
