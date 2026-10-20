@@ -18,6 +18,7 @@ class KeyNestHeader extends StatelessWidget {
     this.icon,
     this.iconColor,
     this.iconBgColor,
+    this.onAdd,
   });
 
   final String title;
@@ -26,6 +27,7 @@ class KeyNestHeader extends StatelessWidget {
   final IconData? icon;
   final Color? iconColor;
   final Color? iconBgColor;
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -200,6 +202,23 @@ class KeyNestHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            if (onAdd != null) ...[
+              _HeaderIconButton(
+                icon: Icons.add_rounded,
+                tooltip: 'Add item',
+                backgroundColor: isDark
+                    ? KeyNestTokens.primaryAccent.withValues(alpha: 0.18)
+                    : KeyNestTokens.lightPrimary.withValues(alpha: 0.15),
+                iconColor: isDark
+                    ? KeyNestTokens.primaryAccent
+                    : KeyNestTokens.lightPrimary,
+                borderColor: isDark
+                    ? KeyNestTokens.primaryAccent.withValues(alpha: 0.35)
+                    : KeyNestTokens.lightPrimary.withValues(alpha: 0.30),
+                onPressed: onAdd!,
+              ),
+              const SizedBox(width: 8),
+            ],
             // Action Buttons: Lock & Settings
             _HeaderIconButton(
               icon: Icons.lock_outline_rounded,

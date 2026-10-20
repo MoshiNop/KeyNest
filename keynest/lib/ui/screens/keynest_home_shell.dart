@@ -27,6 +27,7 @@ class KeyNestHomeShell extends StatefulWidget {
     super.key,
     this.onEntrySelected,
     this.selectedEntry,
+    this.isDesktopMaster = false,
   });
 
   static const routeSettings = RouteSettings(name: '/home');
@@ -70,18 +71,21 @@ class KeyNestHomeShell extends StatefulWidget {
   static Route<void> route({
     OnEntrySelected? onEntrySelected,
     KdbxEntry? selectedEntry,
+    bool isDesktopMaster = false,
   }) => KeyNestPageRoute(
     settings: routeSettings,
     builder: (context) => onEntrySelected != null
         ? KeyNestHomeShell(
             onEntrySelected: onEntrySelected,
             selectedEntry: selectedEntry,
+            isDesktopMaster: isDesktopMaster,
           )
         : phoneHomeShell(context),
   );
 
   final OnEntrySelected? onEntrySelected;
   final KdbxEntry? selectedEntry;
+  final bool isDesktopMaster;
 
   @override
   State<KeyNestHomeShell> createState() => _KeyNestHomeShellState();
@@ -280,9 +284,13 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
           file: activeVault,
           group: activeFolder,
         );
-        await Navigator.of(context).push(
-          EntryDetailsScreen.route(entry: entry, isNew: true),
-        );
+        if (widget.onEntrySelected != null) {
+          widget.onEntrySelected!(entry, EntrySelectionType.newEntry);
+        } else {
+          await Navigator.of(context).push(
+            EntryDetailsScreen.route(entry: entry, isNew: true),
+          );
+        }
         break;
       case 1: // Records
         await Navigator.of(context).push(
@@ -639,6 +647,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                     icon: _tabIcon(),
                     iconBgColor: _tabColor(isDark),
                     iconColor: _tabIconColor(isDark),
+                    onAdd: widget.isDesktopMaster ? _onFabPressed : null,
                   ),
 
                   // Tab Content with smooth direct slide transitions without flashing
@@ -747,12 +756,13 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
               ),
             ),
             // Smooth localized content fade for items approaching bottom navigation area
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 96,
-              child: IgnorePointer(
+            if (!widget.isDesktopMaster)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: 96,
+                child: IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -781,7 +791,8 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
           ],
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: (_currentTabIndex == 0 && _isSelectionMode)
+        floatingActionButton: (widget.isDesktopMaster ||
+                (_currentTabIndex == 0 && _isSelectionMode))
             ? null
             : Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -799,17 +810,19 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                   child: const Icon(Icons.add_rounded, size: 28),
                 ),
               ),
-        bottomNavigationBar: KeyNestBottomNav(
-          currentIndex: _currentTabIndex,
-          counts: {
-            0: _getTabCount(0, kdbxBloc),
-            1: _getTabCount(1, kdbxBloc),
-            2: _getTabCount(2, kdbxBloc),
-            3: _getTabCount(3, kdbxBloc),
-            4: _getTabCount(4, kdbxBloc),
-          },
-          onTap: _switchToTab,
-        ),
+        bottomNavigationBar: widget.isDesktopMaster
+            ? null
+            : KeyNestBottomNav(
+                currentIndex: _currentTabIndex,
+                counts: {
+                  0: _getTabCount(0, kdbxBloc),
+                  1: _getTabCount(1, kdbxBloc),
+                  2: _getTabCount(2, kdbxBloc),
+                  3: _getTabCount(3, kdbxBloc),
+                  4: _getTabCount(4, kdbxBloc),
+                },
+                onTap: _switchToTab,
+              ),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:keynest/bloc/app_data.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/main.dart';
+import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/screens/card_details.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
@@ -12,10 +13,11 @@ import 'package:keynest/ui/screens/keynest_home_shell.dart';
 import 'package:keynest/ui/screens/note_details.dart';
 import 'package:keynest/ui/screens/password_list.dart';
 import 'package:keynest/ui/widgets/keyboard_handler.dart';
-import 'package:keynest/ui/widgets/primary_button.dart';
+import 'package:keynest/ui/widgets/keynest_desktop_nav_rail.dart';
 import 'package:keynest/ui/widgets/utils/back_button_navigator_delegate.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:logging/logging.dart';
 import 'package:provider/provider.dart';
 
@@ -38,7 +40,8 @@ class MainAppScaffold extends StatelessWidget {
       (appData) => appData.systemWideShortcuts,
     );
     _logger.finer('size.width: ${mediaQuery.size.width}');
-    if (mediaQuery.size.width >= Breakpoints.TABLET_WIDTH) {
+    if (KeyNestPlatform.isDesktopOrWeb ||
+        mediaQuery.size.width >= Breakpoints.TABLET_WIDTH) {
       return KeyboardHandler(
         systemWideShortcuts: systemWideShortcuts,
         child: MainAppTabletScaffold(),
@@ -97,7 +100,7 @@ class FocusWorkaroundPageRoute<T> extends MaterialPageRoute<T> {
     final ret = super.didPush();
     ret.then((value) {
       focusNode!.removeListener(_changedFocus);
-    }); // focusNode.requestFocus());
+    });
     return ret;
   }
 }
@@ -105,15 +108,30 @@ class FocusWorkaroundPageRoute<T> extends MaterialPageRoute<T> {
 class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey();
   KdbxEntry? _selectedEntry;
+  double _listPaneWidth = 380.0;
+  bool _isDraggingSplitter = false;
+  int _activeRailIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    _activeRailIndex = KeyNestVaultScope.instance.activeTabIndex ?? 0;
+    KeyNestVaultScope.instance.addListener(_onVaultScopeChanged);
   }
 
   @override
   void dispose() {
+    KeyNestVaultScope.instance.removeListener(_onVaultScopeChanged);
     super.dispose();
+  }
+
+  void _onVaultScopeChanged() {
+    final idx = KeyNestVaultScope.instance.activeTabIndex;
+    if (idx != null && idx != _activeRailIndex && mounted) {
+      setState(() {
+        _activeRailIndex = idx;
+      });
+    }
   }
 
   Route<void> _routeForEntry(KdbxEntry entry, bool isNew) {
@@ -130,8 +148,129 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
+  Widget _buildSplitterHandle(BuildContext context, bool isDark) {
+    final normalBorder = isDark
+        ? KeyNestPalette.cardBorderDark
+        : KeyNestPalette.cardBorderLight;
+    final activeBorder = isDark
+        ? KeyNestPalette.primaryDark
+        : KeyNestPalette.primary;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          setState(() => _isDraggingSplitter = true);
+        },
+        onHorizontalDragUpdate: (details) {
+          setState(() {
+            _listPaneWidth = (_listPaneWidth + details.delta.dx).clamp(
+              280.0,
+              650.0,
+            );
+          });
+        },
+        onHorizontalDragEnd: (_) {
+          setState(() => _isDraggingSplitter = false);
+        },
+        onHorizontalDragCancel: () {
+          setState(() => _isDraggingSplitter = false);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 8,
+          color: _isDraggingSplitter
+              ? activeBorder.withValues(alpha: 0.15)
+              : Colors.transparent,
+          child: Center(
+            child: Container(
+              width: 1,
+              color: _isDraggingSplitter ? activeBorder : normalBorder,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _onEntrySelected(KdbxEntry entry, EntrySelectionType type) {
+    if (_selectedEntry != entry) {
+      final push = _navigatorKey.currentState!.pushAndRemoveUntil(
+        _routeForEntry(
+          entry,
+          type == EntrySelectionType.newEntry,
+        ),
+        (route) => route.isFirst,
+      );
+      push.then((dynamic value) {
+        _logger.finer('entry route was popped.');
+        if (entry == _selectedEntry && mounted) {
+          setState(() => _selectedEntry = null);
+        }
+      });
+      setState(() {
+        _selectedEntry = entry;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDesktopOrWeb = KeyNestPlatform.isDesktopOrWeb;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (isDesktopOrWeb) {
+      return Row(
+        children: <Widget>[
+          // 1. Desktop & Web Navigation Rail (Leftmost)
+          KeyNestDesktopNavRail(
+            currentIndex: _activeRailIndex,
+            onTap: (index) {
+              setState(() {
+                _activeRailIndex = index;
+              });
+              KeyNestVaultScope.instance.setActiveTab(index);
+            },
+          ),
+          // 2. Resizable List Pane (Master)
+          SizedBox(
+            width: _listPaneWidth,
+            child: Navigator(
+              onGenerateRoute: (settings) {
+                assert(settings.name == Navigator.defaultRouteName);
+                return MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (context) => KeyNestHomeShell(
+                    selectedEntry: _selectedEntry,
+                    isDesktopMaster: true,
+                    onEntrySelected: _onEntrySelected,
+                  ),
+                );
+              },
+            ),
+          ),
+          // 3. Draggable Splitter Handle
+          _buildSplitterHandle(context, isDark),
+          // 4. Detail Pane (Detail)
+          Expanded(
+            child: Navigator(
+              key: _navigatorKey,
+              requestFocus: false,
+              onGenerateRoute: (settings) {
+                assert(settings.name == Navigator.defaultRouteName);
+                return MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (context) => EmptyStateInitialRoute(),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Touch Tablet Layout (iPad, Android Tablet)
     return Row(
       children: <Widget>[
         SizedBox(
@@ -143,28 +282,8 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                 settings: settings,
                 builder: (context) => KeyNestHomeShell(
                   selectedEntry: _selectedEntry,
-                  onEntrySelected: (entry, type) {
-                    if (_selectedEntry != entry) {
-                      final push = _navigatorKey.currentState!
-                          .pushAndRemoveUntil(
-                            _routeForEntry(
-                              entry,
-                              type == EntrySelectionType.newEntry,
-                            ),
-                            (route) => route.isFirst,
-                          );
-                      // }
-                      push.then((dynamic value) {
-                        _logger.finer('entry route was popped.');
-                        if (entry == _selectedEntry && mounted) {
-                          setState(() => _selectedEntry = null);
-                        }
-                      });
-                      setState(() {
-                        _selectedEntry = entry;
-                      });
-                    }
-                  },
+                  isDesktopMaster: false,
+                  onEntrySelected: _onEntrySelected,
                 ),
               );
             },
@@ -192,44 +311,87 @@ class EmptyStateInitialRoute extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
-      body: Ink(
-        color: Theme.of(context).cardColor,
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const SizedBox(height: 64),
-              Image.asset(
+      backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: (isDark
+                        ? KeyNestPalette.primaryDark
+                        : KeyNestPalette.primary)
+                    .withValues(alpha: isDark ? 0.16 : 0.10),
+              ),
+              padding: const EdgeInsets.all(16),
+              child: Image.asset(
                 AssetConstants.logoIcon,
-                width: 80,
-                height: 80,
+                fit: BoxFit.contain,
               ),
-              const SizedBox(height: 16),
-              Text(
-                AppConstants.keyNest,
-                style: Theme.of(context).textTheme.displaySmall,
+            ),
+            const SizedBox(height: 20),
+            Text(
+              AppConstants.keyNest,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
               ),
-              Text(
-                'Secure Offline Password & Vault Manager',
-                style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Select an item from the list to view or edit details',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: isDark
+                    ? KeyNestPalette.textSecondaryDark
+                    : KeyNestPalette.textSecondaryLight,
               ),
-              const SizedBox(height: 64),
-              const SizedBox(height: 32),
-              PrimaryButton(
-                onPressed: () {
-                  final newEntry = context.read<KdbxBloc>().createEntry();
-                  Navigator.of(
-                    context,
-                  ).push(
-                    EntryDetailsScreen.route(entry: newEntry, isNew: true),
-                  );
-                },
-                child: Text(loc.addNewPasswordButtonLabel),
+            ),
+            const SizedBox(height: 28),
+            FilledButton.icon(
+              onPressed: () {
+                final kdbxBloc = context.read<KdbxBloc>();
+                final scope = KeyNestVaultScope.instance;
+                final activeVault = scope.getSelectedVault(kdbxBloc) ??
+                    kdbxBloc.openedFilesKdbx.firstOrNull;
+                final activeFolder = (activeVault != null)
+                    ? (scope.getCurrentFolder(kdbxBloc) ??
+                        activeVault.body.rootGroup)
+                    : null;
+                final newEntry = kdbxBloc.createEntry(
+                  file: activeVault,
+                  group: activeFolder,
+                );
+                Navigator.of(context).push(
+                  EntryDetailsScreen.route(entry: newEntry, isNew: true),
+                );
+              },
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: Text(loc.addNewPasswordButtonLabel),
+              style: FilledButton.styleFrom(
+                backgroundColor: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
+                foregroundColor: isDark
+                    ? const Color(0xFF00315D)
+                    : Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 22,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

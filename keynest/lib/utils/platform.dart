@@ -39,6 +39,10 @@ class KeyNestPlatform {
   static bool get isAndroid =>
       debugOverrideIsAndroid ?? (!_kIsWeb && Platform.isAndroid);
 
+  static bool get isDesktop => isWindows || isLinux || isMacOS;
+  static bool get isDesktopOrWeb => isDesktop || isWeb;
+  static bool get isMobile => isAndroid || isIOS;
+
   @NonNls
   static String get operatingSystem =>
       _kIsWeb ? 'web' : Platform.operatingSystem;
