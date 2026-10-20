@@ -30,14 +30,14 @@ Vaults created or edited in KeyNest are 100% interoperable with other major KeeP
 
 ## 3. Platform Operating System Support
 
-| Operating System | Architecture | Minimum Supported OS Version |
-| :--- | :--- | :--- |
-| **Android** | `arm64-v8a`, `armeabi-v7a`, `x86_64` | Android 8.0 (API 26) or newer. |
-| **iOS** | `arm64` | iOS 15.0 or newer. |
-| **Windows** | `x64` | Windows 10 (Build 19041+) or Windows 11. |
-| **macOS** | `arm64` (Apple Silicon), `x86_64` (Intel) | macOS 11.0 (Big Sur) or newer. |
-| **Linux** | `x86_64` | Ubuntu 20.04+, Debian 11+, Fedora 36+ or compatible GTK3 distribution. |
-| **Web** | Any modern Evergreen browser | Chrome 90+, Safari 14+, Firefox 88+, Edge 90+. |
+| Operating System | Status | Architecture | Minimum Supported OS Version |
+| :--- | :--- | :--- | :--- |
+| **Android** | Verified | `arm64-v8a`, `armeabi-v7a`, `x86_64` | Android 8.0 (API 26) or newer. |
+| **Windows** | Verified | `x64` | Windows 10 (Build 19041+) or Windows 11. |
+| **Linux** | Verified | `x86_64` | Ubuntu 20.04+, Debian 11+, Fedora 36+ or compatible GTK3 distribution. |
+| **Web** | Verified | Any modern Evergreen browser | Chrome 90+, Safari 14+, Firefox 88+, Edge 90+. |
+| **iOS** | Not verified | `arm64` | iOS 15.0 or newer. |
+| **macOS** | Not verified | `arm64` (Apple Silicon), `x86_64` (Intel) | macOS 11.0 (Big Sur) or newer. |
 
 ---
 

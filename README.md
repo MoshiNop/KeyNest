@@ -55,55 +55,41 @@ The gallery below presents the core interface across desktop and mobile.
 
 ## Features at a Glance
 
-### 🛡️ True Vault Ownership & Security
-- **Open KDBX Standard:** Native support for both **KDBX 3.1** and **KDBX 4.x** (compatible with KeePassXC, KeePass 2.x, KeePassDX, and Strongbox).
-- **Modern Key Derivation:** Hardened against GPU brute-force attacks with **Argon2id** and **AES-KDF**.
-- **Two-Factor Vault Protection:** Optional **Key File** (`.key` / `.keyx`) composite authentication.
-- **In-Memory Hardening:** Sensitive credentials are held in memory as encrypted stream objects (`ProtectedValue`) rather than plain text.
-- **Screen Protection:** Enables `FLAG_SECURE` on Android to block screen recordings, task-switcher snapshots, and spyware.
+### Vault Security & Encryption
+- **Standard KDBX Format:** Native support for KeePass 3.1 and 4.x databases with Argon2id and AES-KDF key derivation.
+- **Composite Authentication:** Master password protection with optional `.key` and `.keyx` key files.
+- **Zero-Knowledge Architecture:** Client-side encryption with in-memory protected byte streams (`ProtectedValue`).
+- **Screen Protection:** System-level snapshot blocking via `FLAG_SECURE` on Android.
 
-### 🔑 Flexible Entry Archetypes
-- **Logins:** Username, password, website URL, custom ports, and attached TOTP seeds.
-- **Payment Cards:** Cardholder, card number, expiration date, CVV, PIN, and issuer brand detection.
-- **Secure Notes:** Encrypted long-form notes and recovery keys.
-- **Structured Records:** Identity cards, server configurations, Wi-Fi credentials, and custom attributes.
-- **Custom Attributes:** Attach arbitrary text, hidden/secret fields, or TOTP keys to any entry.
+### Credential & Entry Management
+- **Structured Archetypes:** Dedicated schemas for logins, payment cards, secure notes, and network credentials.
+- **Custom Attributes:** Support for arbitrary key-value pairs, hidden fields, and attached TOTP seeds.
+- **Integrated Authenticator:** RFC 6238 and RFC 4226 compliant TOTP generator with QR code scanning and Google Authenticator migration support.
 
-### ⏱️ Integrated Two-Factor Authenticator (TOTP)
-- **RFC 6238 / RFC 4226 Compliant:** Built-in TOTP generation with standard 30-second countdown timers.
-- **Camera QR Scanner:** Instantly scan 2FA setup QR codes directly through your device camera.
-- **Google Authenticator Import:** Import Google Authenticator migration QR codes directly into your vault.
+### System Autofill
+- **Platform Integrations:** Native Android Autofill Service and Apple Credential Provider Extension.
+- **Phishing Protection:** Domain matching using public suffix lists (eTLD+1) across apps and browsers.
 
-### 📲 Native Operating System Autofill
-- **Android Autofill Framework:** Suggests credentials inline and through native bottom sheets in Chrome, Firefox, and native apps (Android 8.0+).
-- **iOS Credential Provider Extension:** Integrates with Apple's `ASCredentialProviderViewController` to offer credentials in Safari and iOS apps via Face ID / Touch ID.
-- **Domain Matching (eTLD+1):** Uses the public suffix list to prevent phishing across untrusted subdomains.
-
-### ☁️ Cloud Synchronization & 3-Way Merge
-- **Multi-Cloud Backends:** Connect to **WebDAV** (Nextcloud / ownCloud), **Google Drive**, **Dropbox**, and **OneDrive**.
-- **Intelligent 3-Way Merge Engine:** When multiple devices edit a vault offline, KeyNest automatically detects non-conflicting modifications and resolves conflicts without duplicating files or losing data.
-- **Offline First:** Full offline functionality with local cached copies; pending edits upload automatically upon reconnection.
-
-### 🔄 Import, Export & Password Generation
-- **Visual CSV Importer:** Interactive column mapping supporting exports from **Bitwarden**, **1Password**, **KeePass**, and **Chrome**.
-- **Export Options:** Export to standard KDBX files, KeePass XML, or plain CSV.
-- **CSPRNG Password Generator:** Customizable length (8–128 chars), character sets, ambiguous character filters, and passphrase mode.
-- **Vault Health Audit:** Identifies reused, weak, and missing 2FA credentials across your vaults.
+### Synchronization & Portability
+- **Cloud Providers:** Synchronization with WebDAV (Nextcloud, ownCloud), Google Drive, Dropbox, and OneDrive.
+- **Conflict Resolution:** Automated three-way merge engine to reconcile concurrent offline modifications.
+- **Migration & Export:** Visual CSV import mapping for Bitwarden, 1Password, and KeePass, alongside KDBX, XML, and CSV export.
+- **Password Generator:** Cryptographically secure pseudorandom generator (CSPRNG) with customizable character sets and passphrase modes.
 
 ---
 
 ## Supported Platforms
 
-KeyNest is tested and packaged across desktop, mobile, and web targets:
+KeyNest targets desktop, mobile, and web environments:
 
-| Platform | Minimum Requirement | Distribution |
-| :--- | :--- | :--- |
-| **Android** | Android 8.0 (API 26)+ | Direct APK, Google Play Bundle |
-| **iOS** | iOS 15.0+ | Apple App Store, TestFlight |
-| **Windows** | Windows 10 (Build 19041+) / Windows 11 (x64) | MSIX Installer, Portable ZIP |
-| **macOS** | macOS 11.0 (Big Sur)+ (Intel & Apple Silicon) | Signed macOS `.app`, DMG |
-| **Linux** | Ubuntu 20.04+, Debian 11+, Fedora 36+ | Debian `.deb`, Standalone Tarball |
-| **Web** | Modern Web Browsers (Chrome, Firefox, Safari, Edge) | Static Progressive Web App (PWA) |
+| Platform | Status | Minimum Requirement | Distribution |
+| :--- | :--- | :--- | :--- |
+| **Android** | Verified | Android 8.0 (API 26)+ | Direct APK, Google Play Bundle |
+| **Windows** | Verified | Windows 10 (Build 19041+) / Windows 11 (x64) | MSIX Installer, Portable ZIP |
+| **Linux** | Verified | Ubuntu 20.04+, Debian 11+, Fedora 36+ | Debian `.deb`, Standalone Tarball |
+| **Web** | Verified | Modern Web Browsers (Chrome, Firefox, Safari, Edge) | Static Progressive Web App (PWA) |
+| **iOS** | Not verified | iOS 15.0+ | Apple App Store, TestFlight |
+| **macOS** | Not verified | macOS 11.0 (Big Sur)+ (Intel & Apple Silicon) | Signed macOS `.app`, DMG |
 
 ---
 
