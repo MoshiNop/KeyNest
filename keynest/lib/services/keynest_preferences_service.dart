@@ -129,6 +129,17 @@ class KeyNestVaultScope with ChangeNotifier {
     notifyListeners();
   }
 
+  String _searchQuery = '';
+  String get searchQuery => _searchQuery;
+
+  void setSearchQuery(String query) {
+    if (_searchQuery == query) {
+      return;
+    }
+    _searchQuery = query;
+    notifyListeners();
+  }
+
   void setActiveTab(int index) {
     if (_activeTabIndex == index) {
       return;

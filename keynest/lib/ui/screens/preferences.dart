@@ -682,7 +682,7 @@ class _PreferencesBodyState extends State<PreferencesBody>
             KeyNestSettingsTile(
               title: 'Import & Export',
               subtitle:
-                  'Export KDBX, CSV, JSON • Import Bitwarden, LastPass, 1Password',
+                  'Export KDBX, CSV, JSON • Import Bitwarden, LastPass, CSV',
               icon: Icons.swap_vert_rounded,
               onTap: () {
                 Navigator.of(context).push(KeyNestImportExportScreen.route());

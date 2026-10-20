@@ -670,7 +670,7 @@ class KeyNestImportExportService {
         );
       }
 
-      // Case 2: External KDBX database import (e.g. from KeePassDX, KeePassXC, 1Password)
+      // Case 2: External KDBX database import (e.g. from KeePassDX, KeePassXC)
       // 1. Copy all binary attachments from source into target context
       for (final remoteBinary in sourceFile.ctx.binariesIterable) {
         if (targetFile.ctx.findBinaryByValue(remoteBinary) == null) {
@@ -1347,7 +1347,7 @@ class KeyNestImportExportService {
     }
   }
 
-  /// Parses and imports CSV data from Bitwarden, LastPass, 1Password, or standard CSV format.
+  /// Parses and imports CSV data from Bitwarden, LastPass, or standard CSV format.
   /// Uses automatic column detection to map recognized headers.
   static Future<KeyNestImportExportResult> importCsvText({
     required KdbxBloc kdbxBloc,

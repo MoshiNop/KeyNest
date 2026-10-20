@@ -728,7 +728,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                     ? KeyNestPalette.successDark
                     : KeyNestPalette.success,
                 subtitle:
-                    'Import credentials from Bitwarden, 1Password, LastPass, or any CSV with Quick Import or Custom Field Mapping.',
+                    'Import credentials from Bitwarden, LastPass, or any CSV with Quick Import or Custom Field Mapping.',
                 actionLabel: 'Import CSV',
                 onAction: _startUnifiedCsvImport,
               ),

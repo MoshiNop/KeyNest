@@ -196,7 +196,7 @@ class KeyNestCsvRowPreview {
 /// Helpers for auto-detection, validation, and preview of CSV mappings.
 class KeyNestCsvMappingHelper {
   /// Auto-detects column mappings based on known header conventions
-  /// (Bitwarden, 1Password, LastPass, KeePass, Generic CSV).
+  /// (Bitwarden, LastPass, KeePass, Generic CSV).
   static List<KeyNestColumnMapping> autoDetectMappings(List<String> headers) {
     final mappings = <KeyNestColumnMapping>[];
     final usedStandardFields = <KeyNestStandardField>{};

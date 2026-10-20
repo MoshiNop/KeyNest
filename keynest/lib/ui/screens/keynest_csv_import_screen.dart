@@ -492,7 +492,7 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Quick Import automatically detects headers from Bitwarden, 1Password, LastPass, KeePass, and generic CSV tables.',
+                  'Quick Import automatically detects headers from Bitwarden, LastPass, KeePass, and generic CSV tables.',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: isDark

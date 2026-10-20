@@ -81,7 +81,7 @@ class SecuritySettingsStore {
 const MethodChannel _miscChannel = MethodChannel('app.keynest/misc');
 
 /// Secure Clipboard helper that automatically clears sensitive secrets (passwords, TOTP, cards)
-/// after a configured timeout (defaults to 30 seconds), matching 1Password and Bitwarden standards.
+/// after a configured timeout (defaults to 30 seconds), matching industry standards.
 class KeyNestClipboard {
   static Timer? _clearTimer;
   static int _copyGeneration = 0;

@@ -2205,6 +2205,13 @@ class _PasswordListContentState extends State<PasswordListContent>
 
   void _onVaultScopeChanged() {
     if (mounted) {
+      if (KeyNestPlatform.isDesktopOrWeb) {
+        final globalQuery = KeyNestVaultScope.instance.searchQuery;
+        if (_filterTextEditingController.text != globalQuery) {
+          _filterTextEditingController.text = globalQuery;
+          _updateFilterQuery(globalQuery);
+        }
+      }
       _entryViewModelCache.clear();
       _updateAllEntries();
     }
@@ -3558,20 +3565,23 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
                   )
                 : (selectedEntry == entry.entry
                       ? BoxDecoration(
-                          color:
-                              theme.listTileTheme.selectedTileColor ??
-                              (theme.brightness == Brightness.dark
-                                  ? KeyNestPalette.surfaceContainerDark
-                                  : KeyNestPalette.primaryContainerLight),
+                          color: KeyNestPlatform.isDesktopOrWeb
+                              ? const Color(0xFF0A85EA)
+                              : (theme.listTileTheme.selectedTileColor ??
+                                  (theme.brightness == Brightness.dark
+                                      ? KeyNestPalette.surfaceContainerDark
+                                      : KeyNestPalette.primaryContainerLight)),
                           borderRadius: BorderRadius.circular(
-                            KeyNestShapes.radiusCard,
+                            KeyNestPlatform.isDesktopOrWeb ? 10 : KeyNestShapes.radiusCard,
                           ),
-                          border: Border.all(
-                            color: theme.brightness == Brightness.dark
-                                ? KeyNestPalette.primaryDark
-                                : KeyNestPalette.primary,
-                            width: 1.5,
-                          ),
+                          border: KeyNestPlatform.isDesktopOrWeb
+                              ? null
+                              : Border.all(
+                                  color: theme.brightness == Brightness.dark
+                                      ? KeyNestPalette.primaryDark
+                                      : KeyNestPalette.primary,
+                                  width: 1.5,
+                                ),
                         )
                       : null),
             child: PasswordEntryTile(
@@ -3822,9 +3832,11 @@ class PasswordEntryTile extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: isDarkTheme
-                    ? const Color(0xFF434657)
-                    : KeyNestPalette.primaryContainerLight,
+                color: (KeyNestPlatform.isDesktopOrWeb && isSelected)
+                    ? Colors.white
+                    : (isDarkTheme
+                        ? const Color(0xFF434657)
+                        : KeyNestPalette.primaryContainerLight),
                 borderRadius: BorderRadius.circular(12),
               ),
               alignment: Alignment.center,
@@ -3928,11 +3940,13 @@ class PasswordEntryTile extends StatelessWidget {
                         style: theme.textTheme.titleMedium!.copyWith(
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
-                          color: isSelected
-                              ? fgColor
-                              : (isDarkTheme
-                                    ? KeyNestPalette.textPrimaryDark
-                                    : KeyNestPalette.textPrimaryLight),
+                          color: (KeyNestPlatform.isDesktopOrWeb && isSelected)
+                              ? Colors.white
+                              : (isSelected
+                                  ? fgColor
+                                  : (isDarkTheme
+                                      ? KeyNestPalette.textPrimaryDark
+                                      : KeyNestPalette.textPrimaryLight)),
                         ),
                         child: Text.rich(
                           _highlightFilterQuery(
@@ -3946,11 +3960,13 @@ class PasswordEntryTile extends StatelessWidget {
                       DefaultTextStyle(
                         style: theme.textTheme.bodyMedium!.copyWith(
                           fontSize: 13,
-                          color: isSelected
-                              ? fgColor
-                              : (isDarkTheme
-                                    ? KeyNestPalette.textSecondaryDark
-                                    : KeyNestPalette.textSecondaryLight),
+                          color: (KeyNestPlatform.isDesktopOrWeb && isSelected)
+                              ? Colors.white.withValues(alpha: 0.85)
+                              : (isSelected
+                                  ? fgColor
+                                  : (isDarkTheme
+                                      ? KeyNestPalette.textSecondaryDark
+                                      : KeyNestPalette.textSecondaryLight)),
                         ),
                         child: Text.rich(
                           _highlightFilterQuery(
