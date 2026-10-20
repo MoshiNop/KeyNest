@@ -719,6 +719,96 @@ class AutofillSecurityTest {
         AutofillRequestStore.clear()
         assertFalse(AutofillRequestStore.hasActiveRequest)
     }
+
+    @Test
+    fun testTotpAutofillSuggestionsPrioritizePreviouslySelectedLoginAndFallback() {
+        val aliceEntry = NativeAutofillEntry(
+            id = "entry-alice",
+            label = "GitHub Alice",
+            username = "alice",
+            password = "AliceSecretPassword1!",
+            urls = listOf("https://github.com/login"),
+            otpSecret = "JBSWY3DPEHPK3PXP",
+            hasTotp = true
+        )
+        val bobEntry = NativeAutofillEntry(
+            id = "entry-bob",
+            label = "GitHub Bob",
+            username = "bob",
+            password = "BobSecretPassword2!",
+            urls = listOf("https://github.com/login"),
+            otpSecret = "HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ",
+            hasTotp = true
+        )
+        val charlieNoTotpEntry = NativeAutofillEntry(
+            id = "entry-charlie",
+            label = "GitHub Charlie",
+            username = "charlie",
+            password = "CharlieSecretPassword3!",
+            urls = listOf("https://github.com/login"),
+            hasTotp = false
+        )
+
+        val siteEntries = listOf(aliceEntry, bobEntry, charlieNoTotpEntry)
+        AutofillCredentialStore.sync(siteEntries, autoLockSec = 300)
+
+        fun resolveTotpSuggestions(targetDomain: String): List<String> {
+            val matches = AutofillCredentialStore.findMatches("com.android.chrome", targetDomain).toMutableList()
+            val pendingLogin = AutofillCredentialStore.getValidPendingLogin(targetDomain)
+            val exactEntry = if (pendingLogin != null) {
+                AutofillCredentialStore.getEntries().firstOrNull { it.id == pendingLogin.entryId }
+                    ?: matches.firstOrNull { it.id == pendingLogin.entryId }
+            } else null
+
+            return if (exactEntry != null && exactEntry.hasTotp) {
+                listOf(exactEntry.id)
+            } else {
+                matches.filter { it.hasTotp }.map { it.id }
+            }
+        }
+
+        // Scenario 1 & 2: User selects Alice on Step 1 (username/password)
+        AutofillCredentialStore.rememberPendingLogin("entry-alice", "github.com", "alice")
+        val aliceSuggestions = resolveTotpSuggestions("github.com")
+        assertEquals("Only Alice's TOTP should be suggested when Alice was selected", 1, aliceSuggestions.size)
+        assertEquals("entry-alice", aliceSuggestions[0])
+
+        // Scenario 3: User selects Bob instead on Step 1
+        AutofillCredentialStore.rememberPendingLogin("entry-bob", "github.com", "bob")
+        val bobSuggestions = resolveTotpSuggestions("github.com")
+        assertEquals("Only Bob's TOTP should be suggested when Bob was selected", 1, bobSuggestions.size)
+        assertEquals("entry-bob", bobSuggestions[0])
+
+        // Scenario 4: User selects Charlie (who has NO TOTP secret)
+        AutofillCredentialStore.rememberPendingLogin("entry-charlie", "github.com", "charlie")
+        val charlieFallbackSuggestions = resolveTotpSuggestions("github.com")
+        assertEquals("Should gracefully fallback to all matching entries with TOTP", 2, charlieFallbackSuggestions.size)
+        assertTrue(charlieFallbackSuggestions.contains("entry-alice"))
+        assertTrue(charlieFallbackSuggestions.contains("entry-bob"))
+        assertFalse(charlieFallbackSuggestions.contains("entry-charlie"))
+
+        // Scenario 5: No previous credential selection (direct navigation to TOTP page)
+        AutofillCredentialStore.clearPendingLogin()
+        val noSelectionSuggestions = resolveTotpSuggestions("github.com")
+        assertEquals("Should preserve existing behavior suggesting all matching entries with TOTP", 2, noSelectionSuggestions.size)
+        assertTrue(noSelectionSuggestions.contains("entry-alice"))
+        assertTrue(noSelectionSuggestions.contains("entry-bob"))
+
+        // Scenario 6: Domain isolation (remembered selection on github.com must NEVER leak to an unrelated domain)
+        AutofillCredentialStore.rememberPendingLogin("entry-alice", "github.com", "alice")
+        assertNull("Selection for github.com must not be returned for gitlab.com", AutofillCredentialStore.getValidPendingLogin("gitlab.com"))
+        assertNull("Selection for github.com must not be returned for google.com", AutofillCredentialStore.getValidPendingLogin("google.com"))
+        assertNotNull("Selection for github.com must match github.com", AutofillCredentialStore.getValidPendingLogin("github.com"))
+        assertNotNull("Selection for github.com must match subdomains like auth.github.com", AutofillCredentialStore.getValidPendingLogin("auth.github.com"))
+
+        // Scenario 7: Session clearing and TTL expiration
+        // 7a: Clearing on lock
+        AutofillCredentialStore.clear()
+        assertNull("Pending login must be purged when vault locks", AutofillCredentialStore.getValidPendingLogin("github.com"))
+
+        // Cleanup
+        AutofillCredentialStore.clearAll()
+    }
 }
 
 

@@ -364,8 +364,36 @@ class FlutterMyAutofillService : AutofillService() {
 
         val contextKey = if (targetDomain.isNotEmpty()) targetDomain else targetPackage
 
+        // Inspect fillEventHistory to see if a dataset was selected in the preceding step
+        try {
+            val history = fillEventHistory
+            val events = history?.events
+            val lastSelectedEvent = events?.lastOrNull {
+                it.type == android.service.autofill.FillEventHistory.Event.TYPE_DATASET_SELECTED
+            }
+            val selectedDatasetId = lastSelectedEvent?.datasetId
+            if (!selectedDatasetId.isNullOrBlank()) {
+                val baseId = selectedDatasetId.substringBefore(":")
+                val allEntries = AutofillCredentialStore.getEntries().ifEmpty {
+                    AutofillCredentialStore.getMetadataEntries()
+                }
+                val selectedEntry = allEntries.firstOrNull { it.id == baseId }
+                if (selectedEntry != null) {
+                    val identifier = if (selectedDatasetId.endsWith(":email") && !selectedEntry.email.isNullOrBlank()) {
+                        selectedEntry.email!!
+                    } else {
+                        selectedEntry.username.ifBlank { selectedEntry.email ?: "" }
+                    }
+                    AutofillCredentialStore.rememberPendingLogin(selectedEntry.id, contextKey, identifier)
+                }
+            }
+        } catch (e: Exception) {
+            logger.debug { "Could not inspect fillEventHistory: $e" }
+        }
+
         // Multi-page Step 1: record username entered/autofilled for multi-page correlation
-        if (passwordFields.isEmpty() && usernameFields.isNotEmpty()) {
+        // Only treat as username-first step if there are no password or OTP fields present
+        if (passwordFields.isEmpty() && usernameFields.isNotEmpty() && otpFields.isEmpty()) {
             val typedUser = usernameFields.mapNotNull { field ->
                 val node = parser.allNodes.firstOrNull { it.autofillId == field.autofillId }
                 node?.autofillValue?.textValue?.toString()?.takeIf { it.isNotBlank() }
@@ -403,8 +431,17 @@ class FlutterMyAutofillService : AutofillService() {
         )
 
         val isOtpFocused = focusedNode != null && otpFields.any { it.autofillId == focusedAutofillId }
-        val isOtpOnlyScreen = otpFields.isNotEmpty() && passwordFields.isEmpty() && usernameFields.isEmpty()
-        val isTotpVerification = isOtpOnlyScreen || (isOtpFocused && otpFields.isNotEmpty() && passwordFields.isEmpty())
+
+        val currentScreenHasOtp = parser.fieldIds[AutofillInputType.Otp]?.isNotEmpty() == true
+        val currentScreenHasUser = parser.fieldIds[AutofillInputType.UserName]?.isNotEmpty() == true ||
+            parser.fieldIds[AutofillInputType.Email]?.isNotEmpty() == true
+        val currentScreenHasPassword = parser.fieldIds[AutofillInputType.Password]?.isNotEmpty() == true ||
+            parser.fieldIds[AutofillInputType.NewPassword]?.isNotEmpty() == true ||
+            parser.fieldIds[AutofillInputType.CurrentPassword]?.isNotEmpty() == true
+
+        val isOtpOnlyScreen = (otpFields.isNotEmpty() && passwordFields.isEmpty() && usernameFields.isEmpty()) ||
+            (currentScreenHasOtp && !currentScreenHasUser && !currentScreenHasPassword)
+        val isTotpVerification = isOtpOnlyScreen || (isOtpFocused && otpFields.isNotEmpty())
 
         val targetFormIds = (usernameFields.map { it.autofillId } +
                 passwordFields.map { it.autofillId } +
@@ -453,48 +490,61 @@ class FlutterMyAutofillService : AutofillService() {
 
             if (isTotpVerification) {
                 // 2FA Verification page while locked:
-                // Only suggest if the exact previously used login contains a TOTP secret!
                 val pendingLogin = AutofillCredentialStore.getValidPendingLogin(contextKey)
-                if (pendingLogin != null) {
-                    val exactEntry = AutofillCredentialStore.getMetadataEntries().firstOrNull { it.id == pendingLogin.entryId }
-                    if (exactEntry != null && exactEntry.hasTotp) {
-                        val subtitleText = if (exactEntry.username.isNotBlank()) {
-                            "${exactEntry.label} (${exactEntry.username}) • Tap to unlock"
-                        } else {
-                            "${exactEntry.label} • Tap to unlock"
-                        }
-                        val presentation = RemoteViewsHelper.viewsWithTotp(
-                            packageName = packageName,
-                            title = "Verification code",
-                            subtitle = subtitleText,
-                            iconBytes = exactEntry.iconBytes,
-                            isLocked = true
-                        )
-                        val entryIntent = Intent(startIntent).apply {
-                            action = "com.moshinop.autofill_service.FILL_ENTRY"
-                            putExtra("selectedEntryId", exactEntry.id)
-                            putExtra("isTotp", true)
-                            putExtra("forceCredentialPicker", false)
-                            putExtra("autofillAuthLevel", "dataset")
-                            putExtra("route", "/autofill")
-                            putExtra("initial_route", "/autofill")
-                            putExtra("autofillRequestId", request.id)
-                        }
-                        val entrySender: IntentSender = PendingIntent.getActivity(
-                            this,
-                            2000,
-                            entryIntent,
-                            piFlags
-                        ).intentSender
+                val lockedMatches = AutofillCredentialStore.findMatches(targetPackage, targetDomain).toMutableList()
+                val exactEntry = if (pendingLogin != null) {
+                    AutofillCredentialStore.getMetadataEntries().firstOrNull { it.id == pendingLogin.entryId }
+                        ?: lockedMatches.firstOrNull { it.id == pendingLogin.entryId }
+                } else null
 
-                        val datasetBuilder = Dataset.Builder(presentation)
-                            .setAuthentication(entrySender)
-                            .setId(exactEntry.id)
-                        for (field in otpFields) {
-                            datasetBuilder.setValue(field.autofillId, null, presentation)
-                        }
-                        fillResponseBuilder.addDataset(datasetBuilder.build())
+                val entriesToSuggest = if (exactEntry != null && exactEntry.hasTotp) {
+                    // Prioritize and ONLY suggest the previously selected entry
+                    listOf(exactEntry)
+                } else {
+                    // Fallback (if exactEntry has no TOTP secret, or if pendingLogin is null):
+                    // Gracefully fallback / preserve existing behavior by suggesting matching entries with TOTP
+                    val totpMatches = lockedMatches.filter { it.hasTotp }
+                    if (totpMatches.isNotEmpty()) totpMatches else lockedMatches
+                }
+
+                var totpIntentCodeCounter = 2000
+                for (entry in entriesToSuggest) {
+                    val subtitleText = if (entry.username.isNotBlank()) {
+                        "${entry.label} (${entry.username}) • Tap to unlock"
+                    } else {
+                        "${entry.label} • Tap to unlock"
                     }
+                    val presentation = RemoteViewsHelper.viewsWithTotp(
+                        packageName = packageName,
+                        title = "Verification code",
+                        subtitle = subtitleText,
+                        iconBytes = entry.iconBytes,
+                        isLocked = true
+                    )
+                    val entryIntent = Intent(startIntent).apply {
+                        action = "com.moshinop.autofill_service.FILL_ENTRY"
+                        putExtra("selectedEntryId", entry.id)
+                        putExtra("isTotp", true)
+                        putExtra("forceCredentialPicker", false)
+                        putExtra("autofillAuthLevel", "dataset")
+                        putExtra("route", "/autofill")
+                        putExtra("initial_route", "/autofill")
+                        putExtra("autofillRequestId", request.id)
+                    }
+                    val entrySender: IntentSender = PendingIntent.getActivity(
+                        this,
+                        totpIntentCodeCounter++,
+                        entryIntent,
+                        piFlags
+                    ).intentSender
+
+                    val datasetBuilder = Dataset.Builder(presentation)
+                        .setAuthentication(entrySender)
+                        .setId(entry.id)
+                    for (field in otpFields) {
+                        datasetBuilder.setValue(field.autofillId, null, presentation)
+                    }
+                    fillResponseBuilder.addDataset(datasetBuilder.build())
                 }
             } else {
                 // Standard locked credential page:
@@ -549,6 +599,7 @@ class FlutterMyAutofillService : AutofillService() {
                     if (prioritized != null) {
                         lockedMatches.removeIf { it.id == prioritized.id }
                         lockedMatches.add(0, prioritized)
+                        AutofillCredentialStore.rememberPendingLogin(prioritized.id, contextKey, prioritized.username)
                     }
                 }
 
@@ -670,95 +721,81 @@ class FlutterMyAutofillService : AutofillService() {
             AutofillCredentialStore.touchActive()
             val matches = AutofillCredentialStore.findMatches(targetPackage, targetDomain).toMutableList()
 
-            // Inspect fillEventHistory to see if a dataset was selected in the preceding step
-            try {
-                val history = fillEventHistory
-                val events = history?.events
-                val lastSelectedEvent = events?.lastOrNull {
-                    it.type == android.service.autofill.FillEventHistory.Event.TYPE_DATASET_SELECTED
-                }
-                val selectedDatasetId = lastSelectedEvent?.datasetId
-                if (!selectedDatasetId.isNullOrBlank()) {
-                    val baseId = selectedDatasetId.substringBefore(":")
-                    val selectedEntry = AutofillCredentialStore.getEntries().firstOrNull { it.id == baseId }
-                    if (selectedEntry != null) {
-                        val identifier = if (selectedDatasetId.endsWith(":email") && !selectedEntry.email.isNullOrBlank()) {
-                            selectedEntry.email!!
-                        } else {
-                            selectedEntry.username.ifBlank { selectedEntry.email ?: "" }
-                        }
-                        AutofillCredentialStore.rememberPendingLogin(selectedEntry.id, contextKey, identifier)
-                    }
-                }
-            } catch (e: Exception) {
-                logger.debug { "Could not inspect fillEventHistory: $e" }
-            }
-
             val pendingLogin = AutofillCredentialStore.getValidPendingLogin(contextKey)
 
             if (isTotpVerification) {
                 // 2FA Verification page while unlocked:
-                // Identify the exact previously used login entry
-                if (pendingLogin != null) {
-                    val exactEntry = AutofillCredentialStore.getEntries().firstOrNull { it.id == pendingLogin.entryId }
-                    if (exactEntry != null && exactEntry.hasTotp) {
-                        val secret = exactEntry.otpSecret ?: exactEntry.otp
-                        val liveCode = KeyNestTotp.generateTotp(
-                            secretBase32 = secret,
-                            algorithm = exactEntry.otpAlgorithm,
-                            period = exactEntry.otpPeriod,
-                            digits = exactEntry.otpDigits
-                        )
-                        if (liveCode.isNotBlank()) {
-                            val displayCode = KeyNestTotp.formatDisplayCode(liveCode)
-                            val subtitleText = if (exactEntry.username.isNotBlank()) {
-                                "${exactEntry.label} (${exactEntry.username}) • 2FA Code"
-                            } else {
-                                "${exactEntry.label} • 2FA Code"
+                fun addTotpDataset(entry: NativeAutofillEntry) {
+                    if (!entry.hasTotp) return
+                    val secret = entry.otpSecret ?: entry.otp ?: return
+                    val liveCode = KeyNestTotp.generateTotp(
+                        secretBase32 = secret,
+                        algorithm = entry.otpAlgorithm,
+                        period = entry.otpPeriod,
+                        digits = entry.otpDigits
+                    )
+                    if (liveCode.isBlank()) return
+                    val displayCode = KeyNestTotp.formatDisplayCode(liveCode)
+                    val subtitleText = if (entry.username.isNotBlank()) {
+                        "${entry.label} (${entry.username}) • 2FA Code"
+                    } else {
+                        "${entry.label} • 2FA Code"
+                    }
+                    val presentation = RemoteViewsHelper.viewsWithTotp(
+                        packageName = packageName,
+                        title = displayCode,
+                        subtitle = subtitleText,
+                        iconBytes = entry.iconBytes,
+                        isLocked = false
+                    )
+                    val datasetBuilder = Dataset.Builder(presentation)
+                    datasetBuilder.setId(entry.id)
+
+                    val filledIds = mutableSetOf<AutofillId>()
+                    val distinctOtpFields = otpFields.distinctBy { it.autofillId }
+
+                    if (distinctOtpFields.size == liveCode.length) {
+                        // Multi-field verification inputs (e.g. 6 separate single-digit boxes)
+                        distinctOtpFields.forEachIndexed { i, field ->
+                            if (filledIds.add(field.autofillId)) {
+                                datasetBuilder.setValue(
+                                    field.autofillId,
+                                    AutofillValue.forText(liveCode[i].toString()),
+                                    presentation
+                                )
                             }
-                            val presentation = RemoteViewsHelper.viewsWithTotp(
-                                packageName = packageName,
-                                title = displayCode,
-                                subtitle = subtitleText,
-                                iconBytes = exactEntry.iconBytes,
-                                isLocked = false
-                            )
-                            val datasetBuilder = Dataset.Builder(presentation)
-                            datasetBuilder.setId(exactEntry.id)
-
-                            val filledIds = mutableSetOf<AutofillId>()
-                            val distinctOtpFields = otpFields.distinctBy { it.autofillId }
-
-                            if (distinctOtpFields.size == liveCode.length) {
-                                // Multi-field verification inputs (e.g. 6 separate single-digit boxes)
-                                distinctOtpFields.forEachIndexed { i, field ->
-                                    if (filledIds.add(field.autofillId)) {
-                                        datasetBuilder.setValue(
-                                            field.autofillId,
-                                            AutofillValue.forText(liveCode[i].toString()),
-                                            presentation
-                                        )
-                                    }
-                                }
-                            } else {
-                                // Single-field OTP input
-                                distinctOtpFields.forEach { field ->
-                                    if (filledIds.add(field.autofillId)) {
-                                        datasetBuilder.setValue(
-                                            field.autofillId,
-                                            AutofillValue.forText(liveCode),
-                                            presentation
-                                        )
-                                    }
-                                }
+                        }
+                    } else {
+                        // Single-field OTP input
+                        distinctOtpFields.forEach { field ->
+                            if (filledIds.add(field.autofillId)) {
+                                datasetBuilder.setValue(
+                                    field.autofillId,
+                                    AutofillValue.forText(liveCode),
+                                    presentation
+                                )
                             }
-
-                            fillResponseBuilder.addDataset(datasetBuilder.build())
                         }
                     }
-                    // If exactEntry does NOT have a TOTP secret, do NOT suggest other entries' codes!
+
+                    fillResponseBuilder.addDataset(datasetBuilder.build())
                 }
-                // If pendingLogin is null, do NOT guess or autofill another account's TOTP code!
+
+                val exactEntry = if (pendingLogin != null) {
+                    AutofillCredentialStore.getEntries().firstOrNull { it.id == pendingLogin.entryId }
+                        ?: matches.firstOrNull { it.id == pendingLogin.entryId }
+                } else null
+
+                if (exactEntry != null && exactEntry.hasTotp) {
+                    // Prioritize and ONLY suggest the previously selected entry
+                    addTotpDataset(exactEntry)
+                } else {
+                    // Fallback (if exactEntry has no TOTP secret, or if pendingLogin is null):
+                    // Gracefully fallback / preserve existing behavior by suggesting matching entries with TOTP
+                    for (entry in matches.filter { it.hasTotp }) {
+                        addTotpDataset(entry)
+                    }
+                }
             } else {
                 // Standard credential autofill (login, password, registration, etc.):
                 val isPasswordOnlyScreen = passwordFields.isNotEmpty() && usernameFields.isEmpty()

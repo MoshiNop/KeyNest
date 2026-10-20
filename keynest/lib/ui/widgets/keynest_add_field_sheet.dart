@@ -142,6 +142,15 @@ class KeyNestAddFieldSheet extends StatelessWidget {
       customKind: CustomFieldKind.text,
     ),
     KeyNestFieldOption(
+      title: 'Notes',
+      subtitle: 'Additional notes or remarks',
+      icon: Icons.notes_rounded,
+      iconColor: const Color(0xFF64748B),
+      iconBg: const Color(0xFFF1F5F9),
+      fixedKey: KdbxKey('Notes'),
+      isProtected: false,
+    ),
+    KeyNestFieldOption(
       title: 'Secondary URL / Website',
       subtitle: 'Alternative login or portal address',
       icon: Icons.link_rounded,

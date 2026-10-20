@@ -91,7 +91,7 @@ class CommonFields {
           autocorrect: true,
           enableSuggestions: true,
           textCapitalization: TextCapitalization.sentences,
-          showByDefault: true,
+          showByDefault: false,
         ),
         CommonField(
           key: KdbxKeyCommon.OTP,

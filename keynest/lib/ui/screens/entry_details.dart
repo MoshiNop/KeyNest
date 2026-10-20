@@ -39,6 +39,7 @@ import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/ui/widgets/keynest_duplicate_warning_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_password_history_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_popup_menu.dart';
+import 'package:keynest/ui/widgets/keynest_totp_tile.dart';
 import 'package:keynest/ui/widgets/link_button.dart';
 import 'package:keynest/ui/widgets/primary_button.dart';
 import 'package:keynest/ui/widgets/shortcut/keynest_intents.dart';
@@ -170,6 +171,7 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
   bool _isSaved = false;
   late bool _isNew;
   late bool _isEditing;
+  int _viewVersion = 0;
   _EntrySnapshot? _entrySnapshot;
 
   @override
@@ -199,8 +201,12 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
       _isSaved = true;
       _isNew = false;
       _entrySnapshot = null;
+      widget.entry.times.lastModificationTime.set(clock.now().toUtc());
+      EntryTotpHelper.invalidateCache(widget.entry);
+      KeyNestItemTypeHelper.invalidateCache(widget.entry);
       final kdbxBloc = context.read<KdbxBloc>();
       setState(() {
+        _viewVersion++;
         _isEditing = false;
         isFormDirty = false;
         entryViewModel = EntryViewModel(widget.entry, kdbxBloc);
@@ -568,6 +574,7 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
                 child: EntryDetails(
                   key: entryDetailsKey,
                   entry: vm,
+                  isNew: _isNew,
                   onSavedPressed: !isDirty && !entry.isDirty
                       ? null
                       : saveCallback,
@@ -575,7 +582,7 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
               )
             : _EntryViewMode(
                 key: ValueKey(
-                  '${widget.entry.uuid}-${widget.entry.times.lastModificationTime.get()?.millisecondsSinceEpoch ?? 0}',
+                  '${widget.entry.uuid}-$_viewVersion-${widget.entry.times.lastModificationTime.get()?.millisecondsSinceEpoch ?? 0}',
                 ),
                 entry: widget.entry,
                 commonFields: Provider.of<CommonFields>(context),
@@ -803,10 +810,12 @@ class EntryDetails extends StatefulWidget {
     super.key,
     required this.entry,
     required this.onSavedPressed,
+    this.isNew = false,
   });
 
   final EntryViewModel entry;
   final VoidCallback? onSavedPressed;
+  final bool isNew;
 
   @override
   _EntryDetailsState createState() => _EntryDetailsState();
@@ -814,6 +823,7 @@ class EntryDetails extends StatefulWidget {
 
 class _EntryDetailsState extends State<EntryDetails>
     with StreamSubscriberMixin {
+  final Set<KdbxKey> _deletedFieldKeys = <KdbxKey>{};
   List<Tuple3<GlobalKey<_EntryFieldState>, KdbxKey, CommonField?>>? _fieldKeys;
 
   IntentActionRegistration? _shortcutRegistration;
@@ -987,7 +997,9 @@ class _EntryDetailsState extends State<EntryDetails>
 
     final nonCommonKeys = entry.stringEntries.where(
       (str) =>
-          !commonFields.isCommon(str.key) && !_isInternalMetadataKey(str.key),
+          !commonFields.isCommon(str.key) &&
+          !_isInternalMetadataKey(str.key) &&
+          !_deletedFieldKeys.contains(str.key),
     );
     final oldKeys = _fieldKeys == null
         ? <KdbxKey, GlobalKey<_EntryFieldState>>{}
@@ -997,7 +1009,9 @@ class _EntryDetailsState extends State<EntryDetails>
       final otherCommonFields = commonFields.fields.where(
         (f) =>
             f.key != commonFields.title.key &&
-            (entry.getString(f.key) != null || f.key == commonFields.notes.key),
+            !_deletedFieldKeys.contains(f.key) &&
+            (entry.getString(f.key) != null ||
+                (widget.isNew && f.key == commonFields.notes.key)),
       );
 
       final titleTuple =
@@ -1032,11 +1046,12 @@ class _EntryDetailsState extends State<EntryDetails>
     } else if (isTwoFactor) {
       final relevantFields = commonFields.fields.where(
         (f) =>
-            f.key == commonFields.title.key ||
-            f.key == commonFields.userName.key ||
-            f.key == commonFields.otpAuth.key ||
-            f.key == commonFields.notes.key ||
-            entry.getString(f.key) != null,
+            !_deletedFieldKeys.contains(f.key) &&
+            (f.key == commonFields.title.key ||
+                f.key == commonFields.userName.key ||
+                f.key == commonFields.otpAuth.key ||
+                entry.getString(f.key) != null ||
+                (widget.isNew && f.key == commonFields.notes.key)),
       );
       _fieldKeys = [
         ...relevantFields.map(
@@ -1058,7 +1073,13 @@ class _EntryDetailsState extends State<EntryDetails>
       ];
     } else {
       _fieldKeys = commonFields.fields
-          .where((f) => f.showByDefault || entry.getString(f.key) != null)
+          .where(
+            (f) =>
+                !_deletedFieldKeys.contains(f.key) &&
+                (f.showByDefault ||
+                    entry.getString(f.key) != null ||
+                    (widget.isNew && f.key == commonFields.notes.key)),
+          )
           .map(
             (f) => Tuple3<GlobalKey<_EntryFieldState>, KdbxKey, CommonField?>(
               oldKeys[f.key] ??
@@ -1272,6 +1293,9 @@ class _EntryDetailsState extends State<EntryDetails>
                           entry: entry,
                           fieldKey: f.item2,
                           commonField: f.item3,
+                          onDeleteField: (key) {
+                            _deletedFieldKeys.add(key);
+                          },
                           onChangedMetadata: () => setState(() {
                             _initFields(
                               Provider.of<CommonFields>(context, listen: false),
@@ -1283,6 +1307,7 @@ class _EntryDetailsState extends State<EntryDetails>
                   AddFieldButton(
                     onAddField: (result) async {
                       final key = result.key;
+                      _deletedFieldKeys.remove(key);
                       if (entry.getString(key) != null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
@@ -1810,6 +1835,7 @@ class EntryField extends StatefulWidget {
     required this.entry,
     required this.fieldKey,
     this.commonField,
+    this.onDeleteField,
     required this.onChangedMetadata,
   });
 
@@ -1817,6 +1843,7 @@ class EntryField extends StatefulWidget {
   final KdbxEntry entry;
   final KdbxKey fieldKey;
   final CommonField? commonField;
+  final void Function(KdbxKey key)? onDeleteField;
   final VoidCallback onChangedMetadata;
 
   @override
@@ -2208,6 +2235,7 @@ class _EntryFieldState extends State<EntryField>
         });
         break;
       case EntryAction.delete:
+        widget.onDeleteField?.call(widget.fieldKey);
         widget.entry.removeString(widget.fieldKey);
         widget.entry.customData['FieldType_${widget.fieldKey.key}'] = '';
         widget.onChangedMetadata();
@@ -2286,13 +2314,17 @@ class _EntryFieldState extends State<EntryField>
           title: Text(_isProtected ? loc.fieldUnprotect : loc.fieldProtect),
         ),
       ),
-      PopupMenuItem(
-        value: EntryAction.delete,
-        child: ListTile(
-          leading: const Icon(Icons.delete),
-          title: Text(loc.deleteAction),
+      if (widget.fieldKey != KdbxKeyCommon.TITLE)
+        PopupMenuItem(
+          value: EntryAction.delete,
+          child: ListTile(
+            leading: const Icon(Icons.delete, color: KeyNestPalette.error),
+            title: Text(
+              loc.deleteAction,
+              style: const TextStyle(color: KeyNestPalette.error),
+            ),
+          ),
         ),
-      ),
       PopupMenuItem(
         value: EntryAction.show,
         child: ListTile(
@@ -2500,8 +2532,16 @@ class _EntryFieldState extends State<EntryField>
   Widget _buildStringEntryFieldEditor() {
     return StringEntryFieldEditor(
       onSaved: (value) {
-        if (value == null) {
-          _fieldValue = null;
+        final trimmed = value?.trim();
+        final isRemovableOptional = widget.fieldKey == KdbxKey('Notes') ||
+            (widget.fieldKey != KdbxKeyCommon.TITLE &&
+                widget.fieldKey != KdbxKeyCommon.PASSWORD &&
+                widget.fieldKey != KdbxKeyCommon.USER_NAME);
+        if (value == null ||
+            (trimmed != null && trimmed.isEmpty && isRemovableOptional)) {
+          widget.onDeleteField?.call(widget.fieldKey);
+          widget.entry.removeString(widget.fieldKey);
+          widget.entry.customData['FieldType_${widget.fieldKey.key}'] = '';
         } else {
           final newValue = _isProtected
               ? ProtectedValue.fromString(value)
@@ -3707,7 +3747,7 @@ class _EntryViewModeState extends State<_EntryViewMode> {
               ),
 
             if (hasTotp)
-              _EntryTotpViewTile(
+              KeyNestTotpTile(
                 entry: entry,
                 isMasked: isOtpProtected && !_isFieldRevealed('TOTP'),
                 onToggleMask: isOtpProtected
@@ -3796,6 +3836,18 @@ class _EntryViewModeState extends State<_EntryViewMode> {
                         onChanged: null,
                       ),
                     ),
+                  );
+                }
+                if (kind == CustomFieldKind.authenticator) {
+                  return KeyNestTotpTile(
+                    entry: entry,
+                    secret: fVal,
+                    label: '$fKey (Authenticator (2FA))',
+                    isMasked:
+                        isFieldProtected && !_isFieldRevealed('custom_$fKey'),
+                    onToggleMask: isFieldProtected
+                        ? () => _toggleFieldReveal('custom_$fKey')
+                        : null,
                   );
                 }
                 return _ViewFieldTile(
@@ -3927,7 +3979,6 @@ class _ViewFieldTile extends StatelessWidget {
     required this.icon,
     this.isMonospace = false,
     this.isMasked = false,
-    this.maskText,
     this.onToggleMask,
     this.trailing,
     this.customAction,
@@ -3941,7 +3992,6 @@ class _ViewFieldTile extends StatelessWidget {
   final IconData icon;
   final bool isMonospace;
   final bool isMasked;
-  final String? maskText;
   final VoidCallback? onToggleMask;
   final Widget? trailing;
   final VoidCallback? customAction;
@@ -4020,7 +4070,7 @@ class _ViewFieldTile extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          isMasked ? (maskText ?? '••••••••••••') : value,
+                          isMasked ? '••••••••••••' : value,
                           style: theme.textTheme.bodyLarge?.copyWith(
                             fontWeight: FontWeight.w600,
                             fontFamily: isMonospace
@@ -4070,151 +4120,6 @@ class _ViewFieldTile extends StatelessWidget {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _EntryTotpViewTile extends StatefulWidget {
-  const _EntryTotpViewTile({
-    required this.entry,
-    required this.isMasked,
-    required this.onToggleMask,
-  });
-
-  final KdbxEntry entry;
-  final bool isMasked;
-  final VoidCallback? onToggleMask;
-
-  @override
-  State<_EntryTotpViewTile> createState() => _EntryTotpViewTileState();
-}
-
-class _EntryTotpViewTileState extends State<_EntryTotpViewTile>
-    with WidgetsBindingObserver {
-  Timer? _timer;
-  int? _currentStep;
-  String? _totpCode;
-  int _remaining = 30;
-  int _period = 30;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _recompute();
-    _startTimer();
-  }
-
-  @override
-  void didUpdateWidget(_EntryTotpViewTile oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.entry != widget.entry) {
-      _currentStep = null;
-      _recompute();
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _startTimer();
-    } else {
-      _stopTimer();
-    }
-  }
-
-  void _startTimer() {
-    if (_timer != null && _timer!.isActive) {
-      return;
-    }
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _recompute();
-    });
-  }
-
-  void _stopTimer() {
-    _timer?.cancel();
-    _timer = null;
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _stopTimer();
-    super.dispose();
-  }
-
-  void _recompute() {
-    final nowMs = clock.now().millisecondsSinceEpoch;
-    final nowSec = nowMs ~/ 1000;
-    final activePeriod = _period > 0 ? _period : 30;
-    final step = nowSec ~/ activePeriod;
-
-    if (_currentStep != step || _totpCode == null) {
-      _currentStep = step;
-      final info = EntryTotpHelper.getTotpInfo(
-        widget.entry,
-        timestampMs: nowMs,
-      );
-      _totpCode = info?.code;
-      if (info != null && info.period > 0) {
-        _period = info.period;
-      }
-    }
-
-    final period = _period > 0 ? _period : 30;
-    final remaining = period - (nowSec % period);
-    if (mounted) {
-      setState(() {
-        _remaining = remaining;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_totpCode == null) {
-      return const SizedBox.shrink();
-    }
-
-    return _ViewFieldTile(
-      label: 'One-Time Password (2FA)',
-      value: _totpCode!,
-      icon: Icons.timer_outlined,
-      isMonospace: true,
-      maskText: '••••••',
-      isMasked: widget.isMasked,
-      onToggleMask: widget.onToggleMask,
-      trailing: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color:
-              (_remaining <= 5
-                      ? KeyNestPalette.error
-                      : (Theme.of(context).brightness == Brightness.dark
-                            ? KeyNestPalette.primaryDark
-                            : KeyNestPalette.primary))
-                  .withValues(
-                    alpha: Theme.of(context).brightness == Brightness.dark
-                        ? 0.20
-                        : 0.15,
-                  ),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          '${_remaining}s',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: _remaining <= 5
-                ? KeyNestPalette.error
-                : (Theme.of(context).brightness == Brightness.dark
-                      ? KeyNestPalette.primaryDark
-                      : KeyNestPalette.primary),
           ),
         ),
       ),

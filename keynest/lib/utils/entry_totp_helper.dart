@@ -33,6 +33,43 @@ class EntryTotpHelper {
     return getTotpInfo(entry, timestampMs: timestampMs)?.code;
   }
 
+  /// Calculates the TOTP code and countdown info for a specific [secret] string (or [entry]).
+  static EntryTotpInfo? getTotpInfoForSecret(
+    String secret, {
+    KdbxEntry? entry,
+    int? timestampMs,
+  }) {
+    try {
+      final otpAuth = parseOtpAuth(secret, entry: entry);
+      if (otpAuth == null) {
+        return null;
+      }
+      final now = timestampMs ?? clock.now().millisecondsSinceEpoch;
+      final secretBase32 = base32Encode(otpAuth.secret);
+      final code = OTP.generateTOTPCodeString(
+        secretBase32,
+        now,
+        algorithm: otpAuth.algorithm,
+        interval: otpAuth.period,
+        length: otpAuth.digits,
+        isGoogle: true,
+      );
+      final period = otpAuth.period;
+      final elapsed = (now ~/ 1000) % period;
+      final remaining = period - elapsed;
+      return EntryTotpInfo(
+        code: code,
+        remainingSeconds: remaining,
+        period: period,
+        elapsed: elapsed,
+        otpAuth: otpAuth,
+      );
+    } catch (e, stack) {
+      _logger.warning('Failed to generate live TOTP info for secret', e, stack);
+      return null;
+    }
+  }
+
   /// Calculates the TOTP code and countdown info for [entry] at the given timestamp (or now).
   static EntryTotpInfo? getTotpInfo(KdbxEntry entry, {int? timestampMs}) {
     try {
@@ -100,23 +137,18 @@ class EntryTotpHelper {
   static final Expando<bool> _hasTotpCache = Expando<bool>('hasTotpCache');
 
   /// Invalidates the cached TOTP status for [entry].
-  static void invalidateCache(KdbxEntry entry) {
-    _hasTotpCache[entry] = null;
+  static void invalidateCache([KdbxEntry? entry]) {
+    if (entry != null) {
+      _hasTotpCache[entry] = null;
+    }
   }
 
   /// Checks whether this entry has a TOTP secret configured.
   static bool hasTotp(KdbxEntry entry) {
-    final cached = _hasTotpCache[entry];
-    if (cached != null) {
-      return cached;
-    }
     if (!hasPotentialTotp(entry)) {
-      _hasTotpCache[entry] = false;
       return false;
     }
-    final result = getOtpAuth(entry) != null;
-    _hasTotpCache[entry] = result;
-    return result;
+    return getOtpAuth(entry) != null;
   }
 
   /// Determines if the field providing the TOTP secret is stored as a [ProtectedValue].

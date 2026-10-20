@@ -12,6 +12,7 @@ import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_password_history_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_payment_card.dart';
 import 'package:keynest/ui/widgets/keynest_popup_menu.dart';
+import 'package:keynest/ui/widgets/keynest_totp_tile.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:provider/provider.dart';
@@ -122,6 +123,26 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
       SecurityService.copySensitive(context, value, label: label);
     } else {
       SecurityService.copyNonSensitive(context, value, label: label);
+    }
+  }
+
+  Future<void> _deleteCustomField(String key) async {
+    final confirm = await DialogUtils.showConfirmDialog(
+      context: context,
+      params: ConfirmDialogParams(
+        title: 'Delete Field',
+        content: 'Are you sure you want to delete field "$key"?',
+        positiveButtonText: 'Delete',
+      ),
+    );
+    if (confirm == true && mounted) {
+      widget.entry.removeString(KdbxKey(key));
+      widget.entry.customData['FieldType_$key'] = '';
+      widget.entry.times.lastModificationTime.set(DateTime.now().toUtc());
+      await context.read<KdbxBloc>().saveFile(widget.entry.file);
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -700,10 +721,39 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                         onChanged: null,
                                       ),
                                     ),
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.delete_outline_rounded,
+                                        size: 20,
+                                        color: KeyNestPalette.error,
+                                      ),
+                                      tooltip: 'Delete field',
+                                      onPressed: () => _deleteCustomField(s.key.key),
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
+                          ),
+                        );
+                      }
+
+                      if (kind == CustomFieldKind.authenticator) {
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: KeyNestTotpTile(
+                            entry: entry,
+                            secret: rawVal,
+                            label: '${s.key.key} (${typeItem.title})',
+                            isMasked: isMasked,
+                            onToggleMask: () => setState(() {
+                              if (isRevealed) {
+                                _revealedCustomFields.remove(s.key.key);
+                              } else {
+                                _revealedCustomFields.add(s.key.key);
+                              }
+                            }),
+                            onDelete: () => _deleteCustomField(s.key.key),
                           ),
                         );
                       }
@@ -728,8 +778,7 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                           onToggleVisibility:
                               (isProtected ||
                                   kind == CustomFieldKind.hidden ||
-                                  kind == CustomFieldKind.pin ||
-                                  kind == CustomFieldKind.authenticator)
+                                  kind == CustomFieldKind.pin)
                               ? () => setState(() {
                                   if (isRevealed) {
                                     _revealedCustomFields.remove(s.key.key);
@@ -739,6 +788,7 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                 })
                               : null,
                           onCopy: () => _copyToClipboard(s.key.key, rawVal),
+                          onDelete: () => _deleteCustomField(s.key.key),
                         ),
                       );
                     },
@@ -821,6 +871,7 @@ class _InfoTile extends StatelessWidget {
     required this.icon,
     this.onCopy,
     this.onToggleVisibility,
+    this.onDelete,
     this.isMasked,
     this.isMonospace = false,
     this.compact = false,
@@ -831,6 +882,7 @@ class _InfoTile extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onCopy;
   final VoidCallback? onToggleVisibility;
+  final VoidCallback? onDelete;
   final bool? isMasked;
   final bool isMonospace;
   final bool compact;
@@ -939,6 +991,22 @@ class _InfoTile extends StatelessWidget {
                           : KeyNestPalette.textSecondaryLight,
                     ),
                     onPressed: onToggleVisibility,
+                  ),
+                if (onDelete != null)
+                  IconButton(
+                    padding: compact
+                        ? EdgeInsets.zero
+                        : const EdgeInsets.all(8),
+                    constraints: compact
+                        ? const BoxConstraints(minWidth: 22, minHeight: 22)
+                        : null,
+                    iconSize: compact ? 16 : 20,
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: KeyNestPalette.error,
+                    ),
+                    tooltip: 'Delete field',
+                    onPressed: onDelete,
                   ),
               ],
             ),

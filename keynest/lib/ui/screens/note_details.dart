@@ -16,6 +16,7 @@ import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/ui/widgets/keynest_password_history_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_popup_menu.dart';
+import 'package:keynest/ui/widgets/keynest_totp_tile.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:keynest/utils/platform.dart';
@@ -1027,6 +1028,27 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                   (t) => t.kind == kind,
                   orElse: () => KeyNestCustomFieldSheet.fieldTypes.first,
                 );
+
+                if (kind == CustomFieldKind.authenticator) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: KeyNestTotpTile(
+                      entry: entry,
+                      secret: fieldValue,
+                      label: '$fieldKey (${typeItem.title})',
+                      isMasked: isMasked,
+                      onToggleMask: () {
+                        setState(() {
+                          if (isRevealed) {
+                            _revealedCustomFields.remove(fieldKey);
+                          } else {
+                            _revealedCustomFields.add(fieldKey);
+                          }
+                        });
+                      },
+                    ),
+                  );
+                }
 
                 String displayVal;
                 if (isMasked) {
