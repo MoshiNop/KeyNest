@@ -84,7 +84,7 @@ jobs:
     - name: run test ${{ matrix.flavor }}
       # --no-enable-impeller: with impeller screenshots don't seem to work.
       run: "cd keynest && ~/deps/flutter/bin/flutter drive --no-enable-impeller --target=test_driver/app.dart"
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: driver-screenshots
         path: keynest/build/screenshots

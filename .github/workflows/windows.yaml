@@ -72,7 +72,7 @@ jobs:
 #    - shell: bash
 #      run: |
 #        cat keynest/lib/generated_plugin_registrant.dart
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.buildapk.outputs.outputfilename }}
         path: keynest/${{ steps.buildapk.outputs.outputpath }}

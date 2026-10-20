@@ -54,7 +54,7 @@ jobs:
       run: >-
         ./keynest/_tools/ship.sh secrets exec --keystore upload --api-key upload --
         ./keynest/_tools/ci-release.sh ${{ matrix.flavor }}
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: ${{ steps.buildapk.outputs.outputfilename }}
         path: keynest/${{ steps.buildapk.outputs.outputpath }}
@@ -82,7 +82,7 @@ jobs:
       with:
         snap: ${{ steps.snapcraft.outputs.snap }}
         release: edge
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: keynest-${{ steps.buildapk.outputs.appversion }}_${{ steps.buildapk.outputs.appbuildnumber }}-snap
         path: ${{ steps.snapcraft.outputs.snap }}

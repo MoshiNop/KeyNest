@@ -90,7 +90,7 @@ jobs:
       run: >-
         ./keynest/_tools/ship.sh secrets exec --keystore upload --api-key upload --
         ./keynest/_tools/upload-artifact.sh keynest/${{ steps.buildapk.outputs.outputpath }}
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       if: ${{ steps.buildapk.outputs.outputfilename != null }}
       with:
         name: ${{ steps.buildapk.outputs.outputfilename }}
