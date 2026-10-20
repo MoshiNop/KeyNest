@@ -160,6 +160,7 @@ class _PreferencesBodyState extends State<PreferencesBody>
   @override
   void initState() {
     super.initState();
+    _autofillStatus = AutofillService.statusNotifier.value;
     WidgetsBinding.instance.addObserver(this);
     _doInit();
   }
@@ -185,17 +186,23 @@ class _PreferencesBodyState extends State<PreferencesBody>
       return;
     }
     final autofill = AutofillService();
-    _autofillStatus = await autofill.status();
-    if (_autofillStatus != AutofillServiceStatus.unsupported) {
-      _autofillPrefs = await autofill.getPreferences();
-      _browsersWithoutAutofill = (await autofill.getBrowserAutofillStatus())
+    final status = await autofill.status();
+    AutofillPreferences? prefs;
+    List<BrowserAutofillStatus> browsersWithoutAutofill = [];
+    if (status != AutofillServiceStatus.unsupported) {
+      prefs = await autofill.getPreferences();
+      browsersWithoutAutofill = (await autofill.getBrowserAutofillStatus())
           .where((browser) => !browser.thirdPartyModeEnabled)
           .toList();
     }
     if (!mounted) {
       return;
     }
-    setState(() {});
+    setState(() {
+      _autofillStatus = status;
+      _autofillPrefs = prefs;
+      _browsersWithoutAutofill = browsersWithoutAutofill;
+    });
   }
 
   @override
@@ -2109,8 +2116,11 @@ class _PreferencesBodyState extends State<PreferencesBody>
       builder: (ctx) {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         final isKeyNestDefault = diag['isKeyNestDefault'] == true;
-        final isEnabled = diag['hasEnabledAutofillServices'] == true;
+        final isEnabled =
+            diag['hasEnabledAutofillServices'] == true || isKeyNestDefault;
         final sdkInt = diag['sdkInt'] ?? 'Android';
+        final currentService =
+            (diag['currentAutofillService'] as String? ?? '').trim();
 
         return Container(
           padding: const EdgeInsets.all(24),
@@ -2180,7 +2190,9 @@ class _PreferencesBodyState extends State<PreferencesBody>
                 'Default Provider',
                 isKeyNestDefault
                     ? 'KeyNest is Active Provider'
-                    : 'Another app is default',
+                    : (currentService.isEmpty || currentService == 'null'
+                        ? 'No provider selected in Settings'
+                        : 'Another app is default'),
                 isKeyNestDefault
                     ? Icons.verified_user_rounded
                     : Icons.info_outline_rounded,
@@ -2231,7 +2243,9 @@ class _PreferencesBodyState extends State<PreferencesBody>
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     await AutofillService().requestSetAutofillService();
-                    await _doInit();
+                    if (mounted) {
+                      await _doInit();
+                    }
                   },
                   icon: const Icon(Icons.settings_rounded, size: 18),
                   label: const Text('Open System Autofill Settings'),
@@ -2254,6 +2268,9 @@ class _PreferencesBodyState extends State<PreferencesBody>
         );
       },
     );
+    if (mounted) {
+      await _doInit();
+    }
   }
 
   Widget _buildDiagRow(String label, String value, IconData icon, Color color) {

@@ -7,6 +7,7 @@ import android.app.Activity.RESULT_CANCELED
 import android.app.Application
 import android.app.PendingIntent
 import android.app.assist.AssistStructure
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -246,9 +247,89 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         var hasCompletedAutofill = false
     }
 
-    private val autofillManager by lazy {
-        requireNotNull(context.getSystemService(AutofillManager::class.java))
+    private fun getAutofillManager(): AutofillManager? {
+        val act = activity
+        if (act != null) {
+            try {
+                val mgr = act.getSystemService(AutofillManager::class.java)
+                if (mgr != null) return mgr
+            } catch (_: Exception) {}
+        }
+        return try {
+            context.getSystemService(AutofillManager::class.java)
+        } catch (_: Exception) {
+            null
+        }
     }
+
+    private fun isAutofillSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return false
+        }
+        val afm = getAutofillManager()
+        return afm?.isAutofillSupported == true
+    }
+
+    private fun isKeyNestServiceComponent(componentStr: String?): Boolean {
+        if (componentStr.isNullOrBlank()) return false
+        val pkg = context.packageName
+        try {
+            val cn = ComponentName.unflattenFromString(componentStr)
+            if (cn != null && cn.packageName == pkg) {
+                return true
+            }
+        } catch (_: Exception) {}
+        return componentStr.startsWith("$pkg/") || componentStr == pkg || componentStr.contains(pkg)
+    }
+
+    private fun getCurrentAutofillService(): String {
+        return try {
+            Settings.Secure.getString(context.contentResolver, "autofill_service") ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun isKeyNestDefaultProvider(): Boolean {
+        val currentService = getCurrentAutofillService()
+        if (isKeyNestServiceComponent(currentService)) {
+            return true
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                val credService = Settings.Secure.getString(context.contentResolver, "credential_service") ?: ""
+                if (isKeyNestServiceComponent(credService)) {
+                    return true
+                }
+                val credPrimary = Settings.Secure.getString(context.contentResolver, "credential_service_primary") ?: ""
+                if (isKeyNestServiceComponent(credPrimary)) {
+                    return true
+                }
+            } catch (_: Exception) {}
+        }
+        return false
+    }
+
+    private fun hasEnabledAutofillServices(): Boolean {
+        if (!isAutofillSupported()) {
+            return false
+        }
+        try {
+            val afm = getAutofillManager()
+            if (afm != null && afm.hasEnabledAutofillServices()) {
+                return true
+            }
+        } catch (e: Exception) {
+            logger.warn(e) { "Error querying afm.hasEnabledAutofillServices()" }
+        }
+        // Modern Android (API 34/35/36) and OEM ROMs (MIUI/HyperOS, Samsung, etc.)
+        // may return false from hasEnabledAutofillServices() after app restart or cold start
+        // until an autofill session is bound by the system server.
+        // If the Android system settings confirm KeyNest is the configured provider,
+        // it IS enabled for the system.
+        return isKeyNestDefaultProvider()
+    }
+
     private val autofillPreferenceStore by lazy { AutofillPreferenceStore.getInstance(context) }
     private var requestSetAutofillServiceResult: Result? = null
     private var lastIntent: Intent? = null
@@ -261,11 +342,13 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         logger.debug { "onMethodCall ${call.method}" }
         when (call.method) {
             "hasAutofillServicesSupport" ->
-                result.success(true)
+                result.success(isAutofillSupported())
             "hasEnabledAutofillServices" ->
-                result.success(autofillManager.hasEnabledAutofillServices())
+                result.success(hasEnabledAutofillServices())
+            "isKeyNestDefaultProvider" ->
+                result.success(isKeyNestDefaultProvider())
             "disableAutofillServices" -> {
-                autofillManager.disableAutofillServices()
+                getAutofillManager()?.disableAutofillServices()
                 AutofillCredentialStore.clearAll(context)
                 logger.info { "Disabled autofill services and purged AutofillCredentialStore" }
                 result.success(null)
@@ -478,20 +561,18 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 result.success(true)
             }
             "getDiagnostics" -> {
-                val currentService = try {
-                    Settings.Secure.getString(context.contentResolver, "autofill_service") ?: ""
-                } catch (e: Exception) {
-                    ""
-                }
-                val isCurrent = currentService.contains(context.packageName)
+                val supported = isAutofillSupported()
+                val isDefault = isKeyNestDefaultProvider()
+                val isEnabled = hasEnabledAutofillServices()
+                val currentService = getCurrentAutofillService()
                 result.success(
                     mapOf(
                         "sdkInt" to Build.VERSION.SDK_INT,
-                        "hasAutofillServicesSupport" to true,
-                        "hasEnabledAutofillServices" to autofillManager.hasEnabledAutofillServices(),
-                        "isAutofillSupported" to autofillManager.isAutofillSupported,
+                        "hasAutofillServicesSupport" to supported,
+                        "hasEnabledAutofillServices" to isEnabled,
+                        "isAutofillSupported" to supported,
                         "currentAutofillService" to currentService,
-                        "isKeyNestDefault" to isCurrent,
+                        "isKeyNestDefault" to isDefault,
                         "servicePackage" to context.packageName,
                     )
                 )
@@ -1119,6 +1200,7 @@ class AutofillServicePlugin : FlutterPlugin, ActivityAware {
                 when (call.method) {
                     "hasAutofillServicesSupport" -> result.success(false)
                     "hasEnabledAutofillServices" -> result.success(null)
+                    "isKeyNestDefaultProvider" -> result.success(false)
                     else -> result.notImplemented()
                 }
             }

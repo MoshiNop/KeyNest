@@ -73807,6 +73807,7 @@ com.moshinop.autofill_service.AutofillServicePluginImpl$onAttachedToActivity$cal
     public static synthetic java.lang.Object $r8$lambda$GQSU9lLbm3bRbsL1Z8Qpmi-LPUI()
     public static final java.lang.Object onActivityStopped$lambda$0()
 com.moshinop.autofill_service.AutofillServicePluginImpl:
+    public static synthetic java.lang.Object $r8$lambda$1ph3tRFdf8AT7ehlyTplohL4Cck()
     public static synthetic java.lang.Object $r8$lambda$92axiIWvVxrKOpROp0T90k4MMes()
     public static synthetic java.lang.Object $r8$lambda$IUpO-uGf6Acohh3yOOj9UQUS7Rs()
     public static synthetic java.lang.Object $r8$lambda$RJZTSq5gp0GXQ55T_cKjkrTwtWc()
@@ -73814,8 +73815,9 @@ com.moshinop.autofill_service.AutofillServicePluginImpl:
     public static synthetic java.lang.Object $r8$lambda$hCJjfBi8IHzq3z4kXQ7NpuS9rDg()
     public static synthetic java.lang.Object $r8$lambda$xaQ65bhDj9tTuQlqbaUS1gs4WhQ()
     public static synthetic java.lang.Object $r8$lambda$zQgFXgZLqvAQ9no25KdDluwykkQ()
-    public final android.view.autofill.AutofillManager getAutofillManager()
     public final com.moshinop.autofill_service.AutofillPreferenceStore getAutofillPreferenceStore()
+    public final java.lang.String getCurrentAutofillService()
+    public static final java.lang.Object hasEnabledAutofillServices$lambda$0()
     public static final java.lang.Object onActivityResult$lambda$1()
     public static final java.lang.Object onMethodCall$lambda$1()
     public static final java.lang.Object onMethodCall$lambda$16()

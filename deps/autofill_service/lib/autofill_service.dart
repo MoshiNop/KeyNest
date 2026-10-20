@@ -205,7 +205,7 @@ class AutofillService {
   }
 
   Future<AutofillRequestInfo> getAutofillRequestInfo() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return AutofillRequestInfo(hasRequest: false, forcePicker: false);
     }
     _ensureInitialized();
@@ -221,7 +221,7 @@ class AutofillService {
   }
 
   Future<String?> getSelectedEntryId() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return null;
     }
     return await _channel.invokeMethod<String>('getSelectedEntryId');
@@ -234,14 +234,14 @@ class AutofillService {
   }
 
   Future<bool> cancelAutofill() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return false;
     }
     return (await _channel.invokeMethod<bool>('cancelAutofill')) ?? false;
   }
 
   Future<bool> get hasAutofillServicesSupport async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return false;
     }
     return (await _channel.invokeMethod<bool>('hasAutofillServicesSupport'))
@@ -249,8 +249,27 @@ class AutofillService {
   }
 
   Future<bool> get hasEnabledAutofillServices async {
-    return (await _channel.invokeMethod<bool>('hasEnabledAutofillServices')) ==
+    if (!isAndroidPlatform) {
+      return false;
+    }
+    final res = (await _channel.invokeMethod<bool>('hasEnabledAutofillServices')) ==
         true;
+    if (res) {
+      return true;
+    }
+    return await isKeyNestDefaultProvider();
+  }
+
+  Future<bool> isKeyNestDefaultProvider() async {
+    if (!isAndroidPlatform) {
+      return false;
+    }
+    try {
+      return (await _channel.invokeMethod<bool>('isKeyNestDefaultProvider')) ==
+          true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Chromium based browsers only forward form data to the autofill framework
@@ -258,7 +277,7 @@ class AutofillService {
   /// settings. Returns the state of that setting for all installed browsers
   /// which expose it (empty on other platforms and for older browsers).
   Future<List<BrowserAutofillStatus>> getBrowserAutofillStatus() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return [];
     }
     final result =
@@ -303,11 +322,20 @@ class AutofillService {
     try {
       final enabled =
           await _channel.invokeMethod<bool>('hasEnabledAutofillServices');
-      final currentStatus = enabled == null
-          ? AutofillServiceStatus.unsupported
-          : (enabled
-              ? AutofillServiceStatus.enabled
-              : AutofillServiceStatus.disabled);
+      if (enabled == null) {
+        statusNotifier.value = AutofillServiceStatus.unsupported;
+        return AutofillServiceStatus.unsupported;
+      }
+      var isEnabled = enabled;
+      if (!isEnabled) {
+        final isDefault = await isKeyNestDefaultProvider();
+        if (isDefault) {
+          isEnabled = true;
+        }
+      }
+      final currentStatus = isEnabled
+          ? AutofillServiceStatus.enabled
+          : AutofillServiceStatus.disabled;
       statusNotifier.value = currentStatus;
       return currentStatus;
     } catch (e) {
@@ -368,7 +396,7 @@ class AutofillService {
   }
 
   Future<Map<String, dynamic>> getDiagnostics() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return {
         'platform': Platform.operatingSystem,
         'supported': false,
@@ -516,7 +544,7 @@ class AutofillService {
   }
 
   Future<Map<String, dynamic>?> getPendingLogin(String currentContext) async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return null;
     }
     return await _channel.invokeMapMethod<String, dynamic>('getPendingLogin', {
@@ -525,7 +553,7 @@ class AutofillService {
   }
 
   Future<bool> clearPendingLogin() async {
-    if (!Platform.isAndroid) {
+    if (!isAndroidPlatform) {
       return false;
     }
     return (await _channel.invokeMethod<bool>('clearPendingLogin')) == true;
