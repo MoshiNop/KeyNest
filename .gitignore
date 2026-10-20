@@ -44,6 +44,8 @@ local.properties
 **/android/**/gradle-wrapper.jar
 settings_aar.gradle
 _debug-full-r8-config.txt
+*.apk
+*.aab
 
 # Gradle home daemon / caches
 **/gradle_home/caches/
