@@ -198,3 +198,9 @@ it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 ```
+
+---
+
+## Acknowledgements
+
+KeyNest builds upon and acknowledges the open-source work and foundations created by the [AuthPass project](https://github.com/authpass) and the KeePass community.
