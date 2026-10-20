@@ -22,7 +22,7 @@ jobs:
         platform: ['ios', 'macos']
     name: "Build ${{ matrix.platform }}"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           submodules: true
       # SOPS_AGE_KEY here too, and for a different reason than below:

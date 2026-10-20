@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       # The only job here that never builds the app: it repackages a published
       # tarball, so there is no Flutter SDK to borrow a Dart from and no
       # ci-install-deps step to install sops. Both, and nothing else.

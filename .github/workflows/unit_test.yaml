@@ -26,7 +26,7 @@ jobs:
           PASSWORD: keyne5t
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
           submodules: true
       # The key is what puts test/_testSecrets.json on disk. Absent — on a

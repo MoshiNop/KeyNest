@@ -38,7 +38,7 @@ jobs:
       fail-fast: true
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
     - name: Checkout submodules
       shell: bash
       run: |

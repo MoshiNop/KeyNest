@@ -28,7 +28,7 @@ jobs:
     # reads that as a dirty tree. Checked out as-is, the tree stays clean.
     - shell: bash
       run: git config --global core.autocrlf false
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v7
       with:
         submodules: true
     - shell: bash
