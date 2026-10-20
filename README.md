@@ -82,14 +82,14 @@ The gallery below presents the core interface across desktop and mobile.
 
 KeyNest targets desktop, mobile, and web environments:
 
-| Platform | Status | Minimum Requirement | Distribution |
+| Platform | Minimum Requirement | Distribution | Status |
 | :--- | :--- | :--- | :--- |
-| **Android** | Verified | Android 8.0 (API 26)+ | Direct APK, Google Play Bundle |
-| **Windows** | Verified | Windows 10 (Build 19041+) / Windows 11 (x64) | MSIX Installer, Portable ZIP |
-| **Linux** | Verified | Ubuntu 20.04+, Debian 11+, Fedora 36+ | Debian `.deb`, Standalone Tarball |
-| **Web** | Verified | Modern Web Browsers (Chrome, Firefox, Safari, Edge) | Static Progressive Web App (PWA) |
-| **iOS** | Not verified | iOS 15.0+ | Apple App Store, TestFlight |
-| **macOS** | Not verified | macOS 11.0 (Big Sur)+ (Intel & Apple Silicon) | Signed macOS `.app`, DMG |
+| **Android** | Android 8.0 (API 26)+ | Direct APK, Google Play Bundle | Verified |
+| **Windows** | Windows 10 (Build 19041+) / Windows 11 (x64) | MSIX Installer, Portable ZIP | Verified |
+| **Linux** | Ubuntu 20.04+, Debian 11+, Fedora 36+ | Debian `.deb`, Standalone Tarball | Verified |
+| **Web** | Modern Web Browsers (Chrome, Firefox, Safari, Edge) | Static Progressive Web App (PWA) | Verified |
+| **iOS** | iOS 15.0+ | Apple App Store, TestFlight | Not verified |
+| **macOS** | macOS 11.0 (Big Sur)+ (Intel & Apple Silicon) | Signed macOS `.app`, DMG | Not verified |
 
 ---
 
