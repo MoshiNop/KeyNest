@@ -181,21 +181,26 @@ void main() {
       expect(QuickUnlockStorage.isSessionValid(), isTrue);
     });
 
-    test('Foreground inactivity exceeding timeout triggers auto-lock', () {
-      SecuritySettingsStore.instance.save(autoLockSeconds: 300);
-      QuickUnlockStorage.cacheSessionCredentials({dummySource: creds});
+    test(
+      'Sitting idle in foreground does NOT trigger auto-lock (locks only when backgrounded)',
+      () {
+        SecuritySettingsStore.instance.save(autoLockSeconds: 300);
+        QuickUnlockStorage.cacheSessionCredentials({dummySource: creds});
 
-      // App is in foreground (pausedAt is null)
-      manager.pausedAt = null;
-      // Inactive for 6 minutes in foreground
-      manager.lastInteractionAt = DateTime.now().subtract(const Duration(minutes: 6));
+        // App is in foreground (pausedAt is null)
+        manager.pausedAt = null;
+        // Inactive for 6 minutes in foreground
+        manager.lastInteractionAt = DateTime.now().subtract(
+          const Duration(minutes: 6),
+        );
 
-      // Trigger check
-      manager.checkForegroundInactivityForTesting();
+        // Trigger check
+        manager.checkForegroundInactivityForTesting();
 
-      // Session must be cleared due to auto-lock
-      expect(QuickUnlockStorage.isSessionValid(), isFalse);
-      expect(QuickUnlockStorage.hasSessionCredentials, isFalse);
-    });
+        // Session must REMAIN valid because the app is in the foreground
+        expect(QuickUnlockStorage.isSessionValid(), isTrue);
+        expect(QuickUnlockStorage.hasSessionCredentials, isTrue);
+      },
+    );
   });
 }

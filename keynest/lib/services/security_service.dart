@@ -333,44 +333,14 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
     lastInteractionAt = DateTime.now();
     if (!_initialized) {
       WidgetsBinding.instance.addObserver(this);
-      try {
-        WidgetsBinding.instance.pointerRouter.addGlobalRoute(_onPointerEvent);
-      } catch (_) {}
-      inactivityCheckTimer = Timer.periodic(
-        const Duration(seconds: 5),
-        (_) => _checkForegroundInactivity(),
-      );
       _initialized = true;
       SecuritySettingsStore.instance.load();
     }
   }
 
-  void _onPointerEvent(PointerEvent event) {
-    lastInteractionAt = DateTime.now();
-  }
-
   void _checkForegroundInactivity() {
-    // Only check foreground inactivity when app is not paused/in background
-    if (pausedAt != null) {
-      return;
-    }
-    final kdbxBloc = _kdbxBloc;
-    final hasOpenVault =
-        (kdbxBloc != null && kdbxBloc.openedFilesKdbx.isNotEmpty) ||
-        QuickUnlockStorage.hasSessionCredentials;
-    if (!hasOpenVault) {
-      return;
-    }
-    final timeout = SecuritySettingsStore.instance.autoLockSeconds;
-    if (timeout > 0 && lastInteractionAt != null) {
-      final elapsed = DateTime.now().difference(lastInteractionAt!).inSeconds;
-      if (elapsed >= timeout) {
-        _logger.info(
-          'Vault foreground inactivity auto-lock triggered ($elapsed s >= $timeout s)',
-        );
-        _lockVaultNow();
-      }
-    }
+    // Inactivity while sitting idle inside the foreground app must NOT lock the vault.
+    // Vault auto-lock applies strictly when the app has been backgrounded.
   }
 
   @visibleForTesting

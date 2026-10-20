@@ -1353,13 +1353,21 @@ class _KeyNestCategoryDetailScreenState
 }
 
 // 3. Recently Deleted / Trash Bin Screen
-class KeyNestRecentlyDeletedScreen extends StatelessWidget {
+class KeyNestRecentlyDeletedScreen extends StatefulWidget {
   const KeyNestRecentlyDeletedScreen({super.key});
 
   static Route<void> route() => MaterialPageRoute(
     settings: const RouteSettings(name: '/trash'),
     builder: (context) => const KeyNestRecentlyDeletedScreen(),
   );
+
+  @override
+  State<KeyNestRecentlyDeletedScreen> createState() =>
+      _KeyNestRecentlyDeletedScreenState();
+}
+
+class _KeyNestRecentlyDeletedScreenState
+    extends State<KeyNestRecentlyDeletedScreen> {
 
   @override
   Widget build(BuildContext context) {
@@ -1369,8 +1377,7 @@ class KeyNestRecentlyDeletedScreen extends StatelessWidget {
     final openedFiles = kdbxBloc.openedFilesKdbx;
 
     final trashEntries = <KdbxEntry>[];
-    if (openedFiles.isNotEmpty) {
-      final file = openedFiles.first;
+    for (final file in openedFiles) {
       for (final e in file.body.rootGroup.getAllEntries()) {
         final cat = e.getString(KdbxKey('ItemCategory'))?.getText() ?? '';
         final isDeleted =
@@ -1413,7 +1420,7 @@ class KeyNestRecentlyDeletedScreen extends StatelessWidget {
                     ],
                   ),
                 );
-                if (confirm == true && context.mounted) {
+                if (confirm == true && mounted) {
                   for (final e in trashEntries) {
                     e.file.deletePermanently(e);
                   }
@@ -1424,9 +1431,13 @@ class KeyNestRecentlyDeletedScreen extends StatelessWidget {
                         recycleBin.groups,
                       ).forEach(file.deletePermanently);
                     }
+                  }
+                  setState(() {});
+                  for (final file in openedFiles) {
                     await kdbxBloc.saveFile(file);
                   }
-                  if (context.mounted) {
+                  if (mounted) {
+                    setState(() {});
                     ScaffoldMessenger.of(context)
                       ..clearSnackBars()
                       ..showSnackBar(
@@ -1566,8 +1577,10 @@ class KeyNestRecentlyDeletedScreen extends StatelessWidget {
                                 PlainValue('General'),
                               );
                             }
+                            setState(() {});
                             await kdbxBloc.saveFile(e.file);
-                            if (context.mounted) {
+                            if (mounted) {
+                              setState(() {});
                               ScaffoldMessenger.of(context)
                                 ..clearSnackBars()
                                 ..showSnackBar(
@@ -1611,10 +1624,12 @@ class KeyNestRecentlyDeletedScreen extends StatelessWidget {
                                 ],
                               ),
                             );
-                            if (confirm == true && context.mounted) {
+                            if (confirm == true && mounted) {
                               e.file.deletePermanently(e);
+                              setState(() {});
                               await kdbxBloc.saveFile(e.file);
-                              if (context.mounted) {
+                              if (mounted) {
+                                setState(() {});
                                 ScaffoldMessenger.of(context)
                                   ..clearSnackBars()
                                   ..showSnackBar(
