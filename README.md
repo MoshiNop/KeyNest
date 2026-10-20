@@ -46,7 +46,7 @@ The gallery below presents the core interface across desktop and mobile.
     <td width="50%" align="center">
       <b>Cloud Storage & 3-Way Synchronization</b><br/>
       <img src="docs/assets/screenshots/cloud-vaults.png" alt="Cloud Vault Synchronization" width="100%" onerror="this.onerror=null; this.src='https://placehold.co/1280x800/1e1e1e/00e5ff?text=Cloud+Storage+%26+3-Way+Sync%0A(docs/assets/screenshots/cloud-vaults.png)';"/><br/>
-      <sub>Sync via Nextcloud (WebDAV), Google Drive, Dropbox, or OneDrive with automatic merge resolution.</sub>
+      <sub>Sync via Nextcloud (WebDAV), Google Drive and Dropbox with automatic merge resolution.</sub>
     </td>
   </tr>
 </table>
