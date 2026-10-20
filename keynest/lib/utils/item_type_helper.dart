@@ -77,11 +77,13 @@ class KeyNestItemTypeHelper {
 
   static final Expando<_CachedItemClassification> _classificationCache =
       Expando<_CachedItemClassification>('itemTypeClassificationCache');
+  static final Expando<bool> _trashCache = Expando<bool>('itemTypeTrashCache');
 
   /// Invalidates the cached classification for [entry] (or all entries if null).
   static void invalidateCache([KdbxEntry? entry]) {
     if (entry != null) {
       _classificationCache[entry] = null;
+      _trashCache[entry] = null;
     }
   }
 
@@ -413,6 +415,16 @@ class KeyNestItemTypeHelper {
 
   /// Returns whether [entry] has been deleted or moved to trash.
   static bool isEntryInTrash(KdbxEntry entry) {
+    final cached = _trashCache[entry];
+    if (cached != null) {
+      return cached;
+    }
+    final inTrash = _computeIsEntryInTrash(entry);
+    _trashCache[entry] = inTrash;
+    return inTrash;
+  }
+
+  static bool _computeIsEntryInTrash(KdbxEntry entry) {
     if (entry.isInRecycleBin()) {
       return true;
     }

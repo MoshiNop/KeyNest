@@ -22,9 +22,13 @@ import 'package:provider/provider.dart';
 final _logger = Logger('main_app_scaffold');
 
 class MainAppScaffold extends StatelessWidget {
-  static MaterialPageRoute<void> route() => MaterialPageRoute(
+  static Route<void> route() => PageRouteBuilder<void>(
     settings: const RouteSettings(name: '/main'),
-    builder: (context) => MainAppScaffold(),
+    pageBuilder: (context, animation, secondaryAnimation) => MainAppScaffold(),
+    transitionDuration: const Duration(milliseconds: 180),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) {
+      return FadeTransition(opacity: animation, child: child);
+    },
   );
 
   @override

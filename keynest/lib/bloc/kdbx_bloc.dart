@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:core';
-import 'dart:typed_data';
 
 import 'package:autofill_service/autofill_service.dart';
 import 'package:autofill_shared/credential_matcher.dart';
 import 'package:biometric_storage/biometric_storage.dart';
 import 'package:collection/collection.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_async_utils/flutter_async_utils.dart';
 import 'package:kdbx/kdbx.dart';
@@ -40,6 +40,7 @@ import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/utils/base32utils.dart';
+import 'package:keynest/utils/biometric_lifecycle_tracker.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/key_file_handler.dart';
@@ -121,11 +122,22 @@ class QuickUnlockStorage {
     return _supported = (canAuthenticate == CanAuthenticateResponse.success);
   }
 
+  static final StorageFileInitOptions _quickUnlockStorageOptions =
+      StorageFileInitOptions(
+    authenticationRequired: true,
+    androidBiometricOnly: true,
+    darwinTouchIDAuthenticationAllowableReuseDuration:
+        const Duration(seconds: 30),
+  );
+
   Future<BiometricStorageFile>? _storageFileCached;
 
   @NonNls
   Future<BiometricStorageFile> _storageFile() => _storageFileCached ??=
-      BiometricStorage().getStorage('${env.storageNamespace ?? ''}QuickUnlock');
+      BiometricStorage().getStorage(
+    '${env.storageNamespace ?? ''}QuickUnlock',
+    options: _quickUnlockStorageOptions,
+  );
 
   static Map<FileSource, Credentials>? _inMemorySessionCredentials;
   static DateTime? _lastActiveSessionTimestamp;
@@ -164,6 +176,10 @@ class QuickUnlockStorage {
       }
     }
   }
+
+  static bool get hasSessionCredentials =>
+      _inMemorySessionCredentials != null &&
+      _inMemorySessionCredentials!.isNotEmpty;
 
   static bool isSessionValid() {
     if (_inMemorySessionCredentials == null ||
@@ -209,7 +225,8 @@ class QuickUnlockStorage {
       if (tokens == null || tokens.isEmpty) {
         return false;
       }
-      final appData = await appDataBloc.store.load();
+      final appData =
+          appDataBloc.store.cachedValue ?? await appDataBloc.store.load();
       final restored = <FileSource, Credentials>{};
       for (final entry in tokens.entries) {
         final file = appData.recentFileByUuid(entry.key);
@@ -264,7 +281,19 @@ class QuickUnlockStorage {
     }
     final storage = await _storageFile();
     try {
-      await storage.write(json.encode(_knownVaultHashes));
+      await storage.write(
+        json.encode(_knownVaultHashes),
+        promptInfo: const PromptInfo(
+          androidPromptInfo: AndroidPromptInfo(
+            title: 'Enable Biometrics',
+            subtitle: 'Authenticate to enable biometric unlock for your vault',
+            confirmationRequired: false,
+          ),
+          iosPromptInfo: IosPromptInfo(
+            saveTitle: 'Enable biometric unlock for your vault',
+          ),
+        ),
+      );
     } catch (e, st) {
       _logger.severe(
         'Failed to write vault credential to biometric storage',
@@ -331,7 +360,19 @@ class QuickUnlockStorage {
         await storage.delete();
         _storageFileCached = null;
       } else {
-        await storage.write(json.encode(_knownVaultHashes));
+        await storage.write(
+          json.encode(_knownVaultHashes),
+          promptInfo: const PromptInfo(
+            androidPromptInfo: AndroidPromptInfo(
+              title: 'Update Biometric Credentials',
+              subtitle: 'Authenticate to update biometric credentials',
+              confirmationRequired: false,
+            ),
+            iosPromptInfo: IosPromptInfo(
+              saveTitle: 'Update biometric credentials for your vault',
+            ),
+          ),
+        );
       }
     } catch (e, stackTrace) {
       _logger.severe(
@@ -356,7 +397,8 @@ class QuickUnlockStorage {
     if (silentOnly) {
       return {};
     }
-    final appData = await appDataBloc.store.load();
+    final appData =
+        appDataBloc.store.cachedValue ?? await appDataBloc.store.load();
     if (appData.previousFiles.isEmpty) {
       _logger.fine('No previous files in app data. Skipping quick unlock.');
       return {};
@@ -366,30 +408,34 @@ class QuickUnlockStorage {
       return {};
     }
     // Only attempt native biometric read if there is at least one enrolled vault in previousFiles
-    // that actually exists on the filesystem / cloud storage.
-    final enrolledFiles = appData.previousFiles
-        .where((f) => f.biometricStoreName != null)
-        .toList();
-    if (enrolledFiles.isEmpty) {
+    final hasEnrolled =
+        appData.previousFiles.any((f) => f.biometricStoreName != null);
+    if (!hasEnrolled) {
       _logger.fine('No previous files have biometric quick unlock enrolled.');
-      return {};
-    }
-    bool anyExists = false;
-    for (final f in enrolledFiles) {
-      if (await f.checkExists(cloudStorageBloc)) {
-        anyExists = true;
-        break;
-      }
-    }
-    if (!anyExists) {
-      _logger.fine(
-        'None of the biometric-enrolled files currently exist on disk.',
-      );
       return {};
     }
 
     final storage = await _storageFile();
-    final jsonContent = await storage.read();
+    BiometricLifecycleTracker.instance.mark(
+      'post_auth_entry',
+      'biometric_prompt_invoked',
+    );
+    final jsonContent = await storage.read(
+      promptInfo: const PromptInfo(
+        androidPromptInfo: AndroidPromptInfo(
+          title: 'Unlock KeyNest',
+          subtitle: 'Verify biometrics to unlock your vault',
+          confirmationRequired: false,
+        ),
+        iosPromptInfo: IosPromptInfo(
+          accessTitle: 'Unlock KeyNest with biometrics',
+        ),
+      ),
+    );
+    BiometricLifecycleTracker.instance.mark(
+      'post_auth_entry',
+      'auth_success_storage_read',
+    );
     if (jsonContent == null) {
       _logger.finer('No quick unlock available.');
       return {};
@@ -683,10 +729,34 @@ class KdbxBloc {
     FileContent fileContent,
     bool addToQuickUnlock,
   ) async {
+    Future<void>? saveQuickUnlockFuture;
+    if (addToQuickUnlock) {
+      _openedFilesQuickUnlock.add(file);
+      _logger.fine(
+        'Prompting quick unlock enrollment concurrently with vault decryption.',
+      );
+      saveQuickUnlockFuture = quickUnlockStorage
+          .saveVaultCredential(
+            file,
+            credentials,
+          )
+          .catchError((Object e, StackTrace st) {
+            _openedFilesQuickUnlock.remove(file);
+            _logger.warning('Failed to persist quick unlock credentials', e, st);
+          });
+    }
+
     final readArgs = KdbxReadArgs(fileContent.content, credentials);
-    final kdbxReadFile = await readKdbxFile(kdbxFormat, readArgs);
+    final kdbxReadFile = await compute(
+      KdbxBloc.staticReadKdbxFile,
+      readArgs,
+    );
     final kdbxReadFileException = kdbxReadFile.exception;
     if (kdbxReadFileException != null) {
+      if (addToQuickUnlock) {
+        _openedFilesQuickUnlock.remove(file);
+        unawaited(quickUnlockStorage.removeVaultCredential(file.uuid));
+      }
       final mapping = <Type, Object Function()>{
         KdbxInvalidKeyException: () => KdbxInvalidKeyException(),
         KdbxCorruptedFileException: () => KdbxCorruptedFileException(''),
@@ -743,11 +813,23 @@ class KdbxBloc {
       return nameFromPath.isNotEmpty ? nameFromPath : 'Vault';
     }();
 
+    var biometricEnrolled = false;
+    if (saveQuickUnlockFuture != null) {
+      try {
+        await saveQuickUnlockFuture;
+        biometricEnrolled = _openedFilesQuickUnlock.contains(file);
+      } catch (e, st) {
+        _openedFilesQuickUnlock.remove(file);
+        _logger.warning('Biometric enrollment cancelled or failed', e, st);
+      }
+    }
+
     final openedFile = await appDataBloc.openedFile(
       file,
       name: resolvedVaultName,
       defaultColor: _defaultNextColor(),
-      biometricStoreName: addToQuickUnlock ? file.uuid : null,
+      biometricStoreName:
+          (addToQuickUnlock && biometricEnrolled) ? file.uuid : null,
     );
     final kdbxOpenedFile = KdbxOpenedFile(
       fileSource: file,
@@ -772,20 +854,129 @@ class KdbxBloc {
         opened.fileSource: opened.kdbxFile.credentials,
     });
 
-    if (addToQuickUnlock) {
-      _openedFilesQuickUnlock.add(file);
-      _logger.fine('adding file to quick unlock.');
-      try {
-        await quickUnlockStorage.saveVaultCredential(
-          file,
-          kdbxFile.credentials,
+    unawaited(_syncAutofillMirror(kdbxOpenedFile, fileContent.content));
+    return kdbxOpenedFile;
+  }
+
+  /// Registers a newly created [KdbxFile] directly into memory and app state
+  /// without re-reading from disk or re-running expensive KDF derivation / decryption.
+  Future<KdbxOpenedFile> registerCreatedKdbxFile({
+    required FileSource fileSource,
+    required KdbxFile kdbxFile,
+    required Uint8List bytes,
+    bool addToQuickUnlock = false,
+    Future<void>? saveQuickUnlockFuture,
+  }) async {
+    final fileContent = FileContent(bytes);
+    fileSource.setCachedContent(fileContent);
+
+    if (addToQuickUnlock && saveQuickUnlockFuture == null) {
+      _openedFilesQuickUnlock.add(fileSource);
+      _logger.fine(
+        'Prompting quick unlock enrollment for newly created vault.',
+      );
+      saveQuickUnlockFuture = quickUnlockStorage
+          .saveVaultCredential(
+            fileSource,
+            kdbxFile.credentials,
+          )
+          .catchError((Object e, StackTrace st) {
+            _openedFilesQuickUnlock.remove(fileSource);
+            _logger.warning('Failed to persist quick unlock credentials', e, st);
+          });
+    }
+
+    // make sure kdbxFile is not already opened with another FileSource.
+    final openedUuid = kdbxFile.body.rootGroup.uuid;
+    for (final openedFile in _openedFiles.value.values) {
+      if (openedFile.kdbxFile.body.rootGroup.uuid == openedUuid &&
+          openedFile.fileSource != fileSource) {
+        throw FileAlreadyOpenException(
+          newFileSource: fileSource,
+          newFile: kdbxFile,
+          openFileSource: openedFile.fileSource,
+          openFile: openedFile.kdbxFile,
         );
-      } catch (e, st) {
-        _openedFilesQuickUnlock.remove(file);
-        _logger.warning('Failed to persist quick unlock credentials', e, st);
       }
     }
-    await _syncAutofillMirror(kdbxOpenedFile, fileContent.content);
+
+    final resolvedVaultName = () {
+      final nameFromPath = fileSource.displayName;
+      if (nameFromPath.isNotEmpty &&
+          nameFromPath != 'Vault' &&
+          nameFromPath.toLowerCase() != 'vault') {
+        return nameFromPath;
+      }
+      final metaName = kdbxFile.body.meta.databaseName.get()?.trim();
+      if (metaName != null && metaName.isNotEmpty) {
+        final cleanMeta = FileSource.cleanDisplayName(metaName);
+        if (cleanMeta.isNotEmpty &&
+            cleanMeta != 'Vault' &&
+            cleanMeta.toLowerCase() != 'vault') {
+          return cleanMeta;
+        }
+      }
+      final rootName = kdbxFile.body.rootGroup.name.get()?.trim();
+      if (rootName != null && rootName.isNotEmpty) {
+        final cleanRoot = FileSource.cleanDisplayName(rootName);
+        if (cleanRoot.isNotEmpty &&
+            cleanRoot != 'Vault' &&
+            cleanRoot.toLowerCase() != 'vault') {
+          return cleanRoot;
+        }
+      }
+      return nameFromPath.isNotEmpty ? nameFromPath : 'Vault';
+    }();
+
+    var biometricEnrolled = false;
+    if (saveQuickUnlockFuture != null) {
+      try {
+        await saveQuickUnlockFuture;
+        biometricEnrolled = _openedFilesQuickUnlock.contains(fileSource);
+      } catch (e, st) {
+        _openedFilesQuickUnlock.remove(fileSource);
+        _logger.warning(
+          'Biometric enrollment cancelled or failed during creation',
+          e,
+          st,
+        );
+      }
+    }
+
+    final openedFile = await appDataBloc.openedFile(
+      fileSource,
+      name: resolvedVaultName,
+      defaultColor: _defaultNextColor(),
+      biometricStoreName:
+          (addToQuickUnlock && biometricEnrolled) ? fileSource.uuid : null,
+    );
+    final kdbxOpenedFile = KdbxOpenedFile(
+      fileSource: fileSource,
+      openedFile: openedFile,
+      kdbxFile: kdbxFile,
+      kdbxFileContent: fileContent,
+    );
+    _openedFiles.add(
+      OpenedKdbxFiles({
+        ..._openedFiles.value._files,
+        fileSource: kdbxOpenedFile,
+      }),
+    );
+    analytics.events.trackOpenFile(type: fileSource.typeDebug);
+    analytics.events.trackOpenFile2(
+      generator: kdbxFile.body.meta.generator.get() ?? 'NULL',
+      version: '${kdbxFile.header.version}',
+    );
+
+    QuickUnlockStorage.cacheSessionCredentials({
+      for (final opened in _openedFiles.value.values)
+        opened.fileSource: opened.kdbxFile.credentials,
+    });
+
+    KeyNestVaultScope.instance.setSelectedVault(this, kdbxFile);
+    KeyNestVaultScope.instance.notifyScopeChanged();
+
+    unawaited(_syncAutofillMirror(kdbxOpenedFile, bytes));
     return kdbxOpenedFile;
   }
 
@@ -840,6 +1031,9 @@ class KdbxBloc {
   /// user taps it. The manifest is the extension's own view, so intersecting
   /// with it is what keeps the two stores from disagreeing.
   Future<void> _publishAutofillIdentities() async {
+    if (!KeyNestPlatform.isIOS) {
+      return;
+    }
     final mirrored = (await autofillMirror.readManifest()).entries
         .map((e) => e.fileUuid)
         .toSet();
@@ -914,8 +1108,13 @@ class KdbxBloc {
 
     final missingDomainsToFetch = <String>{};
     final syncEntries = <AutofillSyncEntry>[];
+    var entryCount = 0;
     for (final file in openFiles) {
       for (final entry in file.body.rootGroup.getAllEntries()) {
+        if (++entryCount % 50 == 0) {
+          // Yield to Flutter event loop so large vaults don't block UI isolate or frame rendering
+          await Future<void>.delayed(Duration.zero);
+        }
         if (entry.isInRecycleBin()) {
           continue;
         }
@@ -1208,7 +1407,8 @@ class KdbxBloc {
   bool canSilentQuickUnlock() => QuickUnlockStorage.isSessionValid();
 
   Future<bool> trySilentRestoreAndUnlock([AppLocalizations? loc]) async {
-    final appData = await appDataBloc.store.load();
+    final appData =
+        appDataBloc.store.cachedValue ?? await appDataBloc.store.load();
     if (appData.previousFiles.isEmpty) {
       return false;
     }
@@ -1226,7 +1426,7 @@ class KdbxBloc {
         true,
       );
       if (opened > 0 || openedFilesKdbx.isNotEmpty) {
-        await syncAndroidAutofillStore(immediate: true);
+        unawaited(syncAndroidAutofillStore(immediate: true));
         return true;
       }
       return false;
@@ -1242,7 +1442,8 @@ class KdbxBloc {
     bool silentOnly = false,
   ]) => _quickUnlockCheckRunning ??= (() async {
     try {
-      final appData = await appDataBloc.store.load();
+      final appData =
+          appDataBloc.store.cachedValue ?? await appDataBloc.store.load();
       if (appData.previousFiles.isEmpty) {
         _logger.fine(
           'No previous files in app data. Skipping quick unlock check.',
@@ -1254,40 +1455,53 @@ class KdbxBloc {
         appDataBloc,
         silentOnly: silentOnly,
       );
+      final filesToOpen = unlockFiles.entries
+          .where((entry) => !_isOpen(entry.key))
+          .toList();
       var filesOpened = 0;
-      for (final file in unlockFiles.entries.where(
-        (entry) => !_isOpen(entry.key),
-      )) {
-        try {
-          if (loc != null) {
-            progress?.progressLabel = loc.openFileProgress(
-              file.key.displayName,
-              filesOpened + 1,
-              unlockFiles.length,
-            );
-          }
-          final open = StreamIterator(
-            openFile(file.key, file.value, addToQuickUnlock: false),
-          );
-          await open.moveNext();
-          filesOpened++;
-          _openedFilesQuickUnlock.add(file.key);
-          unawaited(
-            continueLoadInBackground(
-              open,
-              debugName:
-                  '${file.key.displayName} … (${filesOpened + 1} / ${unlockFiles.length})',
-              fileSource: file.key,
-            ),
-          );
-        } catch (e, stackTrace) {
-          _logger.severe(
-            'Panic, error while trying to open file from '
-            'quick unlock. ignoring file for now. ${file.key}',
-            e,
-            stackTrace,
+      if (filesToOpen.isNotEmpty) {
+        if (loc != null) {
+          progress?.progressLabel = loc.openFileProgress(
+            filesToOpen.first.key.displayName,
+            1,
+            unlockFiles.length,
           );
         }
+        BiometricLifecycleTracker.instance.mark(
+          'post_auth_entry',
+          'kdbx_decryption_start',
+        );
+        await Future.wait(
+          filesToOpen.map((file) async {
+            try {
+              final open = StreamIterator(
+                openFile(file.key, file.value, addToQuickUnlock: false),
+              );
+              await open.moveNext();
+              filesOpened++;
+              _openedFilesQuickUnlock.add(file.key);
+              unawaited(
+                continueLoadInBackground(
+                  open,
+                  debugName:
+                      '${file.key.displayName} … ($filesOpened / ${unlockFiles.length})',
+                  fileSource: file.key,
+                ),
+              );
+            } catch (e, stackTrace) {
+              _logger.severe(
+                'Panic, error while trying to open file from '
+                'quick unlock. ignoring file for now. ${file.key}',
+                e,
+                stackTrace,
+              );
+            }
+          }),
+        );
+        BiometricLifecycleTracker.instance.mark(
+          'post_auth_entry',
+          'kdbx_decryption_complete',
+        );
       }
       analytics.events.trackQuickUnlock(value: filesOpened);
       _openedFilesQuickUnlock.clear();
@@ -1389,6 +1603,8 @@ class KdbxBloc {
 
   Future<void> closeAllFiles({required bool clearQuickUnlock}) async {
     _logger.finer('Closing all files, clearing quick unlock.');
+    final filesToClose = _openedFiles.value.values.toList();
+    _openedFiles.add(OpenedKdbxFiles({}));
     if (!clearQuickUnlock && _pendingAutofillMirrorSyncs.isNotEmpty) {
       await flushPendingAutofillMirror();
     } else {
@@ -1396,7 +1612,7 @@ class KdbxBloc {
       _autofillMirrorDebounceTimer = null;
       _pendingAutofillMirrorSyncs.clear();
     }
-    for (final file in _openedFiles.value.values) {
+    for (final file in filesToClose) {
       file.kdbxFile.dispose();
     }
     QuickUnlockStorage.clearSession();
@@ -1412,11 +1628,10 @@ class KdbxBloc {
       // reason — autofill working while the app is locked is the point of it.
       await autofillMirror.clear();
       await autofillIdentities.publish({});
-      analytics.events.trackCloseAllFiles(count: _openedFiles.value.length);
+      analytics.events.trackCloseAllFiles(count: filesToClose.length);
     } else {
-      analytics.events.trackLockAllFiles(count: _openedFiles.value.length);
+      analytics.events.trackLockAllFiles(count: filesToClose.length);
     }
-    _openedFiles.add(OpenedKdbxFiles({}));
     KeyNestPendingLoginMemory.instance.clear();
     await AutofillService().clearCredentials();
     await AutofillService().clearPendingSaveRequest();
@@ -1426,7 +1641,13 @@ class KdbxBloc {
     KdbxReadArgs readArgs,
   ) async {
     initIsolate();
-    final kdbxFormat = KdbxFormat(FlutterArgon2());
+    KdbxFormat kdbxFormat;
+    try {
+      kdbxFormat = KdbxFormat(FlutterArgon2());
+    } catch (e) {
+      _logger.warning('Argon2 FFI unavailable, falling back to standard KdbxFormat', e);
+      kdbxFormat = KdbxFormat();
+    }
     return readKdbxFile(kdbxFormat, readArgs);
   }
 
@@ -1457,8 +1678,15 @@ class KdbxBloc {
     FileSource? customFileSource,
     bool addToQuickUnlock = false,
   }) async {
+    BiometricLifecycleTracker.instance.start('vault_creation');
+    BiometricLifecycleTracker.instance.mark('vault_creation', 'user_action');
     analytics.events.trackCreateFile();
     assert(!(databaseName.endsWith(AppConstants.kdbxExtension)));
+
+    BiometricLifecycleTracker.instance.mark(
+      'vault_creation',
+      'prerequisite_prep_start',
+    );
     final Credentials credentials;
     if (keyFileBytes != null && keyFileBytes.isNotEmpty) {
       final keyResult = KeyNestKeyFile.parse(keyFileBytes);
@@ -1471,6 +1699,33 @@ class KdbxBloc {
     } else {
       credentials = Credentials(ProtectedValue.fromString(password));
     }
+
+    FileSource? preResolvedFileSource;
+    if (customFileSource != null) {
+      preResolvedFileSource = customFileSource;
+    } else if (target == null) {
+      preResolvedFileSource = await _localFileSourceForDbName(databaseName);
+    }
+    BiometricLifecycleTracker.instance.mark(
+      'vault_creation',
+      'prerequisite_prep_complete',
+    );
+
+    Future<void>? quickUnlockFuture;
+    if (addToQuickUnlock && preResolvedFileSource != null) {
+      BiometricLifecycleTracker.instance.mark(
+        'vault_creation',
+        'biometric_api_invoked',
+      );
+      _openedFilesQuickUnlock.add(preResolvedFileSource);
+      quickUnlockFuture = quickUnlockStorage
+          .saveVaultCredential(preResolvedFileSource, credentials)
+          .catchError((Object e, StackTrace st) {
+            _openedFilesQuickUnlock.remove(preResolvedFileSource);
+            _logger.warning('Failed to persist quick unlock credentials', e, st);
+          });
+    }
+
     final kdbxFile = kdbxFormat.create(
       credentials,
       databaseName,
@@ -1480,16 +1735,17 @@ class KdbxBloc {
       kdbxFile,
       (bytes) async => bytes,
     );
-    FileSource fileSource;
-    if (customFileSource != null) {
-      await customFileSource.contentWrite(bytes, metadata: <String, dynamic>{});
-      fileSource = customFileSource;
-    } else if (target == null) {
-      final localSource = await _localFileSourceForDbName(databaseName);
-      await localSource.contentWrite(bytes, metadata: <String, dynamic>{});
-      fileSource = localSource;
+
+    final FileSource fileSource;
+    if (preResolvedFileSource != null) {
+      await preResolvedFileSource.contentWrite(
+        bytes,
+        metadata: <String, dynamic>{},
+      );
+      fileSource = preResolvedFileSource;
     } else {
-      final entity = await target.provider.createEntity(
+      assert(target != null);
+      final entity = await target!.provider.createEntity(
         CloudStorageSelectorSaveResult(
           target.parent,
           _fileNameForDbName(databaseName),
@@ -1497,25 +1753,47 @@ class KdbxBloc {
         bytes,
       );
       fileSource = entity;
-    }
-    if (openAfterCreate) {
-      final opened = await openFile(
-        fileSource,
-        credentials,
-        addToQuickUnlock: addToQuickUnlock,
-      ).last;
-      final kdbx = opened.kdbxOpenedFile?.kdbxFile;
-      if (kdbx != null) {
-        try {
-          unawaited(
-            KeyNestCloudSyncManager.instance.markVaultDirty(fileSource.uuid),
-          );
-          KeyNestCloudSyncManager.instance.schedulePostSaveSync(
-            kdbxFile: kdbx,
-            kdbxBloc: this,
-          );
-        } catch (_) {}
+      if (addToQuickUnlock && quickUnlockFuture == null) {
+        BiometricLifecycleTracker.instance.mark(
+          'vault_creation',
+          'biometric_api_invoked',
+        );
+        _openedFilesQuickUnlock.add(fileSource);
+        quickUnlockFuture = quickUnlockStorage
+            .saveVaultCredential(fileSource, credentials)
+            .catchError((Object e, StackTrace st) {
+              _openedFilesQuickUnlock.remove(fileSource);
+              _logger.warning(
+                'Failed to persist quick unlock credentials',
+                e,
+                st,
+              );
+            });
       }
+    }
+
+    if (openAfterCreate) {
+      final opened = await registerCreatedKdbxFile(
+        fileSource: fileSource,
+        kdbxFile: kdbxFile,
+        bytes: bytes,
+        addToQuickUnlock: addToQuickUnlock,
+        saveQuickUnlockFuture: quickUnlockFuture,
+      );
+      BiometricLifecycleTracker.instance.mark(
+        'vault_creation',
+        'vault_init_complete',
+      );
+      final kdbx = opened.kdbxFile;
+      try {
+        unawaited(
+          KeyNestCloudSyncManager.instance.markVaultDirty(fileSource.uuid),
+        );
+        KeyNestCloudSyncManager.instance.schedulePostSaveSync(
+          kdbxFile: kdbx,
+          kdbxBloc: this,
+        );
+      } catch (_) {}
     }
     return fileSource;
   }
@@ -1906,7 +2184,10 @@ class KdbxBloc {
         reloadedContent.content,
         file.kdbxFile.credentials,
       );
-      final kdbxReadFile = await readKdbxFile(kdbxFormat, readArgs);
+      final kdbxReadFile = await compute(
+        KdbxBloc.staticReadKdbxFile,
+        readArgs,
+      );
 
       _logger.info('\n\n\n===========\n\n\n');
       _logger.info('starting merge.');

@@ -66,9 +66,57 @@ class EntryTotpHelper {
     }
   }
 
+  /// Fast check to see if [entry] could possibly contain a TOTP configuration
+  /// before doing full decryption of protected strings and parsing.
+  static bool hasPotentialTotp(KdbxEntry entry) {
+    for (final stringEntry in entry.stringEntries) {
+      final key = stringEntry.key.key.toLowerCase();
+      if (key == 'otp' ||
+          key == 'totp' ||
+          key == 'otpauth' ||
+          key == '2fa' ||
+          key == 'totp seed' ||
+          key == 'hmacseed' ||
+          key.contains('authenticator') ||
+          key.contains('2fa') ||
+          key.contains('totp') ||
+          key.contains('otp')) {
+        return true;
+      }
+    }
+    for (final cd in entry.customData.entries) {
+      if (cd.key.startsWith('FieldType_') &&
+          cd.value.toLowerCase() == 'authenticator') {
+        return true;
+      }
+    }
+    final notes = entry.getString(KdbxKey('Notes'))?.getText();
+    if (notes != null && notes.contains('otpauth://')) {
+      return true;
+    }
+    return false;
+  }
+
+  static final Expando<bool> _hasTotpCache = Expando<bool>('hasTotpCache');
+
+  /// Invalidates the cached TOTP status for [entry].
+  static void invalidateCache(KdbxEntry entry) {
+    _hasTotpCache[entry] = null;
+  }
+
   /// Checks whether this entry has a TOTP secret configured.
   static bool hasTotp(KdbxEntry entry) {
-    return getOtpAuth(entry) != null;
+    final cached = _hasTotpCache[entry];
+    if (cached != null) {
+      return cached;
+    }
+    if (!hasPotentialTotp(entry)) {
+      _hasTotpCache[entry] = false;
+      return false;
+    }
+    final result = getOtpAuth(entry) != null;
+    _hasTotpCache[entry] = result;
+    return result;
   }
 
   /// Determines if the field providing the TOTP secret is stored as a [ProtectedValue].

@@ -47,6 +47,7 @@ import 'package:keynest/ui/widgets/keynest_tab_navigation_handler.dart';
 import 'package:keynest/ui/widgets/primary_button.dart';
 import 'package:keynest/ui/widgets/savefile/save_file_diag_button.dart';
 import 'package:keynest/ui/widgets/shortcut/keynest_intents.dart';
+import 'package:keynest/utils/biometric_lifecycle_tracker.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
@@ -113,21 +114,36 @@ class EntryViewModel implements Comparable<EntryViewModel> {
     return _cachedSearchableValues = values;
   }
 
-  static final hasSchemaRegexp = RegExp(r'^https?://');
-  static final hasNewline = RegExp('[\r\n]');
+  static final Map<KdbxFile, Color?> _fileColorCache = <KdbxFile, Color?>{};
+  static final Expando<List<String>> _groupNamesCache =
+      Expando<List<String>>();
 
   static Color? _resolveFileColor(KdbxBloc kdbxBloc, KdbxEntry entry) {
     try {
-      return kdbxBloc.fileForKdbxFile(entry.file).openedFile.color;
+      final file = entry.file;
+      if (_fileColorCache.containsKey(file)) {
+        return _fileColorCache[file];
+      }
+      final color = kdbxBloc.fileForKdbxFile(file).openedFile.color;
+      _fileColorCache[file] = color;
+      return color;
     } catch (_) {
       return null;
     }
   }
 
-  static List<String> _createGroupNames(KdbxGroup group) => group.breadcrumbs
-      .map((e) => e.name.get() ?? '')
-      .where((e) => e.isNotEmpty)
-      .toList();
+  static List<String> _createGroupNames(KdbxGroup group) {
+    final cached = _groupNamesCache[group];
+    if (cached != null) {
+      return cached;
+    }
+    final names = group.breadcrumbs
+        .map((e) => e.name.get() ?? '')
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    _groupNamesCache[group] = names;
+    return names;
+  }
 
   String? _normalizeUrl() {
     final url = entry.getString(websiteKey)?.getText()?.trim();
@@ -136,8 +152,17 @@ class EntryViewModel implements Comparable<EntryViewModel> {
     }
     try {
       // If the url contains newlines, just take the first line.
-      var urlToParse = url.split(hasNewline).first;
-      if (!url.startsWith(hasSchemaRegexp)) {
+      final newlineIdx = url.indexOf('\n');
+      final crIdx = url.indexOf('\r');
+      var urlToParse = url;
+      if (newlineIdx != -1 || crIdx != -1) {
+        final cut = (newlineIdx != -1 && crIdx != -1)
+            ? (newlineIdx < crIdx ? newlineIdx : crIdx)
+            : (newlineIdx != -1 ? newlineIdx : crIdx);
+        urlToParse = url.substring(0, cut);
+      }
+      final lower = urlToParse.toLowerCase();
+      if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
         urlToParse = 'http://$urlToParse'; // NON-NLS
       }
       final parsed = Uri.parse(urlToParse);
@@ -2119,18 +2144,31 @@ class _PasswordListContentState extends State<PasswordListContent>
     _logger.finer('Initializing password list content.');
     WidgetsBinding.instance.addObserver(this);
     KeyNestVaultScope.instance.addListener(_onVaultScopeChanged);
-    _filterFocusNode.addListener(_onFilterFocusChanged);
-    KeyNestVaultScope.instance.init().then((_) {
-      if (mounted) {
-        _updateAllEntries();
-      }
-    });
+    if (!KeyNestVaultScope.instance.isInitialized) {
+      KeyNestVaultScope.instance.init().then((_) {
+        if (mounted) {
+          _updateAllEntries();
+        }
+      });
+    }
     _updateAllEntries();
     _groupFilterNotifier.addListener(_updateAllEntries);
     _updateAutofillPrefs();
     _updateAutofillMetadata();
     _updateDismissedBanners(widget.appData);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      BiometricLifecycleTracker.instance.stop(
+        'post_auth_entry',
+        'first_usable_frame',
+      );
+      BiometricLifecycleTracker.instance.stop(
+        'vault_creation',
+        'first_usable_frame',
+      );
+      BiometricLifecycleTracker.instance.stop(
+        'open_existing_vault',
+        'first_usable_frame',
+      );
       if (mounted) {
         KeyNestAutofillSaveDialog.checkAndShow(context, widget.kdbxBloc);
       }
@@ -2222,24 +2260,25 @@ class _PasswordListContentState extends State<PasswordListContent>
       return;
     }
     if (KeyNestPlatform.isIOS) {
-      // The autofill_service plugin has no iOS implementation — its method
-      // channel answers every call with a version string — so asking it here
-      // would only throw. iOS keeps the answer in the credential identity
-      // store instead.
-      _iosAutofillEnabled = await context
+      final enabled = await context
           .read<KdbxBloc>()
           .autofillIdentities
           .isEnabled();
-      _logger.fine(
-        'autofill credential provider enabled: $_iosAutofillEnabled',
-      );
+      if (!mounted || _iosAutofillEnabled == enabled) {
+        return;
+      }
+      setState(() {
+        _iosAutofillEnabled = enabled;
+      });
     } else {
-      _autofillStatus = await AutofillService().status();
+      final status = await AutofillService().status();
+      if (!mounted || _autofillStatus == status) {
+        return;
+      }
+      setState(() {
+        _autofillStatus = status;
+      });
     }
-    if (!mounted) {
-      return;
-    }
-    setState(() {});
   }
 
   void _updateAutofillMetadata() {
@@ -2338,8 +2377,8 @@ class _PasswordListContentState extends State<PasswordListContent>
               _entryViewModelCache[e] = vm;
               return vm;
             })
-            .toList(growable: false)
-          ..sort((a, b) => a.compareTo(b));
+            .toList(growable: true);
+    _sortEntries(allEntries, KeyNestVaultScope.instance.sortMode);
     _allEntries = allEntries;
     if (_entryViewModelCache.length > allEntries.length * 2) {
       final activeEntries = sourceEntries.toSet();
@@ -2360,6 +2399,39 @@ class _PasswordListContentState extends State<PasswordListContent>
       ' ${watch.elapsedMilliseconds}ms',
     );
     setState(() {});
+  }
+
+  static void _sortEntries(List<EntryViewModel> list, VaultSortMode sortMode) {
+    switch (sortMode) {
+      case VaultSortMode.alphabeticalAsc:
+        list.sort((a, b) => a.compareTo(b));
+        break;
+      case VaultSortMode.alphabeticalDesc:
+        list.sort((a, b) => b.compareTo(a));
+        break;
+      case VaultSortMode.lastModified:
+        list.sort((a, b) {
+          final aMod =
+              a.entry.times.lastModificationTime.get() ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final bMod =
+              b.entry.times.lastModificationTime.get() ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          return bMod.compareTo(aMod);
+        });
+        break;
+      case VaultSortMode.dateCreated:
+        list.sort((a, b) {
+          final aCreated =
+              a.entry.times.creationTime.get() ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          final bCreated =
+              b.entry.times.creationTime.get() ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          return bCreated.compareTo(aCreated);
+        });
+        break;
+    }
   }
 
   @override
@@ -2938,38 +3010,13 @@ class _PasswordListContentState extends State<PasswordListContent>
     }
 
     if (entries != null) {
-      final sortedList = List<EntryViewModel>.from(entries);
-      switch (scope.sortMode) {
-        case VaultSortMode.alphabeticalAsc:
-          sortedList.sort((a, b) => a.compareTo(b));
-          break;
-        case VaultSortMode.alphabeticalDesc:
-          sortedList.sort((a, b) => b.compareTo(a));
-          break;
-        case VaultSortMode.lastModified:
-          sortedList.sort((a, b) {
-            final aMod =
-                a.entry.times.lastModificationTime.get() ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final bMod =
-                b.entry.times.lastModificationTime.get() ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            return bMod.compareTo(aMod);
-          });
-          break;
-        case VaultSortMode.dateCreated:
-          sortedList.sort((a, b) {
-            final aCreated =
-                a.entry.times.creationTime.get() ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final bCreated =
-                b.entry.times.creationTime.get() ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            return bCreated.compareTo(aCreated);
-          });
-          break;
+      if (identical(entries, _allEntries)) {
+        // _allEntries is already pre-sorted by _updateAllEntries according to scope.sortMode.
+      } else {
+        final sortedList = List<EntryViewModel>.from(entries);
+        _sortEntries(sortedList, scope.sortMode);
+        entries = sortedList;
       }
-      entries = sortedList;
     }
 
     final listPrefix = [

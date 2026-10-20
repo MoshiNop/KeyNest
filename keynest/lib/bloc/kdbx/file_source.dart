@@ -163,10 +163,15 @@ abstract class FileSource {
     await content().last;
   }
 
+  void setCachedContent(FileContent content) {
+    _cached = content;
+  }
+
   Stream<FileContent> content({bool updateCache = true}) async* {
     if (_cached != null) {
-      //  memory cache is perfectly fine.
+      // Memory cache is perfectly fine; avoid redundant re-reads.
       yield _cached!;
+      return;
     }
     await for (final content in load()) {
       yield content;

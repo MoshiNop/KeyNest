@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/utils/dialog_utils.dart';
 
 enum CustomFieldKind {
   text,
@@ -234,6 +235,17 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
       orElse: () => fieldTypes.first,
     );
 
+    final String titleText;
+    if (kind == CustomFieldKind.authenticator) {
+      titleText = existing != null
+          ? 'Edit Authenticator (2FA)'
+          : 'Add Authenticator (2FA)';
+    } else {
+      titleText = existing != null
+          ? 'Edit ${typeItem.title} Field'
+          : 'Add ${typeItem.title} Field';
+    }
+
     return showDialog<CustomFieldModel>(
       context: context,
       builder: (ctx) {
@@ -242,25 +254,22 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
             final isDark = Theme.of(ctx).brightness == Brightness.dark;
 
             return AlertDialog(
+              clipBehavior: Clip.antiAlias,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
-              title: Row(
-                children: [
-                  Icon(
-                    typeItem.icon,
-                    color: isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    existing != null
-                        ? 'Edit ${typeItem.title} Field'
-                        : 'Add ${typeItem.title} Field',
-                  ),
-                ],
+              insetPadding: KeyNestDialogDefaults.insetPadding,
+              actionsOverflowDirection: VerticalDirection.down,
+              actionsPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              title: KeyNestDialogTitle(
+                title: titleText,
+                icon: typeItem.icon,
+                iconColor: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
               ),
               content: SingleChildScrollView(
                 child: Column(
@@ -298,30 +307,33 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                                 : KeyNestPalette.cardBorderLight,
                           ),
                         ),
-                        child: SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(
-                            isYesNoTrue ? 'State: On' : 'State: Off',
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: Text(
-                            isYesNoTrue ? 'Enabled' : 'Disabled',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark
-                                  ? KeyNestPalette.textSecondaryDark
-                                  : KeyNestPalette.textSecondaryLight,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              isYesNoTrue ? 'State: On' : 'State: Off',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
                             ),
+                            subtitle: Text(
+                              isYesNoTrue ? 'Enabled' : 'Disabled',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? KeyNestPalette.textSecondaryDark
+                                    : KeyNestPalette.textSecondaryLight,
+                              ),
+                            ),
+                            value: isYesNoTrue,
+                            activeThumbColor: isDark
+                                ? KeyNestPalette.primaryDark
+                                : KeyNestPalette.primary,
+                            onChanged: (val) {
+                              setDialogState(() {
+                                isYesNoTrue = val;
+                              });
+                            },
                           ),
-                          value: isYesNoTrue,
-                          activeThumbColor: isDark
-                              ? KeyNestPalette.primaryDark
-                              : KeyNestPalette.primary,
-                          onChanged: (val) {
-                            setDialogState(() {
-                              isYesNoTrue = val;
-                            });
-                          },
                         ),
                       ),
                     ] else if (kind == CustomFieldKind.date) ...[

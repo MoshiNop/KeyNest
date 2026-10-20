@@ -3,6 +3,7 @@ import 'package:kdbx/kdbx.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
+import 'package:keynest/utils/dialog_utils.dart';
 
 class KeyNestAddFieldResult {
   const KeyNestAddFieldResult({
@@ -414,20 +415,20 @@ class KeyNestAddFieldSheet extends StatelessWidget {
           builder: (context, setDialogState) {
             final isValid = controller.text.trim().isNotEmpty;
             return AlertDialog(
+              clipBehavior: Clip.antiAlias,
               backgroundColor: isDark
                   ? KeyNestPalette.cardDark
                   : KeyNestPalette.cardLight,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
               ),
-              title: Text(
-                label,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
+              insetPadding: KeyNestDialogDefaults.insetPadding,
+              actionsOverflowDirection: VerticalDirection.down,
+              title: KeyNestDialogTitle(
+                title: label,
               ),
-              content: TextField(
+              content: SingleChildScrollView(
+                child: TextField(
                 controller: controller,
                 autofocus: true,
                 textCapitalization: TextCapitalization.words,
@@ -449,6 +450,7 @@ class KeyNestAddFieldSheet extends StatelessWidget {
                     Navigator.of(dialogCtx).pop(trimmed);
                   }
                 },
+              ),
               ),
               actions: [
                 TextButton(
@@ -501,30 +503,25 @@ class KeyNestAddFieldSheet extends StatelessWidget {
           builder: (context, setDialogState) {
             final isValid = controller.text.trim().isNotEmpty;
             return AlertDialog(
+              clipBehavior: Clip.antiAlias,
               backgroundColor: isDark
                   ? KeyNestPalette.cardDark
                   : KeyNestPalette.cardLight,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
               ),
-              title: Row(
-                children: [
-                  Icon(
-                    Icons.toggle_on_rounded,
-                    color: isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Add Switch Field',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
+              insetPadding: KeyNestDialogDefaults.insetPadding,
+              actionsOverflowDirection: VerticalDirection.down,
+              actionsPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              title: KeyNestDialogTitle(
+                title: 'Add Switch Field',
+                icon: Icons.toggle_on_rounded,
+                iconColor: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
               ),
               content: SingleChildScrollView(
                 child: Column(
@@ -566,30 +563,33 @@ class KeyNestAddFieldSheet extends StatelessWidget {
                               : KeyNestPalette.cardBorderLight,
                         ),
                       ),
-                      child: SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          isTrue ? 'State: On' : 'State: Off',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(
-                          isTrue ? 'Enabled' : 'Disabled',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark
-                                ? KeyNestPalette.textSecondaryDark
-                                : KeyNestPalette.textSecondaryLight,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            isTrue ? 'State: On' : 'State: Off',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
+                          subtitle: Text(
+                            isTrue ? 'Enabled' : 'Disabled',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark
+                                  ? KeyNestPalette.textSecondaryDark
+                                  : KeyNestPalette.textSecondaryLight,
+                            ),
+                          ),
+                          value: isTrue,
+                          activeThumbColor: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
+                          onChanged: (val) {
+                            setDialogState(() {
+                              isTrue = val;
+                            });
+                          },
                         ),
-                        value: isTrue,
-                        activeColor: isDark
-                            ? KeyNestPalette.primaryDark
-                            : KeyNestPalette.primary,
-                        onChanged: (val) {
-                          setDialogState(() {
-                            isTrue = val;
-                          });
-                        },
                       ),
                     ),
                   ],

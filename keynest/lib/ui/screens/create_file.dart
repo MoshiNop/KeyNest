@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' as io;
 import 'dart:typed_data';
 
@@ -842,9 +843,11 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
         if (!mounted) {
           return;
         }
-        await Navigator.of(
-          context,
-        ).pushAndRemoveUntil(MainAppScaffold.route(), (route) => false);
+        unawaited(
+          Navigator.of(
+            context,
+          ).pushAndRemoveUntil(MainAppScaffold.route(), (route) => false),
+        );
       } on FileExistsException catch (e, stackTrace) {
         _logger.warning('Showing file exists error dialog.', e, stackTrace);
         if (!mounted) {

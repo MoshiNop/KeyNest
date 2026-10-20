@@ -47,6 +47,7 @@ import 'package:keynest/ui/widgets/keynest_progress_indicator.dart';
 import 'package:keynest/ui/widgets/link_button.dart';
 import 'package:keynest/ui/widgets/password_input_field.dart';
 import 'package:keynest/ui/widgets/primary_button.dart';
+import 'package:keynest/utils/biometric_lifecycle_tracker.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/format_utils.dart';
@@ -1804,6 +1805,11 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
       }
 
       final stopWatch = Stopwatch();
+      BiometricLifecycleTracker.instance.start('open_existing_vault');
+      BiometricLifecycleTracker.instance.mark(
+        'open_existing_vault',
+        'credential_prep',
+      );
       try {
         stopWatch.start();
         final Credentials credentials;
@@ -1829,6 +1835,10 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
         _loadingFile = openIt.moveNext();
         setState(() {});
         final result = await _loadingFile;
+        BiometricLifecycleTracker.instance.mark(
+          'open_existing_vault',
+          'kdbx_loading_init',
+        );
         _logger.info('waited for file $result');
         await KeyNestPreferencesService.setCompletedOnboarding(true);
         final fileResult = openIt.current;
@@ -1888,13 +1898,19 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
             fileSource: fileSource,
           ),
         );
-        if (await AutofillService().hasPendingAutofillRequest() && mounted) {
+        if (KeyNestPlatform.isAndroid &&
+            await AutofillService().hasPendingAutofillRequest() &&
+            mounted) {
           await AutofillResumeHelper.resumeAutofill(context, kdbxBloc);
           return;
         }
-        await Navigator.of(
-          context,
-        ).pushAndRemoveUntil(MainAppScaffold.route(), (route) => false);
+        if (mounted) {
+          unawaited(
+            Navigator.of(
+              context,
+            ).pushAndRemoveUntil(MainAppScaffold.route(), (route) => false),
+          );
+        }
       } on KdbxInvalidKeyException catch (e, stackTrace) {
         _logger.fine('Invalid credentials.', e, stackTrace);
         analytics.trackTiming(

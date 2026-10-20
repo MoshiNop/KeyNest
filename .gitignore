@@ -280,3 +280,7 @@ desktop.ini
 *.swp
 *~
 *.bak
+
+# Local reference materials
+Reference/
+

@@ -214,7 +214,9 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen>
         final uri = Uri.parse(scheme);
         if (await canLaunchUrl(uri)) {
           final success = await launchUrl(uri);
-          if (success) return true;
+          if (success) {
+            return true;
+          }
         }
       } catch (_) {}
     }
@@ -379,22 +381,24 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen>
                     if (isPermissionDenied) ...[
                       ElevatedButton.icon(
                         onPressed: () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           final opened = await _openAppSettings();
                           if (opened) {
                             _openedSettings = true;
                           } else {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context)
-                                ..clearSnackBars()
-                                ..showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'Could not open settings automatically. Please enable camera permission in device Settings.',
-                                    ),
-                                    duration: Duration(milliseconds: 3000),
-                                  ),
-                                );
+                            if (!mounted) {
+                              return;
                             }
+                            messenger
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Could not open settings automatically. Please enable camera permission in device Settings.',
+                                  ),
+                                  duration: Duration(milliseconds: 3000),
+                                ),
+                              );
                           }
                         },
                         icon: const Icon(Icons.settings_rounded, size: 18),

@@ -694,7 +694,7 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                     IgnorePointer(
                                       child: Switch.adaptive(
                                         value: isTrue,
-                                        activeColor: isDark
+                                        activeThumbColor: isDark
                                             ? KeyNestPalette.primaryDark
                                             : KeyNestPalette.primary,
                                         onChanged: null,

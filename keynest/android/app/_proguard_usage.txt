@@ -40620,7 +40620,6 @@ com.moshinop.autofill_service.AssistStructureParser:
 com.moshinop.autofill_service.AutofillCredentialStore:
     public static synthetic void clearAll$default(com.moshinop.autofill_service.AutofillCredentialStore,android.content.Context,int,java.lang.Object)
     public static synthetic void clearSessionAuth$default(com.moshinop.autofill_service.AutofillCredentialStore,java.lang.String,int,java.lang.Object)
-    public final long getLastActiveTimestamp()
     public final long getLastUnlockedTimestamp()
     public final void lock()
     public final void setAutoLockSeconds(int)

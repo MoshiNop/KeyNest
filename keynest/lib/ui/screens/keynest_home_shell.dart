@@ -97,10 +97,14 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
   bool _isSelectionMode = false;
   final Map<int, int> _tabCounts = {};
   final Map<int, KeyNestTabNavigationHandler> _tabHandlers = {};
+  late final Set<int> _activatedTabs;
 
   @override
   void initState() {
     super.initState();
+    final initialTab = KeyNestVaultScope.instance.activeTabIndex ?? 0;
+    _currentTabIndex = initialTab;
+    _activatedTabs = {initialTab};
     _tabAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 240),
@@ -131,10 +135,14 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
       final scope = KeyNestVaultScope.instance;
       final targetTab = scope.activeTabIndex;
 
-      if (targetTab != null && targetTab != _currentTabIndex) {
-        _animateToTab(targetTab);
+      if (targetTab != null) {
+        _activatedTabs.add(targetTab);
+        if (targetTab != _currentTabIndex) {
+          _animateToTab(targetTab);
+        }
       }
       _tabCounts.clear();
+      _isComputingTabCounts = false;
       setState(() {});
     }
   }
@@ -170,9 +178,9 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
 
     final favOnly = scope.favoritesOnly;
     final selectedCat = scope.selectedCategory?.toLowerCase();
-
     for (final e in candidateEntries) {
-      if (!isInsideTrash && KeyNestItemTypeHelper.isEntryInTrash(e)) {
+      // candidateEntries is already filtered by excludeTrash: !isInsideTrash
+      if (isInsideTrash && !KeyNestItemTypeHelper.isEntryInTrash(e)) {
         continue;
       }
       if (favOnly) {
@@ -214,9 +222,22 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
     _tabCounts[4] = tfas;
   }
 
+  bool _isComputingTabCounts = false;
+
   int _getTabCount(int tabIndex, KdbxBloc kdbxBloc) {
     if (!_tabCounts.containsKey(tabIndex)) {
-      _computeAllBaselineTabCounts(kdbxBloc);
+      if (!_isComputingTabCounts) {
+        _isComputingTabCounts = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _computeAllBaselineTabCounts(kdbxBloc);
+            _isComputingTabCounts = false;
+            if (mounted) {
+              setState(() {});
+            }
+          }
+        });
+      }
     }
     return _tabCounts[tabIndex] ?? 0;
   }
@@ -436,6 +457,8 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
       end: Offset.zero,
     ).animate(curvedAnimation);
 
+    _activatedTabs.add(targetIndex);
+
     setState(() {
       _animatingFromIndex = fromIndex;
       _currentTabIndex = targetIndex;
@@ -445,6 +468,9 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
   }
 
   Widget _buildTabItem(int index, Widget child) {
+    if (!_activatedTabs.contains(index)) {
+      return const SizedBox.shrink();
+    }
     final isCurrent = index == _currentTabIndex;
     final isOutgoing = index == _animatingFromIndex;
     final isVisible = isCurrent || isOutgoing;
@@ -624,81 +650,94 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                           // Tab 0: Secrets (Passwords)
                           _buildTabItem(
                             0,
-                            PasswordList(
-                              selectedEntry: widget.selectedEntry,
-                              onEntrySelected: _handleEntrySelected,
-                              embedded: true,
-                              onCountChanged: (count) =>
-                                  _updateTabCount(0, count),
-                              onSelectionModeChanged: (isSelecting) {
-                                if (_isSelectionMode != isSelecting) {
-                                  setState(() {
-                                    _isSelectionMode = isSelecting;
-                                  });
-                                }
-                              },
-                              onRegisterNavigationHandler: (h) =>
-                                  _tabHandlers[0] = h,
-                            ),
+                            _activatedTabs.contains(0)
+                                ? PasswordList(
+                                    selectedEntry: widget.selectedEntry,
+                                    onEntrySelected: _handleEntrySelected,
+                                    embedded: true,
+                                    onCountChanged: (count) =>
+                                        _updateTabCount(0, count),
+                                    onSelectionModeChanged: (isSelecting) {
+                                      if (_isSelectionMode != isSelecting) {
+                                        setState(() {
+                                          _isSelectionMode = isSelecting;
+                                        });
+                                      }
+                                    },
+                                    onRegisterNavigationHandler: (h) =>
+                                        _tabHandlers[0] = h,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                           // Tab 1: Records
                           _buildTabItem(
                             1,
-                            RecordsTab(
-                              onEntrySelected: widget.onEntrySelected != null
-                                  ? (entry) => _handleEntrySelected(
-                                      entry,
-                                      EntrySelectionType.activeOpen,
-                                    )
-                                  : null,
-                              onCountChanged: (count) =>
-                                  _updateTabCount(1, count),
-                              onRegisterNavigationHandler: (h) =>
-                                  _tabHandlers[1] = h,
-                            ),
+                            _activatedTabs.contains(1)
+                                ? RecordsTab(
+                                    onEntrySelected:
+                                        widget.onEntrySelected != null
+                                        ? (entry) => _handleEntrySelected(
+                                            entry,
+                                            EntrySelectionType.activeOpen,
+                                          )
+                                        : null,
+                                    onCountChanged: (count) =>
+                                        _updateTabCount(1, count),
+                                    onRegisterNavigationHandler: (h) =>
+                                        _tabHandlers[1] = h,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                           // Tab 2: Cards
                           _buildTabItem(
                             2,
-                            CardsTab(
-                              onEntrySelected: widget.onEntrySelected != null
-                                  ? (entry) => _handleEntrySelected(
-                                      entry,
-                                      EntrySelectionType.activeOpen,
-                                    )
-                                  : null,
-                              onCountChanged: (count) =>
-                                  _updateTabCount(2, count),
-                              onRegisterNavigationHandler: (h) =>
-                                  _tabHandlers[2] = h,
-                            ),
+                            _activatedTabs.contains(2)
+                                ? CardsTab(
+                                    onEntrySelected:
+                                        widget.onEntrySelected != null
+                                        ? (entry) => _handleEntrySelected(
+                                            entry,
+                                            EntrySelectionType.activeOpen,
+                                          )
+                                        : null,
+                                    onCountChanged: (count) =>
+                                        _updateTabCount(2, count),
+                                    onRegisterNavigationHandler: (h) =>
+                                        _tabHandlers[2] = h,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                           // Tab 3: Notes
                           _buildTabItem(
                             3,
-                            NotesTab(
-                              onEntrySelected: widget.onEntrySelected != null
-                                  ? (entry) => _handleEntrySelected(
-                                      entry,
-                                      EntrySelectionType.activeOpen,
-                                    )
-                                  : null,
-                              onCountChanged: (count) =>
-                                  _updateTabCount(3, count),
-                              onRegisterNavigationHandler: (h) =>
-                                  _tabHandlers[3] = h,
-                            ),
+                            _activatedTabs.contains(3)
+                                ? NotesTab(
+                                    onEntrySelected:
+                                        widget.onEntrySelected != null
+                                        ? (entry) => _handleEntrySelected(
+                                            entry,
+                                            EntrySelectionType.activeOpen,
+                                          )
+                                        : null,
+                                    onCountChanged: (count) =>
+                                        _updateTabCount(3, count),
+                                    onRegisterNavigationHandler: (h) =>
+                                        _tabHandlers[3] = h,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                           // Tab 4: 2FA
                           _buildTabItem(
                             4,
-                            AuthenticatorTab(
-                              isActive: _currentTabIndex == 4,
-                              onCountChanged: (count) =>
-                                  _updateTabCount(4, count),
-                              onRegisterNavigationHandler: (h) =>
-                                  _tabHandlers[4] = h,
-                            ),
+                            _activatedTabs.contains(4)
+                                ? AuthenticatorTab(
+                                    isActive: _currentTabIndex == 4,
+                                    onCountChanged: (count) =>
+                                        _updateTabCount(4, count),
+                                    onRegisterNavigationHandler: (h) =>
+                                        _tabHandlers[4] = h,
+                                  )
+                                : const SizedBox.shrink(),
                           ),
                         ],
                       ),

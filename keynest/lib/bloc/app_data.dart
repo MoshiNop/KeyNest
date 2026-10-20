@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:built_collection/built_collection.dart';
@@ -458,14 +459,24 @@ class AppDataBloc {
     return openedFile;
   });
 
+  Future<void> _updateQueue = Future.value();
+
   Future<T> update<T>(
     T Function(AppDataBuilder builder, AppData data) updater,
-  ) async {
-    final appData = await store.load();
-    late T ret;
-    final newAppData = appData.rebuild((b) => ret = updater(b, appData));
-    await store.save(newAppData);
-    return ret;
+  ) {
+    final completer = Completer<T>();
+    _updateQueue = _updateQueue.then((_) async {
+      try {
+        final appData = store.cachedValue ?? await store.load();
+        late T ret;
+        final newAppData = appData.rebuild((b) => ret = updater(b, appData));
+        await store.save(newAppData);
+        completer.complete(ret);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
   }
 
   Future<AppDataTheme?> updateNextTheme() async {

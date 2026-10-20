@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:autofill_service/autofill_service.dart';
 import 'package:flutter/material.dart';
 import 'package:keynest/bloc/app_data.dart';
@@ -10,6 +12,7 @@ import 'package:keynest/ui/screens/main_app_scaffold.dart';
 import 'package:keynest/ui/screens/onboarding/onboarding.dart';
 import 'package:keynest/ui/screens/select_file_screen.dart';
 import 'package:keynest/ui/widgets/primary_button.dart';
+import 'package:keynest/utils/biometric_lifecycle_tracker.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/platform.dart';
 import 'package:logging/logging.dart';
@@ -68,21 +71,11 @@ class _LockedScreenState extends State<LockedScreen> {
     );
 
     if (hasBiometricsEnrolled) {
-      if (widget.isAutofill) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _attemptQuickUnlock();
-          }
-        });
-      } else {
-        // Slight delay so route transition and window focus settle completely
-        // before presenting the native biometric authentication dialog
-        Future.delayed(const Duration(milliseconds: 350), () {
-          if (mounted) {
-            _attemptQuickUnlock();
-          }
-        });
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _attemptQuickUnlock();
+        }
+      });
     }
   }
 
@@ -113,9 +106,16 @@ class _LockedScreenState extends State<LockedScreen> {
       _errorMessage = null;
     });
 
+    BiometricLifecycleTracker.instance.start('post_auth_entry');
+    BiometricLifecycleTracker.instance.mark(
+      'post_auth_entry',
+      'biometric_prompt_start',
+    );
+
+    var navigatedAway = false;
     try {
       var isSilentValid = kdbxBloc.canSilentQuickUnlock();
-      if (!isSilentValid && KeyNestPlatform.isAndroid) {
+      if (!isSilentValid && KeyNestPlatform.isAndroid && widget.isAutofill) {
         await kdbxBloc.trySilentRestoreAndUnlock(loc);
         isSilentValid =
             kdbxBloc.canSilentQuickUnlock() ||
@@ -128,10 +128,12 @@ class _LockedScreenState extends State<LockedScreen> {
         'Quick unlock completed: opened=$opened, silent=$isSilentValid, hasOpenedFiles=${kdbxBloc.openedFilesKdbx.isNotEmpty}',
       );
       if ((opened > 0 || kdbxBloc.openedFilesKdbx.isNotEmpty) && mounted) {
-        final isAutofillFlow =
-            widget.isAutofill ||
-            await AutofillService().hasPendingAutofillRequest();
-        if (isAutofillFlow && mounted) {
+        navigatedAway = true;
+        BiometricLifecycleTracker.instance.mark(
+          'post_auth_entry',
+          'navigation_start',
+        );
+        if (widget.isAutofill && mounted) {
           _hasFilled = true;
           await AutofillResumeHelper.resumeAutofill(context, kdbxBloc);
           if (mounted) {
@@ -144,9 +146,11 @@ class _LockedScreenState extends State<LockedScreen> {
           return;
         }
         if (mounted) {
-          await Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
-            MainAppScaffold.route(),
-            (_) => false,
+          unawaited(
+            Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+              MainAppScaffold.route(),
+              (_) => false,
+            ),
           );
         }
         return;
@@ -159,7 +163,7 @@ class _LockedScreenState extends State<LockedScreen> {
         });
       }
     } finally {
-      if (mounted) {
+      if (mounted && !navigatedAway) {
         setState(() => _isUnlocking = false);
       }
     }
@@ -170,8 +174,10 @@ class _LockedScreenState extends State<LockedScreen> {
     final loc = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final kdbxBloc = context.watch<KdbxBloc>();
-    final hasQuick = kdbxBloc.hasQuickUnlockOpen() || _supportsBiometrics;
+    final hasQuickUnlock = context.select<KdbxBloc, bool>(
+      (bloc) => bloc.hasQuickUnlockOpen(),
+    );
+    final hasQuick = hasQuickUnlock || _supportsBiometrics;
 
     final primaryColor = isDark
         ? KeyNestTokens.darkPrimary
@@ -430,7 +436,8 @@ class _LockedScreenState extends State<LockedScreen> {
                         icon: const Icon(Icons.swap_horiz_rounded, size: 18),
                         label: 'Switch Vault or Open File',
                         onClick: () async {
-                          await kdbxBloc.closeAllFiles(clearQuickUnlock: true);
+                          final bloc = context.read<KdbxBloc>();
+                          await bloc.closeAllFiles(clearQuickUnlock: true);
                           if (context.mounted) {
                             await SelectFileScreen.navigate(context);
                           }

@@ -8,6 +8,7 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:keynest/bloc/analytics.dart';
 import 'package:keynest/env/_base.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
+import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/extension_methods.dart';
 import 'package:keynest/utils/logging_utils.dart';
@@ -19,6 +20,74 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 final _logger = Logger('keynest.dialog_utils');
+
+/// Standard responsive insets and constraints for KeyNest dialogs, allowing
+/// dialogs to fit comfortably on narrow screens (e.g. 320px–360px) while maintaining
+/// proper margins and preventing clipping when an on-screen keyboard appears.
+class KeyNestDialogDefaults {
+  static const EdgeInsets insetPadding = EdgeInsets.symmetric(
+    horizontal: 20.0,
+    vertical: 24.0,
+  );
+  static const double maxDialogWidth = 520.0;
+}
+
+/// A responsive dialog title layout that accommodates icons and long titles
+/// without overflowing horizontally or pushing text outside dialog boundaries.
+class KeyNestDialogTitle extends StatelessWidget {
+  const KeyNestDialogTitle({
+    super.key,
+    required this.title,
+    this.icon,
+    this.iconColor,
+    this.iconSize = 22.0,
+    this.style,
+  });
+
+  final String title;
+  final IconData? icon;
+  final Color? iconColor;
+  final double iconSize;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final resolvedIconColor = iconColor ??
+        (isDark ? KeyNestTokens.darkPrimary : KeyNestTokens.lightPrimary);
+    final defaultStyle = theme.textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+        ) ??
+        const TextStyle(fontSize: 17, fontWeight: FontWeight.bold);
+
+    if (icon == null) {
+      return Text(
+        title,
+        style: style ?? defaultStyle,
+      );
+    }
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Icon(
+          icon,
+          color: resolvedIconColor,
+          size: iconSize,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            title,
+            style: style ?? defaultStyle,
+          ),
+        ),
+      ],
+    );
+  }
+}
 
 /// Displays a smooth Material dialog with optimized GPU layer caching and cubic transitions.
 Future<T?> showKeyNestDialog<T>({

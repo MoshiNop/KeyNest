@@ -22,6 +22,7 @@ import 'package:keynest/services/keynest_saf_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/select_file_screen.dart';
+import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/path_utils.dart';
 import 'package:keynest/utils/platform.dart';
 import 'package:logging/logging.dart';
@@ -541,63 +542,73 @@ class _KeyNestCloudVaultBrowserScreenState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(KeyNestTokens.radiusDialog),
         ),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: KeyNestTokens.error),
-            SizedBox(width: 8),
-            Text('Delete Selected Vaults?'),
-          ],
+        insetPadding: KeyNestDialogDefaults.insetPadding,
+        actionsOverflowDirection: VerticalDirection.down,
+        actionsPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Are you sure you want to permanently delete ${selectedVaults.length} vault${selectedVaults.length > 1 ? 's' : ''} from ${widget.provider.displayName}?',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: KeyNestTokens.error.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: KeyNestTokens.error.withValues(alpha: 0.3),
-                ),
+        title: const KeyNestDialogTitle(
+          title: 'Delete Selected Vaults?',
+          icon: Icons.warning_amber_rounded,
+          iconColor: KeyNestTokens.error,
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Are you sure you want to permanently delete ${selectedVaults.length} vault${selectedVaults.length > 1 ? 's' : ''} from ${widget.provider.displayName}?',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ...selectedVaults.map(
-                    (v) => Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(
-                        '• ${v.name} (${v.formattedSize})',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: KeyNestTokens.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: KeyNestTokens.error.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ...selectedVaults.map(
+                      (v) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '• ${v.name} (${v.formattedSize})',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          softWrap: true,
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'WARNING: This action deletes the files directly from your cloud storage. '
-                    'This operation cannot be undone through KeyNest.',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: KeyNestTokens.error,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: 8),
+                    const Text(
+                      'WARNING: This action deletes the files directly from your cloud storage. '
+                      'This operation cannot be undone through KeyNest.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: KeyNestTokens.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      softWrap: true,
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(

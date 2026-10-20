@@ -1113,7 +1113,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                               IgnorePointer(
                                 child: Switch.adaptive(
                                   value: isTrue,
-                                  activeColor: isDark
+                                  activeThumbColor: isDark
                                       ? KeyNestPalette.primaryDark
                                       : KeyNestPalette.primary,
                                   onChanged: null,
@@ -1606,7 +1606,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                           ),
                           Switch.adaptive(
                             value: isTrue,
-                            activeColor: isDark
+                            activeThumbColor: isDark
                                 ? KeyNestPalette.primaryDark
                                 : KeyNestPalette.primary,
                             onChanged: (val) {

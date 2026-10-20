@@ -1473,7 +1473,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                             ),
                             Switch.adaptive(
                               value: isTrue,
-                              activeColor: isDark
+                              activeThumbColor: isDark
                                   ? KeyNestPalette.primaryDark
                                   : KeyNestPalette.primary,
                               onChanged: (val) {
