@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/screens/barcodescan_screen.dart';
 import 'package:keynest/utils/dialog_utils.dart';
+import 'package:keynest/utils/totp_parser.dart';
 
 enum CustomFieldKind {
   text,
@@ -180,6 +182,152 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
     return CustomFieldKind.text;
   }
 
+  /// Returns a meaningful icon based on field [kind] or [fieldName] keywords.
+  static IconData getIconForField(
+    String fieldName, {
+    CustomFieldKind? kind,
+    IconData? fallback,
+  }) {
+    // 1. Explicit kind check
+    if (kind == CustomFieldKind.authenticator) {
+      return Icons.shield_outlined;
+    }
+    if (kind == CustomFieldKind.pin) {
+      return Icons.pin_rounded;
+    }
+    if (kind == CustomFieldKind.hidden) {
+      return Icons.lock_outline_rounded;
+    }
+    if (kind == CustomFieldKind.date) {
+      return Icons.calendar_today_rounded;
+    }
+    if (kind == CustomFieldKind.yesNo) {
+      return Icons.toggle_on_rounded;
+    }
+
+    // 2. Name-based semantic recognition
+    final lower = fieldName.trim().toLowerCase();
+
+    // Authenticator / TOTP / 2FA
+    if (lower.contains('otp') ||
+        lower.contains('totp') ||
+        lower.contains('2fa') ||
+        lower.contains('mfa') ||
+        lower.contains('authenticator')) {
+      return Icons.shield_outlined;
+    }
+
+    // Email
+    if (lower.contains('mail')) {
+      return Icons.mail_outline_rounded;
+    }
+
+    // Username / account / login
+    if (lower.contains('user') ||
+        lower.contains('login') ||
+        lower.contains('account') ||
+        lower.contains('member') ||
+        lower.contains('profile')) {
+      return Icons.person_outline_rounded;
+    }
+
+    // Password / secret / keys
+    if (lower.contains('pass') ||
+        lower.contains('pin') ||
+        lower.contains('secret') ||
+        lower.contains('seed') ||
+        lower.contains('phrase') ||
+        lower.contains('cvv') ||
+        lower.contains('cvc') ||
+        lower.contains('security')) {
+      return Icons.lock_outline_rounded;
+    }
+    if (lower.contains('key') ||
+        lower.contains('token') ||
+        lower.contains('cert')) {
+      return Icons.key_rounded;
+    }
+
+    // URL / website / web
+    if (lower.contains('url') ||
+        lower.contains('web') ||
+        lower.contains('link') ||
+        lower.contains('site') ||
+        lower.contains('domain') ||
+        lower.contains('host')) {
+      return Icons.language_rounded;
+    }
+
+    // Phone / mobile
+    if (lower.contains('phone') ||
+        lower.contains('mobile') ||
+        lower.contains('tel') ||
+        lower.contains('cell') ||
+        lower.contains('fax') ||
+        lower.contains('contact')) {
+      return Icons.phone_outlined;
+    }
+
+    // Date / expiration / time
+    if (lower.contains('date') ||
+        lower.contains('expiry') ||
+        lower.contains('expire') ||
+        lower.contains('dob') ||
+        lower.contains('born') ||
+        lower.contains('valid') ||
+        lower.contains('time') ||
+        lower.contains('year')) {
+      return Icons.calendar_today_rounded;
+    }
+
+    // Address / location
+    if (lower.contains('address') ||
+        lower.contains('city') ||
+        lower.contains('country') ||
+        lower.contains('state') ||
+        lower.contains('zip') ||
+        lower.contains('postal') ||
+        lower.contains('street') ||
+        lower.contains('location') ||
+        lower.contains('residence')) {
+      return Icons.place_outlined;
+    }
+
+    // Tags / labels
+    if (lower.contains('tag') ||
+        lower.contains('label') ||
+        lower.contains('category') ||
+        lower.contains('topic')) {
+      return Icons.tag_rounded;
+    }
+
+    // Card / bank / financial / IBAN
+    if (lower.contains('card') ||
+        lower.contains('bank') ||
+        lower.contains('iban') ||
+        lower.contains('swift') ||
+        lower.contains('bic') ||
+        lower.contains('routing')) {
+      return Icons.credit_card_rounded;
+    }
+
+    // Notes / comments / memo
+    if (lower.contains('note') ||
+        lower.contains('comment') ||
+        lower.contains('memo') ||
+        lower.contains('desc')) {
+      return Icons.notes_rounded;
+    }
+
+    // Explicit text kind default
+    if (kind == CustomFieldKind.text) {
+      return Icons.text_fields_rounded;
+    }
+
+    // Sensible fallback
+    return fallback ?? Icons.text_snippet_outlined;
+  }
+
   /// Prompts user to select a field type (if not provided) and enters field name and value.
   static Future<CustomFieldModel?> promptAddField(
     BuildContext context, {
@@ -195,7 +343,11 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
       }
     }
 
-    final nameController = TextEditingController(text: existing?.key ?? '');
+    final isAuth = kind == CustomFieldKind.authenticator;
+    final defaultKey = isAuth
+        ? (existing?.key.isNotEmpty == true ? existing!.key : 'Authenticator')
+        : (existing?.key ?? '');
+    final nameController = TextEditingController(text: defaultKey);
     final valueController = TextEditingController(text: existing?.value ?? '');
     bool isYesNoTrue = existing != null && isTruthy(existing.value);
     bool obscureValue =
@@ -226,7 +378,7 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
         hintName = 'e.g. Contactless Enabled, Auto Pay';
         break;
       case CustomFieldKind.authenticator:
-        hintName = 'e.g. 2FA Secret Key';
+        hintName = 'Authenticator';
         break;
     }
 
@@ -276,20 +428,22 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextField(
-                      controller: nameController,
-                      autofocus: existing == null,
-                      decoration: InputDecoration(
-                        labelText: 'Field Name',
-                        hintText: hintName,
-                        border: const OutlineInputBorder(),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
+                    if (!isAuth) ...[
+                      TextField(
+                        controller: nameController,
+                        autofocus: existing == null,
+                        decoration: InputDecoration(
+                          labelText: 'Field Name',
+                          hintText: hintName,
+                          border: const OutlineInputBorder(),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                    ],
                     if (kind == CustomFieldKind.yesNo) ...[
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -384,6 +538,7 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                     ] else ...[
                       TextField(
                         controller: valueController,
+                        autofocus: isAuth && existing == null,
                         obscureText: obscureValue,
                         keyboardType: kind == CustomFieldKind.pin
                             ? TextInputType.number
@@ -392,7 +547,7 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                             ? [FilteringTextInputFormatter.digitsOnly]
                             : null,
                         decoration: InputDecoration(
-                          labelText: 'Field Value',
+                          labelText: isAuth ? 'Secret Key (TOTP)' : 'Field Value',
                           hintText: kind == CustomFieldKind.pin
                               ? 'Digits only'
                               : (kind == CustomFieldKind.authenticator
@@ -419,7 +574,45 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                                     });
                                   },
                                 )
-                              : null,
+                              : (isAuth
+                                  ? IconButton(
+                                      icon: const Icon(
+                                        Icons.qr_code_scanner_rounded,
+                                        size: 20,
+                                      ),
+                                      tooltip: 'Scan QR Code',
+                                      onPressed: () async {
+                                        final barcodeResult =
+                                            await BarcodeScanHelper.scanBarcode(
+                                          ctx,
+                                          titleText: 'Scan TOTP QR Code',
+                                          formats: const [
+                                            BarcodeFormat.qrCode,
+                                            BarcodeFormat.microQRCode,
+                                          ],
+                                          validator: (rawText) {
+                                            final parsed =
+                                                TotpQrData.parse(rawText.trim());
+                                            if (parsed == null) {
+                                              return 'Not a valid TOTP QR code. Align a TOTP QR code within the frame.';
+                                            }
+                                            return null;
+                                          },
+                                        );
+                                        if (barcodeResult
+                                            case ScanResultValid(
+                                              barcode: final barcode,
+                                            )) {
+                                          final raw = barcode.text.trim();
+                                          final parsed = TotpQrData.parse(raw);
+                                          setDialogState(() {
+                                            valueController.text =
+                                                parsed?.secret ?? raw;
+                                          });
+                                        }
+                                      },
+                                    )
+                                  : null),
                         ),
                       ),
                     ],
@@ -441,7 +634,14 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
                         : Colors.white,
                   ),
                   onPressed: () {
-                    final keyName = nameController.text.trim();
+                    final rawKeyName = nameController.text.trim();
+                    final keyName = isAuth
+                        ? (rawKeyName.isNotEmpty
+                            ? rawKeyName
+                            : (existing?.key.isNotEmpty == true
+                                ? existing!.key
+                                : 'Authenticator'))
+                        : rawKeyName;
                     if (keyName.isEmpty) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(

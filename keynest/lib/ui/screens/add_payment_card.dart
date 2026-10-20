@@ -8,6 +8,7 @@ import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/ui/widgets/keynest_payment_card.dart';
+import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:provider/provider.dart';
 
@@ -1492,8 +1493,22 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                                 color: Colors.redAccent,
                                 size: 20,
                               ),
-                              onPressed: () =>
-                                  setState(() => _customFields.removeAt(i)),
+                              onPressed: () async {
+                                final confirmed =
+                                    await DialogUtils.showConfirmDialog(
+                                  context: context,
+                                  params: ConfirmDialogParams(
+                                    title: 'Delete Field',
+                                    content:
+                                        'Are you sure you want to delete "${field.key}"?',
+                                    positiveButtonText: 'Delete',
+                                    negativeButtonText: 'Cancel',
+                                  ),
+                                );
+                                if (confirmed == true && mounted) {
+                                  setState(() => _customFields.removeAt(i));
+                                }
+                              },
                             ),
                           ],
                         ),
@@ -1528,15 +1543,33 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                       },
                       child: _InputFieldContainer(
                         label: '${field.key} (${typeItem.title})',
-                        icon: typeItem.icon,
+                        icon: KeyNestCustomFieldSheet.getIconForField(
+                          field.key,
+                          kind: field.kind,
+                          fallback: typeItem.icon,
+                        ),
                         trailing: IconButton(
                           icon: const Icon(
                             Icons.remove_circle_outline_rounded,
                             color: Colors.redAccent,
                             size: 20,
                           ),
-                          onPressed: () =>
-                              setState(() => _customFields.removeAt(i)),
+                          onPressed: () async {
+                            final confirmed =
+                                await DialogUtils.showConfirmDialog(
+                              context: context,
+                              params: ConfirmDialogParams(
+                                title: 'Delete Field',
+                                content:
+                                    'Are you sure you want to delete "${field.key}"?',
+                                positiveButtonText: 'Delete',
+                                negativeButtonText: 'Cancel',
+                              ),
+                            );
+                            if (confirmed == true && mounted) {
+                              setState(() => _customFields.removeAt(i));
+                            }
+                          },
                         ),
                         child: Text(
                           displayVal,

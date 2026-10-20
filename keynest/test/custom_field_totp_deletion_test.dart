@@ -5,6 +5,7 @@ import 'package:kdbx/kdbx.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/l10n-generated/app_localizations_en.dart';
 import 'package:keynest/ui/common_fields.dart';
+import 'package:keynest/ui/widgets/keynest_add_field_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
 import 'package:keynest/ui/widgets/keynest_totp_tile.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
@@ -227,6 +228,118 @@ void main() {
 
       entry.removeString(KdbxKey('Notes'));
       expect(entry.getString(KdbxKey('Notes')), isNull);
+    });
+  });
+
+  group('Semantic Icons for Custom Fields', () {
+    test('Resolves proper icon based on field kind or keywords', () {
+      // Kind-based
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('my_otp', kind: CustomFieldKind.authenticator),
+        equals(Icons.shield_outlined),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('my_pin', kind: CustomFieldKind.pin),
+        equals(Icons.pin_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('my_date', kind: CustomFieldKind.date),
+        equals(Icons.calendar_today_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('my_switch', kind: CustomFieldKind.yesNo),
+        equals(Icons.toggle_on_rounded),
+      );
+
+      // Name-based keywords
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Personal Email'),
+        equals(Icons.mail_outline_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Admin Username'),
+        equals(Icons.person_outline_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Client Secret'),
+        equals(Icons.lock_outline_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Backup Website'),
+        equals(Icons.language_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Emergency Phone'),
+        equals(Icons.phone_outlined),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Expiration Date'),
+        equals(Icons.calendar_today_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Office Address'),
+        equals(Icons.place_outlined),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Project Tags'),
+        equals(Icons.tag_rounded),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('2FA Token'),
+        equals(Icons.shield_outlined),
+      );
+      expect(
+        KeyNestCustomFieldSheet.getIconForField('Random Custom', kind: CustomFieldKind.text),
+        equals(Icons.text_fields_rounded),
+      );
+    });
+  });
+
+  group('Add Field Options Simplification', () {
+    test('Redundant Custom Attribute is removed from add-field options', () {
+      final options = KeyNestAddFieldSheet.fieldOptions;
+      final titles = options.map((o) => o.title).toList();
+
+      expect(titles.contains('Custom Attribute'), isFalse);
+      expect(titles.contains('Text Field'), isTrue);
+      expect(titles.contains('Date / Expiration'), isTrue);
+      expect(titles.contains('Tags / Labels'), isTrue);
+    });
+
+    test('Existing custom attributes in entries remain preserved and editable', () {
+      final file = KdbxFormat().create(
+        Credentials.composite(ProtectedValue.fromString('pass'), null),
+        'test',
+      );
+      final entry = KdbxEntry.create(file, file.body.rootGroup);
+      const customKey = 'LegacyAttribute';
+      entry.setString(KdbxKey(customKey), PlainValue('LegacyValue'));
+
+      expect(entry.getString(KdbxKey(customKey))?.getText(), equals('LegacyValue'));
+
+      final resolved = KeyNestCustomFieldSheet.resolveFieldKind(entry, customKey);
+      expect(resolved, equals(CustomFieldKind.text));
+    });
+  });
+
+  group('Tags Persistence and View Mode Consistency', () {
+    test('Tags can be stored and retrieved consistently', () {
+      final file = KdbxFormat().create(
+        Credentials.composite(ProtectedValue.fromString('pass'), null),
+        'test',
+      );
+      final entry = KdbxEntry.create(file, file.body.rootGroup);
+      const tagsString = 'Finance; Personal; Important';
+
+      entry.setString(KdbxKey('Tags'), PlainValue(tagsString));
+      entry.tags.set(tagsString);
+
+      expect(entry.getString(KdbxKey('Tags'))?.getText(), equals(tagsString));
+      expect(entry.tags.get(), equals(tagsString));
+
+      final tagList = tagsString.split(RegExp(r'[;,]')).map((t) => t.trim()).toList();
+      expect(tagList.length, 3);
+      expect(tagList, containsAll(['Finance', 'Personal', 'Important']));
     });
   });
 }

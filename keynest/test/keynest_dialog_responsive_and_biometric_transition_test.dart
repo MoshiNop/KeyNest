@@ -138,9 +138,9 @@ void main() {
         expect(find.byType(KeyNestDialogTitle), findsOneWidget);
         expect(find.byIcon(Icons.timer_outlined), findsOneWidget);
 
-        // Verify inputs
-        expect(find.text('Field Name'), findsOneWidget);
-        expect(find.text('Field Value'), findsOneWidget);
+        // Verify inputs - Authenticator does not ask for Field Name per simplified creation
+        expect(find.text('Field Name'), findsNothing);
+        expect(find.text('Secret Key (TOTP)'), findsOneWidget);
         expect(find.text('Cancel'), findsOneWidget);
         expect(find.text('Add'), findsOneWidget);
 

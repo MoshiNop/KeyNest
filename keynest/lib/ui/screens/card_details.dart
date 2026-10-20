@@ -126,26 +126,6 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
     }
   }
 
-  Future<void> _deleteCustomField(String key) async {
-    final confirm = await DialogUtils.showConfirmDialog(
-      context: context,
-      params: ConfirmDialogParams(
-        title: 'Delete Field',
-        content: 'Are you sure you want to delete field "$key"?',
-        positiveButtonText: 'Delete',
-      ),
-    );
-    if (confirm == true && mounted) {
-      widget.entry.removeString(KdbxKey(key));
-      widget.entry.customData['FieldType_$key'] = '';
-      widget.entry.times.lastModificationTime.set(DateTime.now().toUtc());
-      await context.read<KdbxBloc>().saveFile(widget.entry.file);
-      if (mounted) {
-        setState(() {});
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -591,6 +571,24 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                 icon: Icons.account_balance_wallet_outlined,
               ),
 
+              if ((entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true) ||
+                  (entry.tags.get()?.trim().isNotEmpty == true)) ...[
+                const SizedBox(height: 10),
+                _InfoTile(
+                  label: 'Tags',
+                  value: (entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true)
+                      ? entry.getString(KdbxKey('Tags'))!.getText()!.trim()
+                      : entry.tags.get()!.trim(),
+                  icon: Icons.tag_rounded,
+                  onCopy: () => _copyToClipboard(
+                    'Tags',
+                    (entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true)
+                        ? entry.getString(KdbxKey('Tags'))!.getText()!.trim()
+                        : entry.tags.get()!.trim(),
+                  ),
+                ),
+              ],
+
               // Custom Fields / Notes
               ...entry.stringEntries
                   .where(
@@ -721,15 +719,6 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                         onChanged: null,
                                       ),
                                     ),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.delete_outline_rounded,
-                                        size: 20,
-                                        color: KeyNestPalette.error,
-                                      ),
-                                      tooltip: 'Delete field',
-                                      onPressed: () => _deleteCustomField(s.key.key),
-                                    ),
                                   ],
                                 ),
                               ),
@@ -739,12 +728,15 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                       }
 
                       if (kind == CustomFieldKind.authenticator) {
+                        final authLabel = s.key.key.toLowerCase() == 'authenticator'
+                            ? 'Authenticator (2FA)'
+                            : '${s.key.key} (Authenticator)';
                         return Padding(
                           padding: const EdgeInsets.only(top: 10),
                           child: KeyNestTotpTile(
                             entry: entry,
                             secret: rawVal,
-                            label: '${s.key.key} (${typeItem.title})',
+                            label: authLabel,
                             isMasked: isMasked,
                             onToggleMask: () => setState(() {
                               if (isRevealed) {
@@ -753,7 +745,6 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                 _revealedCustomFields.add(s.key.key);
                               }
                             }),
-                            onDelete: () => _deleteCustomField(s.key.key),
                           ),
                         );
                       }
@@ -767,12 +758,18 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                         displayVal = rawVal;
                       }
 
+                      final fieldIcon = KeyNestCustomFieldSheet.getIconForField(
+                        s.key.key,
+                        kind: kind,
+                        fallback: typeItem.icon,
+                      );
+
                       return Padding(
                         padding: const EdgeInsets.only(top: 10),
                         child: _InfoTile(
                           label: '${s.key.key} (${typeItem.title})',
                           value: displayVal,
-                          icon: typeItem.icon,
+                          icon: fieldIcon,
                           isMonospace: kind == CustomFieldKind.pin,
                           isMasked: isMasked,
                           onToggleVisibility:
@@ -788,73 +785,10 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                                 })
                               : null,
                           onCopy: () => _copyToClipboard(s.key.key, rawVal),
-                          onDelete: () => _deleteCustomField(s.key.key),
                         ),
                       );
                     },
                   ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  side: BorderSide(
-                    color: isDark
-                        ? KeyNestPalette.entryBorderDark
-                        : KeyNestPalette.entryBorderLight,
-                  ),
-                ),
-                icon: Icon(
-                  Icons.add_rounded,
-                  size: 18,
-                  color: isDark
-                      ? KeyNestPalette.primaryDark
-                      : KeyNestPalette.lightIcon,
-                ),
-                label: Text(
-                  'Add Custom Field',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary,
-                  ),
-                ),
-                onPressed: () async {
-                  final existingKeys = entry.stringEntries
-                      .map((s) => s.key.key)
-                      .toSet();
-                  final field = await KeyNestCustomFieldSheet.promptAddField(
-                    context,
-                    existingKeys: existingKeys,
-                  );
-                  if (field != null && context.mounted) {
-                    final isSensitive =
-                        field.kind == CustomFieldKind.hidden ||
-                        field.kind == CustomFieldKind.pin ||
-                        field.kind == CustomFieldKind.authenticator ||
-                        KeyNestItemTypeHelper.isSensitiveFieldKey(
-                          field.key,
-                          kind: field.kind,
-                        );
-                    entry.setString(
-                      KdbxKey(field.key),
-                      isSensitive
-                          ? ProtectedValue.fromString(field.value)
-                          : PlainValue(field.value),
-                    );
-                    entry.customData['FieldType_${field.key}'] =
-                        field.kind.name;
-                    KeyNestItemTypeHelper.upgradeEntrySensitiveFields(entry);
-                    await context.read<KdbxBloc>().saveFile(entry.file);
-                    if (mounted) {
-                      setState(() {});
-                    }
-                  }
-                },
-              ),
               const SizedBox(height: 24),
             ],
           ),
@@ -871,7 +805,6 @@ class _InfoTile extends StatelessWidget {
     required this.icon,
     this.onCopy,
     this.onToggleVisibility,
-    this.onDelete,
     this.isMasked,
     this.isMonospace = false,
     this.compact = false,
@@ -882,7 +815,6 @@ class _InfoTile extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onCopy;
   final VoidCallback? onToggleVisibility;
-  final VoidCallback? onDelete;
   final bool? isMasked;
   final bool isMonospace;
   final bool compact;
@@ -991,22 +923,6 @@ class _InfoTile extends StatelessWidget {
                           : KeyNestPalette.textSecondaryLight,
                     ),
                     onPressed: onToggleVisibility,
-                  ),
-                if (onDelete != null)
-                  IconButton(
-                    padding: compact
-                        ? EdgeInsets.zero
-                        : const EdgeInsets.all(8),
-                    constraints: compact
-                        ? const BoxConstraints(minWidth: 22, minHeight: 22)
-                        : null,
-                    iconSize: compact ? 16 : 20,
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: KeyNestPalette.error,
-                    ),
-                    tooltip: 'Delete field',
-                    onPressed: onDelete,
                   ),
               ],
             ),

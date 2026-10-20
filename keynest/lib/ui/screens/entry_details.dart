@@ -2235,9 +2235,26 @@ class _EntryFieldState extends State<EntryField>
         });
         break;
       case EntryAction.delete:
+        final fieldName =
+            widget.commonField?.displayName ?? widget.fieldKey.key;
+        final confirmed = await DialogUtils.showConfirmDialog(
+          context: context,
+          params: ConfirmDialogParams(
+            title: 'Delete Field',
+            content: 'Are you sure you want to delete "$fieldName"?',
+            positiveButtonText: 'Delete',
+            negativeButtonText: 'Cancel',
+          ),
+        );
+        if (confirmed != true) {
+          break;
+        }
         widget.onDeleteField?.call(widget.fieldKey);
         widget.entry.removeString(widget.fieldKey);
         widget.entry.customData['FieldType_${widget.fieldKey.key}'] = '';
+        if (widget.fieldKey == KdbxKey('Tags')) {
+          widget.entry.tags.remove();
+        }
         widget.onChangedMetadata();
         break;
       case EntryAction.show:
@@ -2446,7 +2463,76 @@ class _EntryFieldState extends State<EntryField>
     if (_customKind == CustomFieldKind.yesNo) {
       return _buildSwitchEntryFieldEditor();
     }
+    if (_customKind == CustomFieldKind.date) {
+      return _buildDateEntryFieldEditor();
+    }
     return _buildStringEntryFieldEditor();
+  }
+
+  Widget _buildDateEntryFieldEditor() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final currentValue = _valueCurrent ?? _fieldValue?.getText() ?? '';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: InkWell(
+        onTap: () async {
+          DateTime? initialDate;
+          if (currentValue.isNotEmpty) {
+            initialDate = DateTime.tryParse(currentValue.trim());
+          }
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: initialDate ?? DateTime.now(),
+            firstDate: DateTime(1900),
+            lastDate: DateTime(2100),
+          );
+          if (picked != null) {
+            final formatted =
+                '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+            setState(() {
+              _controller.text = formatted;
+              _fieldValue = PlainValue(formatted);
+            });
+            final detailsState =
+                context.findAncestorStateOfType<_EntryDetailsScreenState>();
+            if (detailsState != null && !detailsState.isFormDirty) {
+              detailsState.setState(() => detailsState.isFormDirty = true);
+            }
+            widget.onChangedMetadata();
+          }
+        },
+        borderRadius: BorderRadius.circular(8),
+        child: InputDecorator(
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            suffixIcon: Icon(
+              Icons.calendar_today_rounded,
+              size: 18,
+            ),
+          ),
+          child: Text(
+            currentValue.isNotEmpty
+                ? currentValue
+                : 'Tap to pick date (YYYY-MM-DD)',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: currentValue.isNotEmpty
+                  ? (isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight)
+                  : (isDark
+                      ? KeyNestPalette.textSecondaryDark
+                      : KeyNestPalette.textSecondaryLight),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSwitchEntryFieldEditor() {
@@ -2542,11 +2628,17 @@ class _EntryFieldState extends State<EntryField>
           widget.onDeleteField?.call(widget.fieldKey);
           widget.entry.removeString(widget.fieldKey);
           widget.entry.customData['FieldType_${widget.fieldKey.key}'] = '';
+          if (widget.fieldKey == KdbxKey('Tags')) {
+            widget.entry.tags.remove();
+          }
         } else {
           final newValue = _isProtected
               ? ProtectedValue.fromString(value)
               : PlainValue(value);
           _fieldValue = newValue;
+          if (widget.fieldKey == KdbxKey('Tags')) {
+            widget.entry.tags.set(value);
+          }
         }
       },
       fieldKey: widget.fieldKey,
@@ -2574,48 +2666,7 @@ class _EntryFieldState extends State<EntryField>
     if (commonIcon != null) {
       return commonIcon;
     }
-    final k = fieldKey.key.toLowerCase();
-    if (k == 'title') {
-      return Icons.badge_outlined;
-    }
-    if (k.contains('user') || k.contains('login') || k.contains('account')) {
-      return Icons.person_outline_rounded;
-    }
-    if (k.contains('pass') ||
-        k.contains('pin') ||
-        k.contains('secret') ||
-        k.contains('cvv') ||
-        k.contains('cvc')) {
-      return Icons.lock_outline_rounded;
-    }
-    if (k.contains('url') ||
-        k.contains('web') ||
-        k.contains('link') ||
-        k.contains('host')) {
-      return Icons.language_rounded;
-    }
-    if (k.contains('note') || k.contains('comment') || k.contains('desc')) {
-      return Icons.notes_rounded;
-    }
-    if (k.contains('mail')) {
-      return Icons.mail_outline_rounded;
-    }
-    if (k.contains('phone')) {
-      return Icons.phone_outlined;
-    }
-    if (k.contains('key') || k.contains('token') || k.contains('cert')) {
-      return Icons.key_rounded;
-    }
-    if (k.contains('otp') || k.contains('2fa') || k.contains('totp')) {
-      return Icons.timer_outlined;
-    }
-    if (k.contains('date') || k.contains('time') || k.contains('expiry')) {
-      return Icons.calendar_today_rounded;
-    }
-    if (k.contains('card') || k.contains('number')) {
-      return Icons.credit_card_rounded;
-    }
-    return Icons.data_object_rounded;
+    return KeyNestCustomFieldSheet.getIconForField(fieldKey.key);
   }
 }
 
@@ -3799,7 +3850,96 @@ class _EntryViewModeState extends State<_EntryViewMode> {
               ),
             ],
 
-            if (customFields.isNotEmpty) ...[
+            if ((entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true) ||
+                (entry.tags.get()?.trim().isNotEmpty == true)) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Tags',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Builder(
+                builder: (context) {
+                  final tagsStr = (entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true)
+                      ? entry.getString(KdbxKey('Tags'))!.getText()!.trim()
+                      : entry.tags.get()!.trim();
+                  final tagList = tagsStr
+                      .split(RegExp(r'[;,]'))
+                      .map((t) => t.trim())
+                      .where((t) => t.isNotEmpty)
+                      .toList();
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? KeyNestPalette.cardDark
+                          : KeyNestPalette.surfaceLight,
+                      borderRadius:
+                          BorderRadius.circular(KeyNestShapes.radiusCard),
+                      border: Border.all(
+                        color: isDark
+                            ? KeyNestPalette.entryBorderDark
+                            : KeyNestPalette.entryBorderLight,
+                      ),
+                    ),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.tag_rounded,
+                          size: 20,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
+                        ),
+                        ...tagList.map(
+                          (tag) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: (isDark
+                                      ? KeyNestPalette.primaryDark
+                                      : KeyNestPalette.primary)
+                                  .withValues(alpha: isDark ? 0.20 : 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: (isDark
+                                        ? KeyNestPalette.primaryDark
+                                        : KeyNestPalette.primary)
+                                    .withValues(alpha: 0.35),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? KeyNestPalette.primaryDark
+                                    : KeyNestPalette.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+
+            if (customFields.where((f) => f.key.key != 'Tags').isNotEmpty) ...[
               const SizedBox(height: 10),
               Text(
                 'Custom Fields',
@@ -3811,7 +3951,7 @@ class _EntryViewModeState extends State<_EntryViewMode> {
                 ),
               ),
               const SizedBox(height: 8),
-              ...customFields.map((field) {
+              ...customFields.where((f) => f.key.key != 'Tags').map((field) {
                 final fKey = field.key.key;
                 final fVal = field.value?.getText() ?? '';
                 final isFieldProtected = field.value is ProtectedValue;
@@ -3839,10 +3979,13 @@ class _EntryViewModeState extends State<_EntryViewMode> {
                   );
                 }
                 if (kind == CustomFieldKind.authenticator) {
+                  final authLabel = fKey.toLowerCase() == 'authenticator'
+                      ? 'Authenticator (2FA)'
+                      : '$fKey (Authenticator (2FA))';
                   return KeyNestTotpTile(
                     entry: entry,
                     secret: fVal,
-                    label: '$fKey (Authenticator (2FA))',
+                    label: authLabel,
                     isMasked:
                         isFieldProtected && !_isFieldRevealed('custom_$fKey'),
                     onToggleMask: isFieldProtected
@@ -3853,7 +3996,7 @@ class _EntryViewModeState extends State<_EntryViewMode> {
                 return _ViewFieldTile(
                   label: fKey,
                   value: fVal,
-                  icon: Icons.data_object_rounded,
+                  icon: KeyNestCustomFieldSheet.getIconForField(fKey, kind: kind),
                   isMasked:
                       isFieldProtected && !_isFieldRevealed('custom_$fKey'),
                   onToggleMask: isFieldProtected

@@ -993,8 +993,97 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
               ),
             ),
 
+            // Tags Section
+            if ((entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true) ||
+                (entry.tags.get()?.trim().isNotEmpty == true)) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Tags',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Builder(
+                builder: (context) {
+                  final tagsStr = (entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true)
+                      ? entry.getString(KdbxKey('Tags'))!.getText()!.trim()
+                      : entry.tags.get()!.trim();
+                  final tagList = tagsStr
+                      .split(RegExp(r'[;,]'))
+                      .map((t) => t.trim())
+                      .where((t) => t.isNotEmpty)
+                      .toList();
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? KeyNestPalette.cardDark
+                          : KeyNestPalette.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark
+                            ? KeyNestPalette.entryBorderDark
+                            : KeyNestPalette.entryBorderLight,
+                      ),
+                    ),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.tag_rounded,
+                          size: 18,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
+                        ),
+                        ...tagList.map(
+                          (tag) => Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: (isDark
+                                      ? KeyNestPalette.primaryDark
+                                      : KeyNestPalette.primary)
+                                  .withValues(alpha: isDark ? 0.20 : 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: (isDark
+                                        ? KeyNestPalette.primaryDark
+                                        : KeyNestPalette.primary)
+                                    .withValues(alpha: 0.35),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? KeyNestPalette.primaryDark
+                                    : KeyNestPalette.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+
             // Custom Fields Section
-            if (customFields.isNotEmpty) ...[
+            if (customFields.where((f) => f.key.key != 'Tags').isNotEmpty) ...[
               const SizedBox(height: 20),
               Text(
                 'Custom Fields',
@@ -1006,7 +1095,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              ...customFields.map((field) {
+              ...customFields.where((f) => f.key.key != 'Tags').map((field) {
                 final fieldKey = field.key.key;
                 final fieldValue = field.value?.getText() ?? '';
                 final isProtected = field.value is ProtectedValue;
@@ -1030,12 +1119,15 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                 );
 
                 if (kind == CustomFieldKind.authenticator) {
+                  final authLabel = fieldKey.toLowerCase() == 'authenticator'
+                      ? 'Authenticator (2FA)'
+                      : '$fieldKey (Authenticator)';
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: KeyNestTotpTile(
                       entry: entry,
                       secret: fieldValue,
-                      label: '$fieldKey (${typeItem.title})',
+                      label: authLabel,
                       isMasked: isMasked,
                       onToggleMask: () {
                         setState(() {
@@ -1175,7 +1267,11 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                         child: Row(
                           children: [
                             Icon(
-                              typeItem.icon,
+                              KeyNestCustomFieldSheet.getIconForField(
+                                fieldKey,
+                                kind: kind,
+                                fallback: typeItem.icon,
+                              ),
                               size: 18,
                               color: isDark
                                   ? KeyNestPalette.primaryDark
@@ -1568,171 +1664,259 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                   orElse: () => KeyNestCustomFieldSheet.fieldTypes.first,
                 );
 
+                final fieldIcon = KeyNestCustomFieldSheet.getIconForField(
+                  field.key,
+                  kind: field.kind,
+                  fallback: typeItem.icon,
+                );
+
                 if (field.kind == CustomFieldKind.yesNo) {
                   final isTrue =
                       KeyNestCustomFieldSheet.isTruthy(field.value);
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? KeyNestPalette.cardDark
-                            : KeyNestPalette.surfaceLight,
+                    child: Material(
+                      color: isDark
+                          ? KeyNestPalette.cardDark
+                          : KeyNestPalette.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark
-                              ? KeyNestPalette.cardBorderDark
-                              : KeyNestPalette.cardBorderLight,
+                        onTap: () async {
+                          final updated =
+                              await KeyNestCustomFieldSheet.promptAddField(
+                            context,
+                            existing: field,
+                          );
+                          if (updated != null && mounted) {
+                            setState(() {
+                              _customFields[idx] = updated;
+                              _isDirty = true;
+                            });
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? KeyNestPalette.cardBorderDark
+                                  : KeyNestPalette.cardBorderLight,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                fieldIcon,
+                                size: 18,
+                                color: isDark
+                                    ? KeyNestPalette.primaryDark
+                                    : KeyNestPalette.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${field.key} (${typeItem.title})',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark
+                                            ? KeyNestPalette.textSecondaryDark
+                                            : KeyNestPalette.textSecondaryLight,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      isTrue ? 'On (Enabled)' : 'Off (Disabled)',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? KeyNestPalette.textPrimaryDark
+                                            : KeyNestPalette.textPrimaryLight,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch.adaptive(
+                                value: isTrue,
+                                activeThumbColor: isDark
+                                    ? KeyNestPalette.primaryDark
+                                    : KeyNestPalette.primary,
+                                onChanged: (val) {
+                                  setState(() {
+                                    field.value =
+                                        KeyNestCustomFieldSheet.boolToString(
+                                      val,
+                                      originalValue: field.value,
+                                    );
+                                    _isDirty = true;
+                                  });
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                ),
+                                color: KeyNestPalette.error,
+                                tooltip: 'Remove field',
+                                onPressed: () async {
+                                  final confirmed =
+                                      await DialogUtils.showConfirmDialog(
+                                    context: context,
+                                    params: ConfirmDialogParams(
+                                      title: 'Delete Field',
+                                      content:
+                                          'Are you sure you want to delete "${field.key}"?',
+                                      positiveButtonText: 'Delete',
+                                      negativeButtonText: 'Cancel',
+                                    ),
+                                  );
+                                  if (confirmed == true && mounted) {
+                                    setState(() {
+                                      _customFields.removeAt(idx);
+                                      _isDirty = true;
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            typeItem.icon,
-                            size: 18,
-                            color: isDark
-                                ? KeyNestPalette.primaryDark
-                                : KeyNestPalette.primary,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${field.key} (${typeItem.title})',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: isDark
-                                        ? KeyNestPalette.textSecondaryDark
-                                        : KeyNestPalette.textSecondaryLight,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  isTrue ? 'On (Enabled)' : 'Off (Disabled)',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? KeyNestPalette.textPrimaryDark
-                                        : KeyNestPalette.textPrimaryLight,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Switch.adaptive(
-                            value: isTrue,
-                            activeThumbColor: isDark
-                                ? KeyNestPalette.primaryDark
-                                : KeyNestPalette.primary,
-                            onChanged: (val) {
-                              setState(() {
-                                field.value =
-                                    KeyNestCustomFieldSheet.boolToString(
-                                  val,
-                                  originalValue: field.value,
-                                );
-                                _isDirty = true;
-                              });
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline_rounded,
-                              size: 18,
-                            ),
-                            color: KeyNestPalette.error,
-                            tooltip: 'Remove field',
-                            onPressed: () {
-                              setState(() {
-                                _customFields.removeAt(idx);
-                                _isDirty = true;
-                              });
-                            },
-                          ),
-                        ],
                       ),
                     ),
                   );
                 }
 
+                String displayVal;
+                if (field.kind == CustomFieldKind.hidden) {
+                  displayVal = '••••••••••••';
+                } else if (field.kind == CustomFieldKind.pin) {
+                  displayVal = '••••';
+                } else {
+                  displayVal = field.value;
+                }
+
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? KeyNestPalette.cardDark
-                          : KeyNestPalette.surfaceLight,
+                  child: Material(
+                    color: isDark
+                        ? KeyNestPalette.cardDark
+                        : KeyNestPalette.surfaceLight,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark
-                            ? KeyNestPalette.cardBorderDark
-                            : KeyNestPalette.cardBorderLight,
+                      onTap: () async {
+                        final updated =
+                            await KeyNestCustomFieldSheet.promptAddField(
+                          context,
+                          existing: field,
+                        );
+                        if (updated != null && mounted) {
+                          setState(() {
+                            _customFields[idx] = updated;
+                            _isDirty = true;
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isDark
+                                ? KeyNestPalette.cardBorderDark
+                                : KeyNestPalette.cardBorderLight,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              fieldIcon,
+                              size: 18,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${field.key} (${typeItem.title})',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isDark
+                                          ? KeyNestPalette.textSecondaryDark
+                                          : KeyNestPalette.textSecondaryLight,
+                                    ),
+                                  ),
+                                  Text(
+                                    displayVal,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing:
+                                          (field.kind == CustomFieldKind.hidden ||
+                                                  field.kind == CustomFieldKind.pin)
+                                              ? 2.0
+                                              : 0,
+                                      fontFamily:
+                                          field.kind == CustomFieldKind.pin
+                                              ? 'monospace'
+                                              : null,
+                                      color: isDark
+                                          ? KeyNestPalette.textPrimaryDark
+                                          : KeyNestPalette.textPrimaryLight,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.delete_outline_rounded,
+                                size: 18,
+                              ),
+                              color: KeyNestPalette.error,
+                              tooltip: 'Remove field',
+                              onPressed: () async {
+                                final confirmed =
+                                    await DialogUtils.showConfirmDialog(
+                                  context: context,
+                                  params: ConfirmDialogParams(
+                                    title: 'Delete Field',
+                                    content:
+                                        'Are you sure you want to delete "${field.key}"?',
+                                    positiveButtonText: 'Delete',
+                                    negativeButtonText: 'Cancel',
+                                  ),
+                                );
+                                if (confirmed == true && mounted) {
+                                  setState(() {
+                                    _customFields.removeAt(idx);
+                                    _isDirty = true;
+                                  });
+                                }
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          typeItem.icon,
-                          size: 18,
-                          color: isDark
-                              ? KeyNestPalette.primaryDark
-                              : KeyNestPalette.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${field.key} (${typeItem.title})',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? KeyNestPalette.textSecondaryDark
-                                      : KeyNestPalette.textSecondaryLight,
-                                ),
-                              ),
-                              Text(
-                                field.value,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark
-                                      ? KeyNestPalette.textPrimaryDark
-                                      : KeyNestPalette.textPrimaryLight,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline_rounded,
-                            size: 18,
-                          ),
-                          color: KeyNestPalette.error,
-                          tooltip: 'Remove field',
-                          onPressed: () {
-                            setState(() {
-                              _customFields.removeAt(idx);
-                              _isDirty = true;
-                            });
-                          },
-                        ),
-                      ],
                     ),
                   ),
                 );

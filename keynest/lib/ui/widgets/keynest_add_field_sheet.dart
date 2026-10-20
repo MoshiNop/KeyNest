@@ -83,6 +83,22 @@ class KeyNestAddFieldSheet extends StatelessWidget {
         initialValue: res.$2 ? 'Yes' : 'No',
       );
     }
+    if (option.customKind == CustomFieldKind.date) {
+      final res = await _promptDateField(
+        context,
+        label: option.promptLabel ?? 'Date Field Label',
+        initial: option.defaultName ?? 'Expires',
+      );
+      if (res == null || res.$1.trim().isEmpty) {
+        return null;
+      }
+      return KeyNestAddFieldResult(
+        key: KdbxKey(res.$1.trim()),
+        isProtected: false,
+        customKind: CustomFieldKind.date,
+        initialValue: res.$2,
+      );
+    }
     final name = await _promptFieldName(
       context,
       label: option.promptLabel ?? 'Field Name',
@@ -188,16 +204,6 @@ class KeyNestAddFieldSheet extends StatelessWidget {
       iconColor: const Color(0xFFEC4899),
       iconBg: const Color(0xFFFCE7F3),
       fixedKey: KdbxKey('Tags'),
-      isProtected: false,
-    ),
-    const KeyNestFieldOption(
-      title: 'Custom Attribute',
-      subtitle: 'Enter any custom KeePass attribute name',
-      icon: Icons.add_circle_outline_rounded,
-      iconColor: Color(0xFF6366F1),
-      iconBg: Color(0xFFE0E7FF),
-      promptLabel: 'Attribute Name',
-      defaultName: '',
       isProtected: false,
     ),
   ];
@@ -627,6 +633,151 @@ class KeyNestAddFieldSheet extends StatelessWidget {
                   onPressed: isValid
                       ? () => Navigator.of(dialogCtx).pop(
                           (controller.text.trim(), isTrue),
+                        )
+                      : null,
+                  child: const Text('Add Field'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  static Future<(String, String)?> _promptDateField(
+    BuildContext context, {
+    required String label,
+    required String initial,
+  }) async {
+    final controller = TextEditingController(text: initial);
+    DateTime? selectedDate = DateTime.now();
+    String formattedDate =
+        '${selectedDate.year.toString().padLeft(4, '0')}-${selectedDate.month.toString().padLeft(2, '0')}-${selectedDate.day.toString().padLeft(2, '0')}';
+    final dateController = TextEditingController(text: formattedDate);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return showDialog<(String, String)>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final isValid = controller.text.trim().isNotEmpty;
+            return AlertDialog(
+              clipBehavior: Clip.antiAlias,
+              backgroundColor: isDark
+                  ? KeyNestPalette.cardDark
+                  : KeyNestPalette.cardLight,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
+              ),
+              insetPadding: KeyNestDialogDefaults.insetPadding,
+              actionsOverflowDirection: VerticalDirection.down,
+              actionsPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              title: KeyNestDialogTitle(
+                title: 'Add Date / Expiration',
+                icon: Icons.calendar_today_rounded,
+                iconColor: const Color(0xFF10B981),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        labelText: label,
+                        hintText: 'e.g. Expires, Renew Date',
+                        filled: true,
+                        fillColor: isDark
+                            ? KeyNestPalette.surfaceDark
+                            : KeyNestPalette.surfaceLight,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? KeyNestPalette.entryBorderDark
+                                : KeyNestPalette.entryBorderLight,
+                          ),
+                        ),
+                      ),
+                      onChanged: (_) => setDialogState(() {}),
+                    ),
+                    const SizedBox(height: 16),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: dialogCtx,
+                          initialDate: selectedDate ?? DateTime.now(),
+                          firstDate: DateTime(1900),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) {
+                          setDialogState(() {
+                            selectedDate = picked;
+                            formattedDate =
+                                '${picked.year.toString().padLeft(4, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+                            dateController.text = formattedDate;
+                          });
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: 'Select Date',
+                          filled: true,
+                          fillColor: isDark
+                              ? KeyNestPalette.surfaceDark
+                              : KeyNestPalette.surfaceLight,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          suffixIcon: const Icon(
+                            Icons.calendar_today_rounded,
+                            size: 20,
+                          ),
+                        ),
+                        child: Text(
+                          dateController.text.isNotEmpty
+                              ? dateController.text
+                              : 'Tap to select date',
+                          style: TextStyle(
+                            color: dateController.text.isNotEmpty
+                                ? (isDark ? Colors.white : Colors.black87)
+                                : Colors.grey,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(null),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDark
+                        ? KeyNestPalette.primaryDark
+                        : KeyNestPalette.primary,
+                    foregroundColor: isDark
+                        ? const Color(0xFF00315D)
+                        : Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: isValid
+                      ? () => Navigator.of(dialogCtx).pop(
+                          (controller.text.trim(), dateController.text.trim()),
                         )
                       : null,
                   child: const Text('Add Field'),
