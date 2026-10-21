@@ -21,6 +21,7 @@ import 'package:keynest/env/_base.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/services/keynest_dynamic_icon_service.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
+import 'package:keynest/services/keynest_support_service.dart';
 import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/common_fields.dart';
@@ -876,17 +877,9 @@ class _PreferencesBodyState extends State<PreferencesBody>
           children: [
             KeyNestSettingsTile(
               title: 'KeyNest Password Manager',
-              subtitle: 'Version 1.0.0 • Open Source',
+              subtitle: 'Help, About, and Contact • v1.0.0',
               icon: Icons.shield_rounded,
-              onTap: () {
-                showAboutDialog(
-                  context: context,
-                  applicationName: 'KeyNest',
-                  applicationVersion: '1.0.0',
-                  applicationLegalese:
-                      'A secure, offline-first KeePass compatible password manager.',
-                );
-              },
+              onTap: () => KeyNestSupportService.openAbout(context),
             ),
           ],
         ),

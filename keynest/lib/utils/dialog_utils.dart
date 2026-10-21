@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:file_picker_writable/file_picker_writable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_email_sender/flutter_email_sender.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:keynest/bloc/analytics.dart';
 import 'package:keynest/env/_base.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
+import 'package:keynest/services/keynest_support_service.dart';
 import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/extension_methods.dart';
@@ -298,36 +298,17 @@ class DialogUtils {
         true;
   }
 
-  static bool sendLogsSupported() =>
-      KeyNestPlatform.isIOS || KeyNestPlatform.isAndroid;
+  static bool sendLogsSupported() => true;
 
   @NonNls
   static Future<void> sendLogs(
     BuildContext context, {
     @NonNls String errorDescription = '',
-  }) async {
-    final env = Provider.of<Env>(context, listen: false);
-    final loggingUtil = LoggingUtils();
-    final logFiles = loggingUtil.rotatingFileLoggerFiles;
-    final logFileDebug = logFiles
-        .map((file) => '${file.absolute.path}: ${file.statSync()}')
-        .join('\n\n');
-    final details = errorDescription.isEmpty
-        ? ''
-        : '===================\n$errorDescription';
-    final email = Email(
-      subject:
-          'Log file for '
-          '${await env.getAppInfo()} (${KeyNestPlatform.operatingSystem})',
-      body:
-          '\n\n\n\n$details\n'
-          '====================Available Log Files:\n$logFileDebug',
-      recipients: ['moshiiur@proton.me'],
-      // for now just take the current one.
-      attachmentPaths: [logFiles.first.absolute.path],
-    );
-    await FlutterEmailSender.send(email);
-  }
+  }) =>
+      KeyNestSupportService.sendLogs(
+        context,
+        errorDescription: errorDescription,
+      );
 }
 
 class LogViewerDialog extends StatelessWidget {
