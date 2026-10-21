@@ -140,29 +140,11 @@ class AppBarMenu {
         ),
         PopupMenuItem(
           value: () {
-            KeyNestSupportService.openUserGuide(context);
-          },
-          child: const ListTile(
-            leading: Icon(Icons.help_outline_rounded),
-            title: Text('Help'),
-          ),
-        ),
-        PopupMenuItem(
-          value: () {
             KeyNestSupportService.openAbout(context);
           },
           child: const ListTile(
             leading: ImageIcon(AssetImage('assets/images/logo_icon.png')),
             title: Text('About'),
-          ),
-        ),
-        PopupMenuItem(
-          value: () {
-            KeyNestSupportService.contactSupport(context);
-          },
-          child: const ListTile(
-            leading: Icon(Icons.mail_outline_rounded),
-            title: Text('Contact'),
           ),
         ),
       ];
@@ -359,16 +341,6 @@ class AppBarMenu {
         child: ListTile(
           leading: const ImageIcon(AssetImage('assets/images/logo_icon.png')),
           title: Text(loc.menuItemAbout),
-        ),
-      ),
-      PopupMenuItem(
-        value: () {
-          KeyNestSupportService.contactSupport(context);
-        },
-        child: const ListTile(
-          leading: Icon(Icons.mail_outline_rounded),
-          title: Text('Contact'),
-          subtitle: Text('Email support team'),
         ),
       ),
     ];

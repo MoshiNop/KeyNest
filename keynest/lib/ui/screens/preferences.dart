@@ -173,7 +173,6 @@ class _PreferencesBodyState extends State<PreferencesBody>
 
   late AppDataBloc _appDataBloc;
   AppData? _appData;
-  bool _keyNestSectionExpanded = false;
 
   Analytics get _analytics => context.read<Analytics>();
 
@@ -878,46 +877,10 @@ class _PreferencesBodyState extends State<PreferencesBody>
           children: [
             KeyNestSettingsTile(
               title: 'KeyNest Password Manager',
-              subtitle: _keyNestSectionExpanded
-                  ? 'Tap to collapse options'
-                  : 'Help, About, and Contact • v1.0.0',
+              subtitle: 'Help, About, and Contact • v1.0.0',
               icon: Icons.shield_rounded,
-              trailing: AnimatedRotation(
-                turns: _keyNestSectionExpanded ? 0.25 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: const Icon(
-                  Icons.chevron_right_rounded,
-                  size: 22,
-                ),
-              ),
-              onTap: () {
-                setState(() {
-                  _keyNestSectionExpanded = !_keyNestSectionExpanded;
-                });
-              },
+              onTap: () => KeyNestSupportService.openAbout(context),
             ),
-            if (_keyNestSectionExpanded) ...[
-              KeyNestSettingsTile(
-                title: 'Help',
-                subtitle: 'Official GitHub user guide and documentation',
-                icon: Icons.help_outline_rounded,
-                onTap: () => KeyNestSupportService.openUserGuide(context),
-              ),
-              KeyNestSettingsTile(
-                title: 'About',
-                subtitle:
-                    'Version info, GitHub contributors, releases & licenses',
-                icon: Icons.info_outline_rounded,
-                onTap: () => KeyNestSupportService.openAbout(context),
-              ),
-              KeyNestSettingsTile(
-                title: 'Contact',
-                subtitle:
-                    'Reach out to support at ${KeyNestSupportService.supportEmail}',
-                icon: Icons.mail_outline_rounded,
-                onTap: () => KeyNestSupportService.contactSupport(context),
-              ),
-            ],
           ],
         ),
       ],

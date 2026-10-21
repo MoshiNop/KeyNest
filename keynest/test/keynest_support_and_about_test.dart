@@ -164,8 +164,8 @@ void main() {
 
       await tester.pump();
 
-      // Verify 5 popup entries exist (Theme Selection + Send Logs, Help, About, Contact)
-      expect(items.length, equals(5));
+      // Verify 3 popup entries exist (Theme Selection, Send Logs, About)
+      expect(items.length, equals(3));
 
       // Inspect child widgets of items
       final itemTitles = <String>[];
@@ -179,9 +179,9 @@ void main() {
       }
 
       expect(itemTitles, contains('Send Logs'));
-      expect(itemTitles, contains('Help'));
       expect(itemTitles, contains('About'));
-      expect(itemTitles, contains('Contact'));
+      expect(itemTitles, isNot(contains('Help')));
+      expect(itemTitles, isNot(contains('Contact')));
     });
   });
 
@@ -244,59 +244,22 @@ void main() {
     });
   });
 
-  group('Settings Screen KeyNest Section Expandable Tests', () {
-    testWidgets('Tapping KeyNest Password Manager reveals Help, About, and Contact',
+  group('Settings Screen KeyNest Section Tests', () {
+    testWidgets('KeyNest Password Manager tile opens About page directly',
         (tester) async {
-      bool expanded = false;
+      bool openedAbout = false;
 
       await tester.pumpWidget(
         MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
-            body: StatefulBuilder(
-              builder: (context, setState) {
-                return Column(
-                  children: [
-                    ListTile(
-                      key: const ValueKey('keyNestHeaderTile'),
-                      title: const Text('KeyNest Password Manager'),
-                      subtitle: Text(expanded
-                          ? 'Tap to collapse options'
-                          : 'Help, About, and Contact • v1.0.0'),
-                      onTap: () {
-                        setState(() {
-                          expanded = !expanded;
-                        });
-                      },
-                    ),
-                    if (expanded) ...[
-                      ListTile(
-                        key: const ValueKey('helpTile'),
-                        title: const Text('Help'),
-                        subtitle: const Text(
-                            'Official GitHub user guide and documentation'),
-                        onTap: () =>
-                            KeyNestSupportService.openUserGuide(context),
-                      ),
-                      ListTile(
-                        key: const ValueKey('aboutTile'),
-                        title: const Text('About'),
-                        subtitle: const Text(
-                            'Version info, GitHub contributors, releases & licenses'),
-                        onTap: () => KeyNestSupportService.openAbout(context),
-                      ),
-                      ListTile(
-                        key: const ValueKey('contactTile'),
-                        title: const Text('Contact'),
-                        subtitle: Text(
-                            'Reach out to support at ${KeyNestSupportService.supportEmail}'),
-                        onTap: () =>
-                            KeyNestSupportService.contactSupport(context),
-                      ),
-                    ],
-                  ],
-                );
+            body: ListTile(
+              key: const ValueKey('keyNestHeaderTile'),
+              title: const Text('KeyNest Password Manager'),
+              subtitle: const Text('Help, About, and Contact • v1.0.0'),
+              onTap: () {
+                openedAbout = true;
               },
             ),
           ),
@@ -305,31 +268,13 @@ void main() {
 
       await tester.pump();
 
-      // Initially collapsed
       expect(find.text('KeyNest Password Manager'), findsOneWidget);
       expect(find.text('Help, About, and Contact • v1.0.0'), findsOneWidget);
-      expect(find.byKey(const ValueKey('helpTile')), findsNothing);
-      expect(find.byKey(const ValueKey('aboutTile')), findsNothing);
-      expect(find.byKey(const ValueKey('contactTile')), findsNothing);
 
-      // Tap to expand
       await tester.tap(find.byKey(const ValueKey('keyNestHeaderTile')));
       await tester.pump();
 
-      // Now expanded
-      expect(find.text('Tap to collapse options'), findsOneWidget);
-      expect(find.byKey(const ValueKey('helpTile')), findsOneWidget);
-      expect(find.byKey(const ValueKey('aboutTile')), findsOneWidget);
-      expect(find.byKey(const ValueKey('contactTile')), findsOneWidget);
-      expect(find.textContaining('moshidevs@gmail.com'), findsOneWidget);
-
-      // Tap again to collapse
-      await tester.tap(find.byKey(const ValueKey('keyNestHeaderTile')));
-      await tester.pump();
-
-      expect(find.byKey(const ValueKey('helpTile')), findsNothing);
-      expect(find.byKey(const ValueKey('aboutTile')), findsNothing);
-      expect(find.byKey(const ValueKey('contactTile')), findsNothing);
+      expect(openedAbout, isTrue);
     });
 
     test('KeyNestSupportService constants match project specification', () {
