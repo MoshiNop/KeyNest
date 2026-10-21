@@ -73,10 +73,14 @@ void main() {
     });
 
     test('Desktop platforms (Windows, Linux, macOS) and Web share isDesktopOrWeb', () {
-      // On Windows environment:
       expect(KeyNestPlatform.isDesktopOrWeb, isTrue);
       expect(KeyNestPlatform.isDesktop, isTrue);
-      expect(KeyNestPlatform.isWindows, isTrue);
+      expect(
+        KeyNestPlatform.isWindows ||
+            KeyNestPlatform.isLinux ||
+            KeyNestPlatform.isMacOS,
+        isTrue,
+      );
     });
   });
 
