@@ -185,14 +185,6 @@ class _AboutScreenState extends State<AboutScreen> {
                             const SizedBox(height: 16),
                           ],
 
-                          // Contributors
-                          _buildContributorsCard(data.contributors, isDark, cardBg, borderColor),
-                          const SizedBox(height: 16),
-
-                          // Acknowledgements & AuthPass Credits
-                          _buildAcknowledgementsCard(isDark, cardBg, borderColor),
-                          const SizedBox(height: 16),
-
                           // Open-Source Licenses & Legal
                           _buildLicensesCard(data.repo, isDark, cardBg, borderColor),
                           const SizedBox(height: 16),
@@ -307,6 +299,52 @@ class _AboutScreenState extends State<AboutScreen> {
               color: isDark
                   ? KeyNestPalette.textSecondaryDark
                   : KeyNestPalette.textSecondaryLight,
+            ),
+          ),
+          const SizedBox(height: 12),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => _safeLaunchUrl('https://github.com/MoshiNop'),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: (isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.black.withValues(alpha: 0.04)),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                  width: 0.8,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FaIcon(
+                    FontAwesomeIcons.github,
+                    size: 13,
+                    color: isDark ? _accentColor : const Color(0xFF185ABC),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Moshiur Rahman',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? _accentColor : const Color(0xFF185ABC),
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Icon(
+                    Icons.arrow_outward_rounded,
+                    size: 12,
+                    color: isDark
+                        ? _accentColor.withValues(alpha: 0.75)
+                        : const Color(0xFF185ABC).withValues(alpha: 0.75),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -509,121 +547,6 @@ class _AboutScreenState extends State<AboutScreen> {
     );
   }
 
-  Widget _buildContributorsCard(
-    List<GitHubContributor> contributors,
-    bool isDark,
-    Color cardBg,
-    Color borderColor,
-  ) {
-    return _buildSectionCard(
-      title: 'Repository Contributors',
-      icon: Icons.people_outline_rounded,
-      isDark: isDark,
-      cardBg: cardBg,
-      borderColor: borderColor,
-      children: [
-        if (contributors.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(16.0),
-            child: Text('No contributors loaded.'),
-          )
-        else
-          ...contributors.asMap().entries.map((entry) {
-            final index = entry.key;
-            final contributor = entry.value;
-            return Column(
-              children: [
-                if (index > 0) _buildDivider(isDark),
-                Material(
-                  color: Colors.transparent,
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    leading: CircleAvatar(
-                      radius: 20,
-                      backgroundColor: isDark ? Colors.white10 : Colors.black12,
-                      backgroundImage: contributor.avatarUrl.isNotEmpty
-                          ? NetworkImage(contributor.avatarUrl)
-                          : null,
-                      onBackgroundImageError: contributor.avatarUrl.isNotEmpty
-                          ? (_, _) {}
-                          : null,
-                      child: contributor.avatarUrl.isEmpty
-                          ? const Icon(Icons.person, size: 20)
-                          : null,
-                    ),
-                    title: Text(
-                      contributor.login,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
-                    ),
-                    subtitle: Text(
-                      '${contributor.contributions} ${contributor.contributions == 1 ? "contribution" : "contributions"}',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isDark
-                            ? KeyNestPalette.textSecondaryDark
-                            : KeyNestPalette.textSecondaryLight,
-                      ),
-                    ),
-                    trailing: Icon(
-                      Icons.chevron_right_rounded,
-                      size: 20,
-                      color: isDark ? Colors.white38 : Colors.black38,
-                    ),
-                    onTap: () => _safeLaunchUrl(contributor.htmlUrl),
-                  ),
-                ),
-              ],
-            );
-          }),
-      ],
-    );
-  }
-
-  Widget _buildAcknowledgementsCard(bool isDark, Color cardBg, Color borderColor) {
-    return _buildSectionCard(
-      title: 'Acknowledgements & Credits',
-      icon: Icons.favorite_border_rounded,
-      isDark: isDark,
-      cardBg: cardBg,
-      borderColor: borderColor,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'KeyNest builds upon and acknowledges the open-source work and foundations created by the AuthPass project and the KeePass community.',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  height: 1.4,
-                  color: isDark
-                      ? KeyNestPalette.textSecondaryDark
-                      : KeyNestPalette.textSecondaryLight,
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                icon: const FaIcon(FontAwesomeIcons.github, size: 14),
-                label: const Text('AuthPass Project'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: isDark ? _accentColor : const Color(0xFF185ABC),
-                  side: BorderSide(
-                    color: isDark ? Colors.white24 : Colors.black12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                onPressed: () => _safeLaunchUrl('https://github.com/authpass'),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildLicensesCard(
     GitHubRepoInfo repo,
     bool isDark,
@@ -640,7 +563,7 @@ class _AboutScreenState extends State<AboutScreen> {
         _buildListRow(
           icon: Icons.shield_outlined,
           title: 'Project License',
-          subtitle: repo.licenseName,
+          subtitle: '${repo.licenseName} (GNU GPL v3.0)',
           onTap: () => _safeLaunchUrl('${repo.htmlUrl}/blob/main/LICENSE'),
         ),
         _buildDivider(isDark),

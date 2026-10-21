@@ -220,18 +220,22 @@ void main() {
         findsOneWidget,
       );
 
+      // Verify Moshiur Rahman credit under header
+      expect(find.text('Moshiur Rahman'), findsOneWidget);
+
       // Verify Project Information Section
       expect(find.text('Project Information'), findsOneWidget);
       expect(find.text('GitHub Repository'), findsOneWidget);
       expect(find.text('User Guide & Documentation'), findsOneWidget);
       expect(find.text('Issue Tracker'), findsOneWidget);
 
-      // Verify Acknowledgements & Credits
-      expect(find.text('Acknowledgements & Credits'), findsOneWidget);
-      expect(find.textContaining('AuthPass project'), findsOneWidget);
+      // Verify Acknowledgements & Contributors are removed
+      expect(find.text('Acknowledgements & Credits'), findsNothing);
+      expect(find.text('Repository Contributors'), findsNothing);
 
       // Verify Open-Source Licenses
       expect(find.text('Open-Source Licenses'), findsOneWidget);
+      expect(find.text('Project License'), findsOneWidget);
       expect(find.text('Third-Party Dependency Licenses'), findsOneWidget);
 
       // Verify Support Section
