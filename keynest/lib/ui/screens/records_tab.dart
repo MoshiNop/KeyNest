@@ -14,6 +14,7 @@ import 'package:keynest/ui/widgets/keynest_search_highlight.dart';
 import 'package:keynest/ui/widgets/keynest_tab_navigation_handler.dart';
 import 'package:keynest/ui/widgets/keynest_top_chips_bar.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class RecordsTab extends StatefulWidget {
@@ -22,11 +23,13 @@ class RecordsTab extends StatefulWidget {
     this.onEntrySelected,
     this.onCountChanged,
     this.onRegisterNavigationHandler,
+    this.selectedEntry,
   });
 
   final void Function(KdbxEntry entry)? onEntrySelected;
   final void Function(int count)? onCountChanged;
   final ValueChanged<KeyNestTabNavigationHandler>? onRegisterNavigationHandler;
+  final KdbxEntry? selectedEntry;
 
   @override
   State<RecordsTab> createState() => _RecordsTabState();
@@ -202,7 +205,8 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
       child: Column(
         children: [
           // Consistent Top Chip Bar Across Tabs (No Category chip)
-          KeyNestTopChipsBar(
+          if (!KeyNestPlatform.isDesktopOrWeb)
+            KeyNestTopChipsBar(
             tab: KeyNestTab.records,
             searchController: _searchController,
             searchFocusNode: _searchFocusNode,

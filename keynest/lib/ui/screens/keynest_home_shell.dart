@@ -28,6 +28,7 @@ class KeyNestHomeShell extends StatefulWidget {
     this.onEntrySelected,
     this.selectedEntry,
     this.isDesktopMaster = false,
+    this.onAddNewItem,
   });
 
   static const routeSettings = RouteSettings(name: '/home');
@@ -86,6 +87,7 @@ class KeyNestHomeShell extends StatefulWidget {
   final OnEntrySelected? onEntrySelected;
   final KdbxEntry? selectedEntry;
   final bool isDesktopMaster;
+  final VoidCallback? onAddNewItem;
 
   @override
   State<KeyNestHomeShell> createState() => _KeyNestHomeShellState();
@@ -262,6 +264,10 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
   }
 
   Future<void> _onFabPressed() async {
+    if (widget.onAddNewItem != null) {
+      widget.onAddNewItem!();
+      return;
+    }
     final kdbxBloc = context.read<KdbxBloc>();
     final scope = KeyNestVaultScope.instance;
     final t = switch (_currentTabIndex) {
@@ -641,14 +647,15 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
               child: Column(
                 children: [
                   // Top Header: User avatar/tab icon, Title, Subtitle, Lock, Settings
-                  KeyNestHeader(
-                    title: _tabTitle(),
-                    subtitle: _tabSubtitle(),
-                    icon: _tabIcon(),
-                    iconBgColor: _tabColor(isDark),
-                    iconColor: _tabIconColor(isDark),
-                    onAdd: widget.isDesktopMaster ? _onFabPressed : null,
-                  ),
+                  if (!widget.isDesktopMaster)
+                    KeyNestHeader(
+                      title: _tabTitle(),
+                      subtitle: _tabSubtitle(),
+                      icon: _tabIcon(),
+                      iconBgColor: _tabColor(isDark),
+                      iconColor: _tabIconColor(isDark),
+                      onAdd: null,
+                    ),
 
                   // Tab Content with smooth direct slide transitions without flashing
                   Expanded(
@@ -683,6 +690,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             1,
                             _activatedTabs.contains(1)
                                 ? RecordsTab(
+                                    selectedEntry: widget.selectedEntry,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(
@@ -702,6 +710,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             2,
                             _activatedTabs.contains(2)
                                 ? CardsTab(
+                                    selectedEntry: widget.selectedEntry,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(
@@ -721,6 +730,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             3,
                             _activatedTabs.contains(3)
                                 ? NotesTab(
+                                    selectedEntry: widget.selectedEntry,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(

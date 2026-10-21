@@ -3078,8 +3078,9 @@ class _PasswordListContentState extends State<PasswordListContent>
       },
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+          if (!KeyNestPlatform.isDesktopOrWeb)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
             child: SingleChildScrollView(
               controller: _chipsScrollController,
               scrollDirection: Axis.horizontal,

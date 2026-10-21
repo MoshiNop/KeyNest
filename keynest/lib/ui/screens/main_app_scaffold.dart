@@ -7,14 +7,17 @@ import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/main.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/screens/add_payment_card.dart';
 import 'package:keynest/ui/screens/card_details.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/screens/keynest_home_shell.dart';
 import 'package:keynest/ui/screens/note_details.dart';
 import 'package:keynest/ui/screens/password_list.dart';
 import 'package:keynest/ui/widgets/keyboard_handler.dart';
-import 'package:keynest/ui/widgets/keynest_desktop_detail_pane.dart';
+import 'package:keynest/ui/widgets/keynest_category_picker.dart';
+import 'package:keynest/ui/widgets/keynest_chips.dart';
 import 'package:keynest/ui/widgets/keynest_desktop_nav_rail.dart';
+import 'package:keynest/ui/widgets/keynest_top_chips_bar.dart';
 import 'package:keynest/ui/widgets/utils/back_button_navigator_delegate.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/item_type_helper.dart';
@@ -112,7 +115,6 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   final List<KdbxEntry> _history = [];
   int _historyIndex = -1;
   KdbxEntry? _selectedEntry;
-  bool _isCreatingNew = false;
   double _listPaneWidth = 380.0;
   bool _isDraggingSplitter = false;
   int _activeRailIndex = 0;
@@ -158,8 +160,23 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
     setState(() {
       _selectedEntry = entry;
-      _isCreatingNew = isNew;
     });
+
+    if (entry != null) {
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        _routeForEntry(entry, isNew),
+        (route) => route.isFirst,
+      );
+    } else {
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (context) => EmptyStateInitialRoute(
+            onAddNewItem: _handleAddNewItem,
+          ),
+        ),
+        (route) => route.isFirst,
+      );
+    }
   }
 
   void _navigateBack() {
@@ -167,8 +184,11 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       setState(() {
         _historyIndex--;
         _selectedEntry = _history[_historyIndex];
-        _isCreatingNew = false;
       });
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        _routeForEntry(_selectedEntry!, false),
+        (route) => route.isFirst,
+      );
     }
   }
 
@@ -177,8 +197,11 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       setState(() {
         _historyIndex++;
         _selectedEntry = _history[_historyIndex];
-        _isCreatingNew = false;
       });
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        _routeForEntry(_selectedEntry!, false),
+        (route) => route.isFirst,
+      );
     }
   }
 
@@ -190,11 +213,60 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     final activeFolder = (activeVault != null)
         ? (scope.getCurrentFolder(kdbxBloc) ?? activeVault.body.rootGroup)
         : null;
-    final newEntry = kdbxBloc.createEntry(
-      file: activeVault,
-      group: activeFolder,
-    );
-    _navigateToEntry(newEntry, isNew: true);
+
+    final currentTab = scope.activeTabIndex ?? _activeRailIndex;
+
+    switch (currentTab) {
+      case 2: // Cards tab
+        _navigatorKey.currentState?.pushAndRemoveUntil(
+          AddPaymentCardScreen.route(
+            initialFile: activeVault,
+            initialGroup: activeFolder,
+          ),
+          (route) => route.isFirst,
+        );
+        setState(() {
+          _selectedEntry = null;
+        });
+        break;
+      case 3: // Notes tab
+        _navigatorKey.currentState?.pushAndRemoveUntil(
+          NoteDetailsScreen.route(
+            isEditing: true,
+            initialFile: activeVault,
+            initialGroup: activeFolder,
+          ),
+          (route) => route.isFirst,
+        );
+        setState(() {
+          _selectedEntry = null;
+        });
+        break;
+      case 1: // Records tab
+        final newEntry = kdbxBloc.createEntry(
+          file: activeVault,
+          group: activeFolder,
+        );
+        KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.record);
+        _navigateToEntry(newEntry, isNew: true);
+        break;
+      case 4: // Authenticator tab
+        final newEntry = kdbxBloc.createEntry(
+          file: activeVault,
+          group: activeFolder,
+        );
+        KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
+        _navigateToEntry(newEntry, isNew: true);
+        break;
+      case 0: // Secrets tab
+      default:
+        final newEntry = kdbxBloc.createEntry(
+          file: activeVault,
+          group: activeFolder,
+        );
+        _navigateToEntry(newEntry, isNew: true);
+        break;
+    }
   }
 
   Route<void> _routeForEntry(KdbxEntry entry, bool isNew) {
@@ -433,6 +505,137 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     );
   }
 
+  Widget _buildDesktopChipsBar(BuildContext context, bool isDark) {
+    final kdbxBloc = context.watch<KdbxBloc>();
+    final scope = KeyNestVaultScope.instance;
+    final selectedVault = scope.getSelectedVault(kdbxBloc);
+    final borderColor = isDark
+        ? KeyNestPalette.cardBorderDark
+        : KeyNestPalette.cardBorderLight;
+    final currentTab = scope.activeTabIndex ?? _activeRailIndex;
+
+    return Container(
+      height: 42,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: isDark ? KeyNestPalette.surfaceDark : Colors.white,
+        border: Border(
+          bottom: BorderSide(color: borderColor, width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          // 1. Vault Chip
+          KeyNestChip(
+            label: selectedVault == null
+                ? 'All Vault Items'
+                : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
+            icon: Icons.keyboard_arrow_down_rounded,
+            isSelected: selectedVault != null,
+            onTap: () => KeyNestTopChipsBar.showVaultSelectionSheet(
+              context,
+              kdbxBloc,
+              tab: scope.currentActiveTab,
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // 2. Sort Chip
+          KeyNestChip(
+            label: KeyNestTopChipsBar.sortLabel(scope.sortMode),
+            icon: Icons.sort_rounded,
+            isSelected: scope.sortMode != VaultSortMode.alphabeticalAsc,
+            onTap: () => _showDesktopSortDialog(context, scope),
+          ),
+          const SizedBox(width: 8),
+
+          // 3. Category Chip (for secrets/passwords tab)
+          if (currentTab == 0) ...[
+            KeyNestChip(
+              label: scope.selectedCategory ?? 'Category',
+              icon: Icons.keyboard_arrow_down_rounded,
+              isSelected: scope.selectedCategory != null,
+              onTap: () async {
+                final cat = await KeyNestCategoryPicker.show(
+                  context,
+                  selectedCategory: scope.selectedCategory,
+                );
+                if (cat == null || cat == 'All') {
+                  scope.setSelectedCategory(null);
+                } else {
+                  scope.setSelectedCategory(cat);
+                }
+              },
+            ),
+            const SizedBox(width: 8),
+          ],
+
+          // 4. Favorites Chip
+          KeyNestChip(
+            label: 'Favorites',
+            icon: Icons.star_rounded,
+            isSelected: scope.favoritesOnly,
+            onTap: () {
+              scope.setFavoritesOnly(!scope.favoritesOnly);
+            },
+          ),
+
+          // 5. Clear Filter Chip if active
+          if (scope.selectedCategory != null || scope.favoritesOnly) ...[
+            const SizedBox(width: 8),
+            KeyNestChip(
+              label: 'Clear filter',
+              icon: Icons.close_rounded,
+              onTap: () {
+                scope.setSelectedCategory(null);
+                scope.setFavoritesOnly(false);
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showDesktopSortDialog(BuildContext context, KeyNestVaultScope scope) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return SimpleDialog(
+          title: const Text('Sort entries by'),
+          children: VaultSortMode.values.map((mode) {
+            final isSelected = scope.sortMode == mode;
+            return SimpleDialogOption(
+              onPressed: () {
+                scope.setSortMode(mode);
+                Navigator.of(dialogContext).pop();
+              },
+              child: Row(
+                children: [
+                  Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 18,
+                    color: isSelected ? const Color(0xFF0A85EA) : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    KeyNestTopChipsBar.sortLabel(mode),
+                    style: TextStyle(
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDesktopOrWeb = KeyNestPlatform.isDesktopOrWeb;
@@ -454,11 +657,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                 KeyNestVaultScope.instance.setActiveTab(index);
               },
             ),
-            // 2. Right of Rail: Top Bar + List & Detail Panes
+            // 2. Right of Rail: Top Bar + Chips Bar + List & Detail Panes
             Expanded(
               child: Column(
                 children: [
                   _buildDesktopTopBar(context, isDark),
+                  _buildDesktopChipsBar(context, isDark),
                   Expanded(
                     child: Row(
                       children: [
@@ -469,31 +673,27 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                             selectedEntry: _selectedEntry,
                             isDesktopMaster: true,
                             onEntrySelected: _onEntrySelected,
+                            onAddNewItem: _handleAddNewItem,
                           ),
                         ),
                         // Splitter
                         _buildSplitterHandle(context, isDark),
-                        // Right Pane: Detail
+                        // Right Pane: Detail (Full-featured screens via Navigator)
                         Expanded(
-                          child: KeyNestDesktopDetailPane(
-                            key: ValueKey(
-                              _selectedEntry?.uuid.toString() ?? 'empty_detail',
-                            ),
-                            entry: _selectedEntry,
-                            initialIsEditing: _isCreatingNew,
-                            onEntrySaved: (saved) {
-                              setState(() {
-                                _selectedEntry = saved;
-                                _isCreatingNew = false;
-                              });
+                          child: Navigator(
+                            key: _navigatorKey,
+                            requestFocus: false,
+                            onGenerateRoute: (settings) {
+                              assert(
+                                settings.name == Navigator.defaultRouteName,
+                              );
+                              return MaterialPageRoute<void>(
+                                settings: settings,
+                                builder: (context) => EmptyStateInitialRoute(
+                                  onAddNewItem: _handleAddNewItem,
+                                ),
+                              );
                             },
-                            onEntryDeleted: () {
-                              setState(() {
-                                _selectedEntry = null;
-                                _isCreatingNew = false;
-                              });
-                            },
-                            onAddNewItem: _handleAddNewItem,
                           ),
                         ),
                       ],
@@ -545,6 +745,10 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
 }
 
 class EmptyStateInitialRoute extends StatelessWidget {
+  const EmptyStateInitialRoute({super.key, this.onAddNewItem});
+
+  final VoidCallback? onAddNewItem;
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context);
@@ -593,7 +797,7 @@ class EmptyStateInitialRoute extends StatelessWidget {
             ),
             const SizedBox(height: 28),
             FilledButton.icon(
-              onPressed: () {
+              onPressed: onAddNewItem ?? () {
                 final kdbxBloc = context.read<KdbxBloc>();
                 final scope = KeyNestVaultScope.instance;
                 final activeVault = scope.getSelectedVault(kdbxBloc) ??
