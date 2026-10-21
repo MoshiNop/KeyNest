@@ -8,6 +8,7 @@ import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/widgets/keynest_key_file_creation_section.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 
 enum KeyNestExportFormat {
   kdbx,
@@ -57,6 +58,27 @@ class KeyNestExportOptionsSheet extends StatefulWidget {
       return Future.value(null);
     }
     final targetFile = initialFile ?? files.first;
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return showDialog<KeyNestExportConfig>(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: KeyNestExportOptionsSheet(
+                kdbxBloc: kdbxBloc,
+                format: format,
+                initialFile: targetFile,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return showModalBottomSheet<KeyNestExportConfig>(
       context: context,
@@ -340,34 +362,20 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                 child: Row(
                   children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: widget.format == KeyNestExportFormat.kdbx
-                            ? (isDark
-                                      ? KeyNestPalette.primaryDark
-                                      : KeyNestPalette.primary)
-                                  .withValues(alpha: isDark ? 0.20 : 0.12)
-                            : KeyNestPalette.warning.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      alignment: Alignment.center,
+                    Padding(
+                      padding: const EdgeInsets.only(right: 14),
                       child: Icon(
                         widget.format == KeyNestExportFormat.kdbx
                             ? Icons.shield_rounded
                             : widget.format == KeyNestExportFormat.csv
                             ? Icons.table_chart_rounded
                             : Icons.code_rounded,
-                        color: widget.format == KeyNestExportFormat.kdbx
-                            ? (isDark
-                                  ? KeyNestPalette.primaryDark
-                                  : KeyNestPalette.primary)
-                            : KeyNestPalette.warning,
-                        size: 22,
+                        color: isDark
+                            ? KeyNestPalette.primaryDark
+                            : KeyNestPalette.primary,
+                        size: 26,
                       ),
                     ),
-                    const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -485,13 +493,9 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                                 Icon(
                                   Icons.all_inclusive_rounded,
                                   size: 18,
-                                  color: _selectedFile == null
-                                      ? (isDark
-                                            ? KeyNestPalette.primaryDark
-                                            : KeyNestPalette.primary)
-                                      : (isDark
-                                            ? Colors.white70
-                                            : Colors.black54),
+                                  color: isDark
+                                      ? KeyNestPalette.primaryDark
+                                      : KeyNestPalette.primary,
                                 ),
                                 const SizedBox(width: 10),
                                 Expanded(
@@ -563,13 +567,9 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                                   Icon(
                                     Icons.lock_rounded,
                                     size: 18,
-                                    color: isSelected
-                                        ? (isDark
-                                              ? KeyNestPalette.primaryDark
-                                              : KeyNestPalette.primary)
-                                        : (isDark
-                                              ? Colors.white70
-                                              : Colors.black54),
+                                    color: isDark
+                                        ? KeyNestPalette.primaryDark
+                                        : KeyNestPalette.primary,
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
@@ -736,7 +736,13 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                       TextField(
                         decoration: InputDecoration(
                           hintText: 'Search entries...',
-                          prefixIcon: const Icon(Icons.search, size: 20),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            size: 20,
+                            color: isDark
+                                ? KeyNestPalette.primaryDark
+                                : KeyNestPalette.primary,
+                          ),
                           isDense: true,
                           filled: true,
                           fillColor: isDark
@@ -797,6 +803,21 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                                   return CheckboxListTile(
                                     dense: true,
                                     value: isChecked,
+                                    activeColor: isDark
+                                        ? KeyNestPalette.primaryDark
+                                        : KeyNestPalette.primary,
+                                    checkColor: isDark
+                                        ? const Color(0xFF00315D)
+                                        : Colors.white,
+                                    side: BorderSide(
+                                      color: isDark
+                                          ? const Color(0xFF94A3B8)
+                                          : const Color(0xFF73777F),
+                                      width: 2.0,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
                                     title: Text(
                                       title,
                                       maxLines: 1,
@@ -840,20 +861,22 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: KeyNestPalette.warning.withValues(alpha: 0.12),
+                          color: KeyNestPalette.warningColorFor(isDark)
+                              .withValues(alpha: isDark ? 0.18 : 0.12),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: KeyNestPalette.warning.withValues(
-                              alpha: 0.35,
-                            ),
+                            color: KeyNestPalette.warningColorFor(isDark)
+                                .withValues(alpha: isDark ? 0.45 : 0.35),
                           ),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.warning_amber_rounded,
-                              color: KeyNestPalette.warning,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
                               size: 22,
                             ),
                             const SizedBox(width: 12),
@@ -867,7 +890,9 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                       letterSpacing: 0.8,
-                                      color: KeyNestPalette.warning,
+                                      color: KeyNestPalette.warningColorFor(
+                                        isDark,
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -914,9 +939,12 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                         obscureText: _obscureNew,
                         decoration: InputDecoration(
                           labelText: 'New Master Password for Export',
-                          prefixIcon: const Icon(
+                          prefixIcon: Icon(
                             Icons.vpn_key_rounded,
                             size: 20,
+                            color: isDark
+                                ? KeyNestPalette.primaryDark
+                                : KeyNestPalette.primary,
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -944,9 +972,12 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                         obscureText: _obscureConfirm,
                         decoration: InputDecoration(
                           labelText: 'Confirm Export Master Password',
-                          prefixIcon: const Icon(
+                          prefixIcon: Icon(
                             Icons.check_circle_outline,
                             size: 20,
+                            color: isDark
+                                ? KeyNestPalette.primaryDark
+                                : KeyNestPalette.primary,
                           ),
                           suffixIcon: IconButton(
                             icon: Icon(
@@ -1026,13 +1057,15 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                               ? (isDark
                                     ? KeyNestPalette.primaryDark
                                     : KeyNestPalette.primary)
-                              : KeyNestPalette.warning,
+                              : KeyNestPalette.warningColorFor(isDark),
                           foregroundColor:
                               widget.format == KeyNestExportFormat.kdbx
                               ? (isDark
                                     ? const Color(0xFF00315D)
                                     : Colors.white)
-                              : Colors.white,
+                              : (isDark
+                                    ? const Color(0xFF271900)
+                                    : Colors.white),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
@@ -1114,11 +1147,9 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
             Icon(
               icon,
               size: 22,
-              color: isSelected
-                  ? (isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary)
-                  : (isDark ? Colors.white70 : Colors.black54),
+              color: isDark
+                  ? KeyNestPalette.primaryDark
+                  : KeyNestPalette.primary,
             ),
             const SizedBox(height: 6),
             Text(

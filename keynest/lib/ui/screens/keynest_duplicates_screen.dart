@@ -9,15 +9,26 @@ import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/duplicate_detector.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class KeyNestDuplicatesScreen extends StatefulWidget {
   const KeyNestDuplicatesScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute(
-    settings: const RouteSettings(name: '/duplicates'),
-    builder: (context) => const KeyNestDuplicatesScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/duplicates'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => const KeyNestDuplicatesScreen(),
+      );
+    }
+    return MaterialPageRoute(
+      settings: const RouteSettings(name: '/duplicates'),
+      builder: (context) => const KeyNestDuplicatesScreen(),
+    );
+  }
 
   @override
   State<KeyNestDuplicatesScreen> createState() =>
@@ -408,6 +419,12 @@ class _KeyNestDuplicatesScreenState extends State<KeyNestDuplicatesScreen> {
               ),
             ),
           ],
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
         ],
       ),
       bottomNavigationBar: selectedEntries.isNotEmpty

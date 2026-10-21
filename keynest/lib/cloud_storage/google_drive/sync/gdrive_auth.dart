@@ -483,6 +483,9 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
   String get _clientId =>
       CloudConfigStore.instance.effectiveGoogleDesktopClientId;
 
+  String get _clientSecret =>
+      CloudConfigStore.instance.effectiveGoogleDesktopClientSecret;
+
   GoogleTokenResponse? _inMemoryToken;
   String? _currentAccountEmail;
   String? _currentDisplayName;
@@ -646,6 +649,7 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
     required String codeVerifier,
     required String redirectUri,
   }) async {
+    final clientSecret = _clientSecret;
     final response = await _httpClient.post(
       Uri.parse('https://oauth2.googleapis.com/token'),
       headers: {'content-type': 'application/x-www-form-urlencoded'},
@@ -653,14 +657,19 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
         'grant_type': 'authorization_code',
         'code': code,
         'client_id': _clientId,
+        if (clientSecret.isNotEmpty) 'client_secret': clientSecret,
         'redirect_uri': redirectUri,
         'code_verifier': codeVerifier,
       },
     );
 
     if (response.statusCode != 200) {
+      _logger.warning(
+        'Token exchange failed: HTTP ${response.statusCode} - ${response.body}',
+      );
       throw GoogleDriveAuthException(
         'Token exchange failed: HTTP ${response.statusCode}',
+        details: response.body,
       );
     }
 
@@ -669,6 +678,7 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
   }
 
   Future<GoogleTokenResponse> _refreshToken(String refreshToken) async {
+    final clientSecret = _clientSecret;
     final response = await _httpClient.post(
       Uri.parse('https://oauth2.googleapis.com/token'),
       headers: {'content-type': 'application/x-www-form-urlencoded'},
@@ -676,6 +686,7 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
         'grant_type': 'refresh_token',
         'refresh_token': refreshToken,
         'client_id': _clientId,
+        if (clientSecret.isNotEmpty) 'client_secret': clientSecret,
       },
     );
 

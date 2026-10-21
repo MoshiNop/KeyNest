@@ -49,10 +49,20 @@ import 'package:provider/provider.dart';
 final _logger = Logger('preferences');
 
 class PreferencesScreen extends StatelessWidget {
-  static Route<void> route() => KeyNestPushPageRoute(
-    settings: const RouteSettings(name: '/preferences'),
-    builder: (context) => PreferencesScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/preferences'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => PreferencesScreen(),
+      );
+    }
+    return KeyNestPushPageRoute(
+      settings: const RouteSettings(name: '/preferences'),
+      builder: (context) => PreferencesScreen(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +84,15 @@ class PreferencesScreen extends StatelessWidget {
                 : KeyNestPalette.textPrimaryLight,
           ),
         ),
-        actions: [PreferencesOverflowMenuAction()],
+        actions: [
+          PreferencesOverflowMenuAction(),
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+        ],
       ),
       body: Stack(
         children: [
@@ -657,19 +675,23 @@ class _PreferencesBodyState extends State<PreferencesBody>
           header: 'Security & Auto-Lock',
           headerIcon: Icons.lock_clock_outlined,
           children: [
-            KeyNestSettingsTile(
-              title: 'Auto-Lock Vault',
-              subtitle:
-                  'Timeout: ${_autoLockLabel(SecuritySettingsStore.instance.autoLockSeconds)}',
-              icon: Icons.timer_outlined,
-              onTap: () => _showAutoLockPicker(context),
+            Builder(
+              builder: (tileCtx) => KeyNestSettingsTile(
+                title: 'Auto-Lock Vault',
+                subtitle:
+                    'Timeout: ${_autoLockLabel(SecuritySettingsStore.instance.autoLockSeconds)}',
+                icon: Icons.timer_outlined,
+                onTap: () => _showAutoLockPicker(tileCtx),
+              ),
             ),
-            KeyNestSettingsTile(
-              title: 'Clipboard Auto-Clear',
-              subtitle:
-                  'Clear copied secrets after: ${_clipboardClearLabel(SecuritySettingsStore.instance.clipboardClearSeconds)}',
-              icon: Icons.content_paste_off_rounded,
-              onTap: () => _showClipboardClearPicker(context),
+            Builder(
+              builder: (tileCtx) => KeyNestSettingsTile(
+                title: 'Clipboard Auto-Clear',
+                subtitle:
+                    'Clear copied secrets after: ${_clipboardClearLabel(SecuritySettingsStore.instance.clipboardClearSeconds)}',
+                icon: Icons.content_paste_off_rounded,
+                onTap: () => _showClipboardClearPicker(tileCtx),
+              ),
             ),
           ],
         ),
@@ -908,6 +930,138 @@ class _PreferencesBodyState extends State<PreferencesBody>
       -1: 'Never (Not Recommended)',
     };
 
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      showAnchoredPopover<void>(
+        anchorContext: context,
+        width: 380,
+        centerOnAnchor: true,
+        builder: (popContext) {
+          final isDark = Theme.of(popContext).brightness == Brightness.dark;
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.timer_outlined,
+                            color: Color(0xFFF59E0B),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Auto-Lock Vault',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark
+                                ? KeyNestPalette.textPrimaryDark
+                                : KeyNestPalette.textPrimaryLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      splashRadius: 16,
+                      onPressed: () => Navigator.of(popContext).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Lock database when KeyNest is sent to background.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark
+                        ? KeyNestPalette.textSecondaryDark
+                        : KeyNestPalette.textSecondaryLight,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...options.entries.map((e) {
+                  final isSelected = current == e.key;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: KeyNestCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: isSelected
+                          ? Border.all(
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                              width: 1.5,
+                            )
+                          : null,
+                      onTap: () {
+                        Navigator.of(popContext).pop();
+                        SecuritySettingsStore.instance
+                            .save(autoLockSeconds: e.key)
+                            .then((_) {
+                              if (mounted) {
+                                setState(() {});
+                              }
+                            });
+                      },
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              e.value,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? (isDark
+                                          ? KeyNestPalette.primaryDark
+                                          : KeyNestPalette.primary)
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          if (isSelected)
+                            Icon(
+                              Icons.check_circle_rounded,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                              size: 18,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+      );
+      return;
+    }
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1065,6 +1219,138 @@ class _PreferencesBodyState extends State<PreferencesBody>
       90: '90 seconds',
       -1: 'Never',
     };
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      showAnchoredPopover<void>(
+        anchorContext: context,
+        width: 380,
+        centerOnAnchor: true,
+        builder: (popContext) {
+          final isDark = Theme.of(popContext).brightness == Brightness.dark;
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.content_paste_off_rounded,
+                            color: Color(0xFF10B981),
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Clipboard Auto-Clear',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark
+                                ? KeyNestPalette.textPrimaryDark
+                                : KeyNestPalette.textPrimaryLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      splashRadius: 16,
+                      onPressed: () => Navigator.of(popContext).pop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Automatically wipe sensitive credentials from the clipboard after copying.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark
+                        ? KeyNestPalette.textSecondaryDark
+                        : KeyNestPalette.textSecondaryLight,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...options.entries.map((e) {
+                  final isSelected = current == e.key;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: KeyNestCard(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      border: isSelected
+                          ? Border.all(
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                              width: 1.5,
+                            )
+                          : null,
+                      onTap: () {
+                        Navigator.of(popContext).pop();
+                        SecuritySettingsStore.instance
+                            .save(clipboardClearSeconds: e.key)
+                            .then((_) {
+                              if (mounted) {
+                                setState(() {});
+                              }
+                            });
+                      },
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              e.value,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? (isDark
+                                          ? KeyNestPalette.primaryDark
+                                          : KeyNestPalette.primary)
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          if (isSelected)
+                            Icon(
+                              Icons.check_circle_rounded,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                              size: 18,
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+      );
+      return;
+    }
 
     showModalBottomSheet<void>(
       context: context,

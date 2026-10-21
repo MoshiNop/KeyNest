@@ -751,6 +751,14 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             _activatedTabs.contains(4)
                                 ? AuthenticatorTab(
                                     isActive: _currentTabIndex == 4,
+                                    selectedEntry: widget.selectedEntry,
+                                    onEntrySelected:
+                                        widget.onEntrySelected != null
+                                        ? (entry) => _handleEntrySelected(
+                                            entry,
+                                            EntrySelectionType.activeOpen,
+                                          )
+                                        : null,
                                     onCountChanged: (count) =>
                                         _updateTabCount(4, count),
                                     onRegisterNavigationHandler: (h) =>

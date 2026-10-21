@@ -5,8 +5,10 @@ import 'package:keynest/models/keynest_csv_mapping.dart';
 import 'package:keynest/services/keynest_import_export_service.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/widgets/keynest_card.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 enum KeyNestCsvImportMode {
@@ -22,6 +24,36 @@ class KeyNestCsvImportScreen extends StatefulWidget {
     required this.parsedRows,
     required this.initialDestination,
   });
+
+  static Route<KeyNestImportExportResult> route({
+    required String fileName,
+    required String csvText,
+    required List<List<String>> parsedRows,
+    required KeyNestDestination initialDestination,
+  }) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<KeyNestImportExportResult>(
+        settings: const RouteSettings(name: '/import/csv'),
+        maxWidth: 560,
+        maxHeight: 640,
+        builder: (context) => KeyNestCsvImportScreen(
+          fileName: fileName,
+          csvText: csvText,
+          parsedRows: parsedRows,
+          initialDestination: initialDestination,
+        ),
+      );
+    }
+    return MaterialPageRoute<KeyNestImportExportResult>(
+      settings: const RouteSettings(name: '/import/csv'),
+      builder: (context) => KeyNestCsvImportScreen(
+        fileName: fileName,
+        csvText: csvText,
+        parsedRows: parsedRows,
+        initialDestination: initialDestination,
+      ),
+    );
+  }
 
   final String fileName;
   final String csvText;
@@ -146,6 +178,7 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
   }
 
   void _showSnack(String message, {bool isError = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
@@ -153,7 +186,9 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
           content: Text(message),
           backgroundColor: isError
               ? KeyNestPalette.error
-              : KeyNestPalette.success,
+              : (isDark
+                    ? KeyNestPalette.successContainerDark
+                    : KeyNestPalette.success),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -286,24 +321,16 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
       padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color:
-                  (isDark ? KeyNestPalette.primaryDark : KeyNestPalette.primary)
-                      .withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
             child: Icon(
               Icons.folder_shared_rounded,
               color: isDark
                   ? KeyNestPalette.primaryDark
                   : KeyNestPalette.primary,
-              size: 20,
+              size: 26,
             ),
           ),
-          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -484,9 +511,11 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
           ),
           child: Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.info_outline_rounded,
-                color: KeyNestPalette.info,
+                color: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
                 size: 20,
               ),
               const SizedBox(width: 10),
@@ -531,8 +560,9 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
               badgeBg = Colors.grey.withValues(alpha: 0.2);
               badgeText = Colors.grey;
             } else if (isCustom) {
-              badgeBg = KeyNestPalette.warning.withValues(alpha: 0.18);
-              badgeText = KeyNestPalette.warning;
+              final warnColor = KeyNestPalette.warningColorFor(isDark);
+              badgeBg = warnColor.withValues(alpha: 0.18);
+              badgeText = warnColor;
             } else {
               badgeBg =
                   (isDark ? KeyNestPalette.primaryDark : KeyNestPalette.primary)
@@ -601,7 +631,13 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
           child: TextButton.icon(
             onPressed: () =>
                 setState(() => _mode = KeyNestCsvImportMode.custom),
-            icon: const Icon(Icons.edit_note_rounded, size: 16),
+            icon: Icon(
+              Icons.edit_note_rounded,
+              size: 16,
+              color: isDark
+                  ? KeyNestPalette.primaryDark
+                  : KeyNestPalette.primary,
+            ),
             label: const Text(
               'Customize column assignments →',
               style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
@@ -630,9 +666,11 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
           ),
           child: Row(
             children: [
-              const Icon(
+              Icon(
                 Icons.touch_app_rounded,
-                color: KeyNestPalette.info,
+                color: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
                 size: 20,
               ),
               const SizedBox(width: 10),
@@ -708,10 +746,12 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
             margin: const EdgeInsets.only(bottom: 14),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: KeyNestPalette.warning.withValues(alpha: 0.12),
+              color: KeyNestPalette.warningColorFor(isDark)
+                  .withValues(alpha: isDark ? 0.18 : 0.12),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: KeyNestPalette.warning.withValues(alpha: 0.3),
+                color: KeyNestPalette.warningColorFor(isDark)
+                    .withValues(alpha: isDark ? 0.45 : 0.3),
               ),
             ),
             child: Column(
@@ -721,9 +761,11 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.info_outline_rounded,
-                        color: KeyNestPalette.warning,
+                        color: isDark
+                            ? KeyNestPalette.primaryDark
+                            : KeyNestPalette.primary,
                         size: 16,
                       ),
                       const SizedBox(width: 8),
@@ -890,7 +932,13 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                suffixIcon: const Icon(Icons.edit, size: 14),
+                suffixIcon: Icon(
+                  Icons.edit,
+                  size: 14,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? KeyNestPalette.primaryDark
+                      : KeyNestPalette.primary,
+                ),
               ),
               onChanged: (val) {
                 setState(() {
@@ -944,20 +992,25 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
       );
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     items.add(
-      const DropdownMenuItem(
+      DropdownMenuItem(
         value: '__custom__',
         child: Row(
           children: [
             Icon(
               Icons.add_circle_outline_rounded,
               size: 15,
-              color: KeyNestPalette.warning,
+              color: isDark
+                  ? KeyNestPalette.primaryDark
+                  : KeyNestPalette.primary,
             ),
-            SizedBox(width: 6),
+            const SizedBox(width: 6),
             Text(
               'Custom Field (User Defined)',
-              style: TextStyle(color: KeyNestPalette.warning),
+              style: TextStyle(
+                color: KeyNestPalette.warningColorFor(isDark),
+              ),
             ),
           ],
         ),
@@ -988,7 +1041,13 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.copy_rounded, size: 16),
+              Icon(
+                Icons.copy_rounded,
+                size: 16,
+                color: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
+              ),
               const SizedBox(width: 8),
               Text(
                 'DUPLICATE HANDLING',
@@ -1074,6 +1133,9 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
                         ? Icons.visibility_off_rounded
                         : Icons.visibility_rounded,
                     size: 18,
+                    color: isDark
+                        ? KeyNestPalette.primaryDark
+                        : KeyNestPalette.primary,
                   ),
                   onPressed: () =>
                       setState(() => _showSensitive = !_showSensitive),
@@ -1120,15 +1182,16 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: KeyNestPalette.warning.withValues(alpha: 0.15),
+                  color: KeyNestPalette.warningColorFor(isDark)
+                      .withValues(alpha: isDark ? 0.20 : 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '$issueCount Issues Found',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: KeyNestPalette.warning,
+                    color: KeyNestPalette.warningColorFor(isDark),
                   ),
                 ),
               ),
@@ -1216,9 +1279,9 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
             const SizedBox(height: 4),
             Text(
               '⚠️ ${preview.issueReason}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
-                color: KeyNestPalette.warning,
+                color: KeyNestPalette.warningColorFor(isDark),
               ),
             ),
           ],

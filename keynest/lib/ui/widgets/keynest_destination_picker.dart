@@ -5,6 +5,7 @@ import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class KeyNestDestination {
@@ -39,6 +40,26 @@ class KeyNestDestinationPickerSheet extends StatefulWidget {
     }
     final targetFile = initialFile ?? files.first;
     final targetGroup = initialGroup ?? targetFile.body.rootGroup;
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return showDialog<KeyNestDestination>(
+        context: context,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 580),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: KeyNestDestinationPickerSheet(
+                initialFile: targetFile,
+                initialGroup: targetGroup,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return showModalBottomSheet<KeyNestDestination>(
       context: context,

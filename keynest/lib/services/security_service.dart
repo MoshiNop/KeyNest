@@ -125,7 +125,7 @@ class KeyNestClipboard {
         customSeconds ?? SecuritySettingsStore.instance.clipboardClearSeconds;
 
     if (context != null && showToast && context.mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -205,7 +205,7 @@ class KeyNestClipboard {
     await Clipboard.setData(ClipboardData(text: text));
 
     if (context != null && showToast && context.mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(

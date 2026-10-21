@@ -104,6 +104,16 @@ class KeyNestTokens {
     return isDark ? darkSuccess : lightSuccess;
   }
 
+  static Color warningColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? darkWarning
+        : lightWarning;
+  }
+
+  static Color warningColorFor(bool isDark) {
+    return isDark ? darkWarning : lightWarning;
+  }
+
   static const Color textPrimaryLight = lightOnBackground;
   static const Color textSecondaryLight = lightOnSurfaceVariant;
   static const Color textTertiaryLight = lightOutline;

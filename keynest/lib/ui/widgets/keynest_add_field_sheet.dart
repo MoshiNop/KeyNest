@@ -4,6 +4,7 @@ import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/ui/widgets/keynest_custom_field_sheet.dart';
 import 'package:keynest/utils/dialog_utils.dart';
+import 'package:keynest/utils/platform.dart';
 
 class KeyNestAddFieldResult {
   const KeyNestAddFieldResult({
@@ -46,17 +47,41 @@ class KeyNestFieldOption {
 }
 
 class KeyNestAddFieldSheet extends StatelessWidget {
-  const KeyNestAddFieldSheet({super.key});
+  const KeyNestAddFieldSheet({super.key, this.isDialog = false});
+
+  final bool isDialog;
 
   static List<KeyNestFieldOption> get fieldOptions => _options;
 
   static Future<KeyNestAddFieldResult?> show(BuildContext context) async {
-    final option = await showModalBottomSheet<KeyNestFieldOption>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => const KeyNestAddFieldSheet(),
-    );
+    final KeyNestFieldOption? option;
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      option = await showDialog<KeyNestFieldOption>(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          clipBehavior: Clip.antiAlias,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 460,
+              maxHeight: 600,
+            ),
+            child: const KeyNestAddFieldSheet(isDialog: true),
+          ),
+        ),
+      );
+    } else {
+      option = await showModalBottomSheet<KeyNestFieldOption>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) => const KeyNestAddFieldSheet(),
+      );
+    }
     if (option == null || !context.mounted) {
       return null;
     }
@@ -219,9 +244,11 @@ class KeyNestAddFieldSheet extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(KeyNestShapes.radiusSheet),
-        ),
+        borderRadius: isDialog
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(
+                top: Radius.circular(KeyNestShapes.radiusSheet),
+              ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.15),
@@ -230,24 +257,26 @@ class KeyNestAddFieldSheet extends StatelessWidget {
           ),
         ],
       ),
-      padding: const EdgeInsets.only(top: 14, bottom: 28),
+      padding: EdgeInsets.only(top: isDialog ? 12 : 14, bottom: isDialog ? 16 : 28),
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
+            if (!isDialog) ...[
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
+            ],
 
             // Sheet Title
             Padding(
@@ -273,29 +302,37 @@ class KeyNestAddFieldSheet extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Add Custom Field',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 17,
-                          color: isDark
-                              ? KeyNestPalette.textPrimaryDark
-                              : KeyNestPalette.textPrimaryLight,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Add Custom Field',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 17,
+                            color: isDark
+                                ? KeyNestPalette.textPrimaryDark
+                                : KeyNestPalette.textPrimaryLight,
+                          ),
                         ),
-                      ),
-                      Text(
-                        'Choose a specialized field type or custom attribute',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: isDark
-                              ? KeyNestPalette.textSecondaryDark
-                              : KeyNestPalette.textSecondaryLight,
+                        Text(
+                          'Choose a specialized field type or custom attribute',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: isDark
+                                ? KeyNestPalette.textSecondaryDark
+                                : KeyNestPalette.textSecondaryLight,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                  if (isDialog)
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      splashRadius: 18,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
                 ],
               ),
             ),

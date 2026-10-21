@@ -23,6 +23,7 @@ import 'package:keynest/ui/widgets/keynest_tab_navigation_handler.dart';
 import 'package:keynest/ui/widgets/keynest_top_chips_bar.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:keynest/utils/totp_parser.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 import 'package:provider/provider.dart';
@@ -33,11 +34,15 @@ class AuthenticatorTab extends StatefulWidget {
     this.isActive,
     this.onCountChanged,
     this.onRegisterNavigationHandler,
+    this.selectedEntry,
+    this.onEntrySelected,
   });
 
   final bool? isActive;
   final void Function(int count)? onCountChanged;
   final ValueChanged<KeyNestTabNavigationHandler>? onRegisterNavigationHandler;
+  final KdbxEntry? selectedEntry;
+  final ValueChanged<KdbxEntry>? onEntrySelected;
 
   static Future<void> showAddOptions(
     BuildContext context, {
@@ -371,7 +376,21 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
     _timer = null;
   }
 
-  Future<void> _onAddTotp() => AuthenticatorTab.showAddOptions(context);
+  Future<void> _onAddTotp() async {
+    if (KeyNestPlatform.isDesktopOrWeb && widget.onEntrySelected != null) {
+      final kdbxBloc = context.read<KdbxBloc>();
+      final scope = KeyNestVaultScope.instance;
+      final newEntry = kdbxBloc.createEntry(
+        file: scope.getSelectedVault(kdbxBloc) ??
+            kdbxBloc.openedFilesKdbx.firstOrNull,
+        group: scope.getCurrentFolder(kdbxBloc, KeyNestTab.twoFactor),
+      );
+      KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
+      widget.onEntrySelected!(newEntry);
+      return;
+    }
+    await AuthenticatorTab.showAddOptions(context);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -404,9 +423,13 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
           .toList();
     }
 
+    final effectiveQuery = KeyNestPlatform.isDesktopOrWeb
+        ? scope.searchQuery
+        : _searchQuery;
+
     final displayedEntries = allEntries.where((entry) {
-      if (_searchQuery.isNotEmpty) {
-        final query = _searchQuery.toLowerCase();
+      if (effectiveQuery.isNotEmpty) {
+        final query = effectiveQuery.toLowerCase();
         final title = entry.label?.toLowerCase() ?? '';
         final username =
             entry
@@ -449,38 +472,39 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
       },
       child: Column(
         children: [
-          // Consistent Top Chip Bar Across Tabs (No Category chip)
-          KeyNestTopChipsBar(
-            tab: KeyNestTab.twoFactor,
-            searchController: _searchController,
-            searchFocusNode: _searchFocusNode,
-            isSearchExpanded: _isSearchExpanded,
-            scrollController: _chipsScrollController,
-            searchHintText: 'Search 2FA accounts...',
-            showCategoryChip: false,
-            onSearchExpandedChanged: (expanded) {
-              if (expanded) {
-                _searchOpenedAt = clock.now();
-                _keyboardWasVisible = false;
-              }
-              setState(() {
-                _isSearchExpanded = expanded;
-                if (!expanded) {
-                  _searchQuery = '';
-                  _searchController.clear();
-                  _searchFocusNode.unfocus();
+          // Consistent Top Chip Bar Across Tabs (hidden on desktop because top bar is in shell)
+          if (!KeyNestPlatform.isDesktopOrWeb)
+            KeyNestTopChipsBar(
+              tab: KeyNestTab.twoFactor,
+              searchController: _searchController,
+              searchFocusNode: _searchFocusNode,
+              isSearchExpanded: _isSearchExpanded,
+              scrollController: _chipsScrollController,
+              searchHintText: 'Search 2FA accounts...',
+              showCategoryChip: false,
+              onSearchExpandedChanged: (expanded) {
+                if (expanded) {
+                  _searchOpenedAt = clock.now();
+                  _keyboardWasVisible = false;
                 }
-              });
-            },
-            onSearchChanged: (val) {
-              setState(() {
-                _searchQuery = val.trim();
-              });
-            },
-          ),
+                setState(() {
+                  _isSearchExpanded = expanded;
+                  if (!expanded) {
+                    _searchQuery = '';
+                    _searchController.clear();
+                    _searchFocusNode.unfocus();
+                  }
+                });
+              },
+              onSearchChanged: (val) {
+                setState(() {
+                  _searchQuery = val.trim();
+                });
+              },
+            ),
 
           Expanded(
-            child: allEntries.isEmpty && _searchQuery.isEmpty
+            child: allEntries.isEmpty && effectiveQuery.isEmpty
                 ? KeyNestEmptyState(
                     type: EmptyStateType.twoFactor,
                     actionLabel: 'Add Account',
@@ -489,8 +513,8 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
                 : displayedEntries.isEmpty
                 ? Center(
                     child: Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No 2FA accounts found for "$_searchQuery"'
+                      effectiveQuery.isNotEmpty
+                          ? 'No 2FA accounts found for "$effectiveQuery"'
                           : (scope.favoritesOnly
                                 ? 'No favorite 2FA accounts found'
                                 : 'No 2FA accounts found'),
@@ -523,10 +547,14 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
                             key: ValueKey(entry.uuid.uuid),
                             entry: entry,
                             clockNotifier: _clockNotifier,
-                            searchQuery: _searchQuery,
+                            searchQuery: effectiveQuery,
                             commonFields: commonFields,
                             isDark: isDark,
                             theme: theme,
+                            isSelected: widget.selectedEntry == entry,
+                            onSelect: widget.onEntrySelected != null
+                                ? () => widget.onEntrySelected!(entry)
+                                : null,
                           );
                         },
                       ),
@@ -570,6 +598,8 @@ class KeyNestTotpCardItem extends StatefulWidget {
     required this.commonFields,
     required this.isDark,
     required this.theme,
+    this.isSelected = false,
+    this.onSelect,
   });
 
   final KdbxEntry entry;
@@ -578,6 +608,8 @@ class KeyNestTotpCardItem extends StatefulWidget {
   final CommonFields commonFields;
   final bool isDark;
   final ThemeData theme;
+  final bool isSelected;
+  final VoidCallback? onSelect;
 
   @override
   State<KeyNestTotpCardItem> createState() => _KeyNestTotpCardItemState();
@@ -653,6 +685,26 @@ class _KeyNestTotpCardItemState extends State<KeyNestTotpCardItem> {
     }
   }
 
+  void _openEntryDetails(BuildContext context) {
+    if (widget.onSelect != null) {
+      widget.onSelect!();
+      return;
+    }
+    final itemType = KeyNestItemTypeHelper.getItemType(widget.entry);
+    if (itemType == KeyNestItemType.card) {
+      Navigator.of(context).push(CardDetailsScreen.route(entry: widget.entry));
+    } else if (itemType == KeyNestItemType.note) {
+      Navigator.of(context).push(NoteDetailsScreen.route(entry: widget.entry));
+    } else {
+      Navigator.of(context).push(
+        EntryDetailsScreen.route(
+          entry: widget.entry,
+          isEditing: false,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final title = widget.entry.label ?? '2FA Account';
@@ -675,6 +727,7 @@ class _KeyNestTotpCardItemState extends State<KeyNestTotpCardItem> {
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: KeyNestCard(
+            isSelected: widget.isSelected,
             onTap: () {
               final cleanCode = _cachedCode.replaceAll(' ', '');
               if (cleanCode.isNotEmpty &&
@@ -763,18 +816,32 @@ class _KeyNestTotpCardItemState extends State<KeyNestTotpCardItem> {
                     ],
                   ),
                 ),
-                // Edit button
-                KeyNestPressScale(
-                  onTap: () => _openEntryEditor(context),
-                  child: IconButton(
-                    tooltip: 'Edit entry',
-                    icon: const Icon(Icons.edit_outlined, size: 20),
-                    color: widget.isDark
-                        ? KeyNestPalette.textSecondaryDark
-                        : KeyNestPalette.textSecondaryLight,
-                    onPressed: () => _openEntryEditor(context),
+                if (!KeyNestPlatform.isDesktopOrWeb)
+                  // Edit button (Android/Mobile)
+                  KeyNestPressScale(
+                    onTap: () => _openEntryEditor(context),
+                    child: IconButton(
+                      tooltip: 'Edit entry',
+                      icon: const Icon(Icons.edit_outlined, size: 20),
+                      color: widget.isDark
+                          ? KeyNestPalette.textSecondaryDark
+                          : KeyNestPalette.textSecondaryLight,
+                      onPressed: () => _openEntryEditor(context),
+                    ),
+                  )
+                else
+                  // View details action button (Desktop/Web)
+                  KeyNestPressScale(
+                    onTap: () => _openEntryDetails(context),
+                    child: IconButton(
+                      tooltip: 'View details',
+                      icon: const Icon(Icons.visibility_outlined, size: 20),
+                      color: widget.isDark
+                          ? KeyNestPalette.textSecondaryDark
+                          : KeyNestPalette.textSecondaryLight,
+                      onPressed: () => _openEntryDetails(context),
+                    ),
                   ),
-                ),
               ],
             ),
           ),

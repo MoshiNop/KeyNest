@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/add_record_catalog.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 /// Representation of a category in KeyNest.
@@ -210,6 +212,18 @@ class KeyNestCategories {
     String? selectedCategory,
     bool showAllOption = true,
   }) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return showAnchoredPopover<String>(
+        anchorContext: context,
+        width: 340,
+        maxHeight: 480,
+        builder: (ctx) => _CategoryBottomSheet(
+          selectedCategory: selectedCategory,
+          showAllOption: showAllOption,
+          isDialog: true,
+        ),
+      );
+    }
     return showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -408,15 +422,17 @@ class KeyNestCategoryService {
   }
 }
 
-/// Interactive modal bottom sheet for picking a category.
+/// Interactive modal bottom sheet or dialog for picking a category.
 class _CategoryBottomSheet extends StatefulWidget {
   const _CategoryBottomSheet({
     required this.selectedCategory,
     required this.showAllOption,
+    this.isDialog = false,
   });
 
   final String? selectedCategory;
   final bool showAllOption;
+  final bool isDialog;
 
   @override
   State<_CategoryBottomSheet> createState() => _CategoryBottomSheetState();
@@ -439,44 +455,60 @@ class _CategoryBottomSheetState extends State<_CategoryBottomSheet> {
     return Container(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(KeyNestShapes.radiusSheet),
-        ),
+        borderRadius: widget.isDialog
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(
+                top: Radius.circular(KeyNestShapes.radiusSheet),
+              ),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      padding: EdgeInsets.symmetric(vertical: widget.isDialog ? 12 : 20),
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? KeyNestPalette.cardBorderDark
-                      : KeyNestPalette.dividerLight,
-                  borderRadius: BorderRadius.circular(2),
+            if (!widget.isDialog) ...[
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? KeyNestPalette.cardBorderDark
+                        : KeyNestPalette.dividerLight,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
+              const SizedBox(height: 18),
+            ],
             // Title
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                'Filter by Category',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: isDark
-                      ? KeyNestPalette.textPrimaryDark
-                      : KeyNestPalette.textPrimaryLight,
-                ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Filter by Category',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: isDark
+                            ? KeyNestPalette.textPrimaryDark
+                            : KeyNestPalette.textPrimaryLight,
+                      ),
+                    ),
+                  ),
+                  if (widget.isDialog)
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      splashRadius: 18,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             // Add Category button
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -668,9 +700,13 @@ class _CategoryEditorDialogState extends State<_CategoryEditorDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       backgroundColor: isDark ? KeyNestPalette.surfaceDark : Colors.white,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: KeyNestPlatform.isDesktopOrWeb ? 460 : double.infinity,
+        ),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -936,8 +972,9 @@ class _CategoryEditorDialogState extends State<_CategoryEditorDialog> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class KeyNestCategoryPicker {

@@ -459,7 +459,9 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
                   } else {
                     entry.file.deleteEntry(entry);
                   }
+                  KeyNestItemTypeHelper.invalidateCache(entry);
                   await kdbxBloc.saveFile(entry.file);
+                  KeyNestVaultScope.instance.notifyScopeChanged();
                   if (mounted) {
                     navigator.pop();
                     scaffoldMessenger.clearSnackBars();

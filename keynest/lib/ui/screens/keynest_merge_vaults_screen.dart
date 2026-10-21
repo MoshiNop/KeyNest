@@ -9,16 +9,27 @@ import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/keynest_vault_manager_screen.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 /// Dedicated Vault Merge screen accessible from Settings.
 class KeyNestMergeVaultsScreen extends StatefulWidget {
   const KeyNestMergeVaultsScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute<void>(
-    settings: const RouteSettings(name: '/merge_vaults'),
-    builder: (_) => const KeyNestMergeVaultsScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/merge_vaults'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (_) => const KeyNestMergeVaultsScreen(),
+      );
+    }
+    return MaterialPageRoute<void>(
+      settings: const RouteSettings(name: '/merge_vaults'),
+      builder: (_) => const KeyNestMergeVaultsScreen(),
+    );
+  }
 
   @override
   State<KeyNestMergeVaultsScreen> createState() =>
@@ -66,6 +77,14 @@ class _KeyNestMergeVaultsScreenState extends State<KeyNestMergeVaultsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Merge KDBX Vaults'),
+        actions: [
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+        ],
       ),
       body: _isMerging
           ? Center(

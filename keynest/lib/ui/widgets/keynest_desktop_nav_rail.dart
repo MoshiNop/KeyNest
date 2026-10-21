@@ -90,7 +90,7 @@ class KeyNestDesktopNavRail extends StatelessWidget {
                         : KeyNestPalette.primary)
                     .withValues(alpha: isDark ? 0.20 : 0.12),
               ),
-              padding: const EdgeInsets.all(7),
+              padding: const EdgeInsets.all(4),
               child: Image.asset(
                 AssetConstants.logoIcon,
                 fit: BoxFit.contain,

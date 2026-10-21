@@ -9,6 +9,7 @@ import 'package:keynest/ui/screens/barcodescan_screen.dart';
 import 'package:keynest/ui/widgets/keynest_card.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:keynest/utils/totp_parser.dart';
 import 'package:provider/provider.dart';
 
@@ -28,14 +29,25 @@ class AddTwoFactorScreen extends StatefulWidget {
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
     TotpQrData? initialData,
-  }) => KeyNestPushPageRoute<bool>(
-    settings: const RouteSettings(name: '/add2fa'),
-    builder: (context) => AddTwoFactorScreen(
-      initialFile: initialFile,
-      initialGroup: initialGroup,
-      initialData: initialData,
-    ),
-  );
+  }) => KeyNestPlatform.isDesktopOrWeb
+      ? KeyNestDesktopDialogRoute<bool>(
+          settings: const RouteSettings(name: '/add2fa'),
+          maxWidth: 480,
+          maxHeight: 580,
+          builder: (context) => AddTwoFactorScreen(
+            initialFile: initialFile,
+            initialGroup: initialGroup,
+            initialData: initialData,
+          ),
+        )
+      : KeyNestPushPageRoute<bool>(
+          settings: const RouteSettings(name: '/add2fa'),
+          builder: (context) => AddTwoFactorScreen(
+            initialFile: initialFile,
+            initialGroup: initialGroup,
+            initialData: initialData,
+          ),
+        );
 
   @override
   State<AddTwoFactorScreen> createState() => _AddTwoFactorScreenState();
@@ -325,6 +337,12 @@ class _AddTwoFactorScreenState extends State<AddTwoFactorScreen> {
       backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
       appBar: AppBar(
         title: const Text('Add 2FA Account'),
+        leading: KeyNestPlatform.isDesktopOrWeb
+            ? IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => Navigator.of(context).maybePop(),
+              )
+            : null,
         actions: [
           TextButton(
             onPressed: _isSaving ? null : _onSave,

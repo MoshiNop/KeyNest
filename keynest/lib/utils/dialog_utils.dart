@@ -651,6 +651,7 @@ extension BuildContextSnackBar on BuildContext {
     return messenger.showSnackBar(
       SnackBar(
         content: Text(message),
+        width: KeyNestPlatform.isDesktopOrWeb ? 380 : null,
         duration:
             duration ??
             (action != null

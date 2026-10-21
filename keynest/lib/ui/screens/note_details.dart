@@ -618,8 +618,14 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                 ),
               );
               if (confirm == true && mounted) {
-                entry.file.deleteEntry(entry);
+                if (KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+                  entry.file.deletePermanently(entry);
+                } else {
+                  entry.file.deleteEntry(entry);
+                }
+                KeyNestItemTypeHelper.invalidateCache(entry);
                 await kdbxBloc.saveFile(entry.file);
+                KeyNestVaultScope.instance.notifyScopeChanged();
                 if (mounted) {
                   navigator.pop();
                   scaffoldMessenger.clearSnackBars();

@@ -246,7 +246,9 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                   } else {
                     widget.entry.file.deleteEntry(widget.entry);
                   }
+                  KeyNestItemTypeHelper.invalidateCache(widget.entry);
                   await kdbxBloc.saveFile(widget.entry.file);
+                  KeyNestVaultScope.instance.notifyScopeChanged();
                   if (mounted) {
                     navigator.pop();
                     scaffoldMessenger.clearSnackBars();

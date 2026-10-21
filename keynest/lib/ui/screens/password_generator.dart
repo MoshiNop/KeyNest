@@ -11,6 +11,7 @@ import 'package:keynest/ui/widgets/slide_hide_widget.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/extension_methods.dart';
 import 'package:keynest/utils/password_generator.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 import 'package:quiver/iterables.dart' as iterables;
 import 'package:zxcvbn/zxcvbn.dart';
@@ -23,13 +24,24 @@ enum FinishButtonStyle {
 class PasswordGeneratorScreen extends StatelessWidget {
   const PasswordGeneratorScreen({super.key, this.finishButton});
 
-  static Route<String> route({required FinishButtonStyle finishButton}) =>
-      KeyNestPushPageRoute<String>(
+  static Route<String> route({required FinishButtonStyle finishButton}) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<String>(
         settings: const RouteSettings(name: '/passwordGenerator'),
+        maxWidth: 520,
+        maxHeight: 620,
         builder: (context) => PasswordGeneratorScreen(
           finishButton: finishButton,
         ),
       );
+    }
+    return KeyNestPushPageRoute<String>(
+      settings: const RouteSettings(name: '/passwordGenerator'),
+      builder: (context) => PasswordGeneratorScreen(
+        finishButton: finishButton,
+      ),
+    );
+  }
 
   /// Either a 'Done' for using in a form field, or 'Save as Default'
   final FinishButtonStyle? finishButton;

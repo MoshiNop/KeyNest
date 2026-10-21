@@ -154,9 +154,13 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
           .toList();
     }
 
+    final effectiveQuery = KeyNestPlatform.isDesktopOrWeb
+        ? scope.searchQuery
+        : _searchQuery;
+
     final displayedRecordEntries = allRecordEntries.where((entry) {
-      if (_searchQuery.isNotEmpty) {
-        final query = _searchQuery.toLowerCase();
+      if (effectiveQuery.isNotEmpty) {
+        final query = effectiveQuery.toLowerCase();
         final title = entry.label?.toLowerCase() ?? '';
         final recordType =
             entry.getString(KdbxKey('RecordType'))?.getText()?.toLowerCase() ??
@@ -236,14 +240,24 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
           ),
 
           Expanded(
-            child: allRecordEntries.isEmpty && _searchQuery.isEmpty
+            child: allRecordEntries.isEmpty && effectiveQuery.isEmpty
                 ? KeyNestEmptyState(
                     type: EmptyStateType.records,
                     actionLabel: 'Add Record',
                     onAction: () async {
-                      await Navigator.of(
-                        context,
-                      ).push(AddRecordCatalogScreen.route());
+                      final result = await Navigator.of(context).push<dynamic>(
+                        AddRecordCatalogScreen.route(
+                          initialFile: scope.getSelectedVault(kdbxBloc) ??
+                              kdbxBloc.openedFilesKdbx.firstOrNull,
+                          initialGroup: scope.getCurrentFolder(
+                            kdbxBloc,
+                            KeyNestTab.records,
+                          ),
+                        ),
+                      );
+                      if (result is KdbxEntry && widget.onEntrySelected != null) {
+                        widget.onEntrySelected!(result);
+                      }
                       if (mounted) {
                         setState(() {});
                       }
@@ -252,8 +266,8 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
                 : displayedRecordEntries.isEmpty
                 ? Center(
                     child: Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No records found for "$_searchQuery"'
+                      effectiveQuery.isNotEmpty
+                          ? 'No records found for "$effectiveQuery"'
                           : (scope.favoritesOnly
                                 ? 'No favorite records found'
                                 : 'No records found'),
@@ -312,11 +326,11 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
                             subtitle = recordType;
                           }
 
-                          if (_searchQuery.isNotEmpty &&
+                          if (effectiveQuery.isNotEmpty &&
                               primaryVal != null &&
                               primaryVal.isNotEmpty &&
                               primaryVal.toLowerCase().contains(
-                                _searchQuery.toLowerCase(),
+                                effectiveQuery.toLowerCase(),
                               ) &&
                               !subtitle.toLowerCase().contains(
                                 primaryVal.toLowerCase(),
@@ -331,6 +345,7 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: KeyNestCard(
+                              isSelected: widget.selectedEntry == entry,
                               onTap: () {
                                 if (widget.onEntrySelected != null) {
                                   widget.onEntrySelected!(entry);
@@ -369,7 +384,7 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
                                       children: [
                                         KeyNestSearchHighlight.text(
                                           text: title,
-                                          query: _searchQuery,
+                                          query: effectiveQuery,
                                           isDark: isDark,
                                           style: theme.textTheme.titleMedium
                                               ?.copyWith(
@@ -384,7 +399,7 @@ class _RecordsTabState extends State<RecordsTab> with WidgetsBindingObserver {
                                         const SizedBox(height: 2),
                                         KeyNestSearchHighlight.text(
                                           text: subtitle,
-                                          query: _searchQuery,
+                                          query: effectiveQuery,
                                           isDark: isDark,
                                           style: theme.textTheme.bodySmall
                                               ?.copyWith(

@@ -10,6 +10,7 @@ import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/ui/widgets/keynest_payment_card.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class AddPaymentCardScreen extends StatefulWidget {
@@ -811,7 +812,11 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
+          icon: Icon(
+            KeyNestPlatform.isDesktopOrWeb
+                ? Icons.close_rounded
+                : Icons.arrow_back_rounded,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),

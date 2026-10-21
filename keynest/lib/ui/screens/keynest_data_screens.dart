@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/barcodescan_screen.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/widgets/keynest_card.dart';
@@ -10,6 +11,7 @@ import 'package:keynest/ui/widgets/keynest_category_picker.dart';
 import 'package:keynest/ui/widgets/keynest_popup_menu.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 // 1. Privacy Score & Password Health Audit Screen
@@ -431,10 +433,20 @@ class KeyNestPrivacyScoreSheet extends StatelessWidget {
 class KeyNestManageCategoriesScreen extends StatefulWidget {
   const KeyNestManageCategoriesScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute(
-    settings: const RouteSettings(name: '/categories/manage'),
-    builder: (context) => const KeyNestManageCategoriesScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/categories/manage'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => const KeyNestManageCategoriesScreen(),
+      );
+    }
+    return MaterialPageRoute(
+      settings: const RouteSettings(name: '/categories/manage'),
+      builder: (context) => const KeyNestManageCategoriesScreen(),
+    );
+  }
 
   @override
   State<KeyNestManageCategoriesScreen> createState() =>
@@ -1356,10 +1368,20 @@ class _KeyNestCategoryDetailScreenState
 class KeyNestRecentlyDeletedScreen extends StatefulWidget {
   const KeyNestRecentlyDeletedScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute(
-    settings: const RouteSettings(name: '/trash'),
-    builder: (context) => const KeyNestRecentlyDeletedScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/trash'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => const KeyNestRecentlyDeletedScreen(),
+      );
+    }
+    return MaterialPageRoute(
+      settings: const RouteSettings(name: '/trash'),
+      builder: (context) => const KeyNestRecentlyDeletedScreen(),
+    );
+  }
 
   @override
   State<KeyNestRecentlyDeletedScreen> createState() =>

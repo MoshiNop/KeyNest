@@ -331,9 +331,9 @@ msix_config:
 #  certificate_path: C:\<PathToCertificate>\<MyCertificate.pfx>
 #  certificate_password: 1234 (require if using .pfx certificate)
   publisher: CN=9A3091A5-8ED6-447B-8681-7F59FF7FE2BE
-  logo_path: assets/images/app_icon_squircle.png
-  start_menu_icon_path: assets/images/app_icon_squircle.png
-  tile_icon_path: assets/images/app_icon_squircle.png
+  logo_path: assets/images/app_icon_windows.png
+  start_menu_icon_path: assets/images/app_icon_windows.png
+  tile_icon_path: assets/images/app_icon_windows.png
 #  vs_generated_images_folder_path: C:\<PathToFolder>\icons
   icons_background_color: transparent
   architecture: x64
@@ -356,7 +356,7 @@ flutter_launcher_icons:
     image_path: "assets/images/app_icon_squircle.png"
   windows:
     generate: true
-    image_path: "assets/images/app_icon_squircle.png"
+    image_path: "assets/images/app_icon_windows.png"
     icon_size: 48
   web:
     generate: true

@@ -48,6 +48,8 @@ class KeyNestPalette {
   static const Color successContainer = KeyNestTokens.lightSuccessContainer;
   static const Color successContainerDark = KeyNestTokens.darkSuccessContainer;
   static const Color warning = KeyNestTokens.lightWarning;
+  static const Color warningDark = KeyNestTokens.darkWarning;
+  static const Color warningContainerDark = KeyNestTokens.darkWarningContainer;
   static const Color warningContainer = KeyNestTokens.lightWarningContainer;
   static const Color error = KeyNestTokens.lightError;
   static const Color errorContainer = KeyNestTokens.lightErrorContainer;
@@ -63,6 +65,17 @@ class KeyNestPalette {
 
   static Color successColorFor(bool isDark) {
     return isDark ? KeyNestTokens.darkSuccess : KeyNestTokens.lightSuccess;
+  }
+
+  /// Theme-aware warning foreground color providing high contrast in light and dark modes.
+  static Color warningColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? KeyNestTokens.darkWarning
+        : KeyNestTokens.lightWarning;
+  }
+
+  static Color warningColorFor(bool isDark) {
+    return isDark ? KeyNestTokens.darkWarning : KeyNestTokens.lightWarning;
   }
 
   // Text
@@ -307,11 +320,19 @@ ThemeData createTheme() {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
+        width: KeyNestPlatform.isDesktopOrWeb ? 380 : null,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
+          borderRadius: BorderRadius.circular(
+            KeyNestPlatform.isDesktopOrWeb ? 10 : KeyNestShapes.radiusCard,
+          ),
+          side: KeyNestPlatform.isDesktopOrWeb
+              ? const BorderSide(color: Color(0xFFE2E4E8), width: 1)
+              : BorderSide.none,
         ),
-        elevation: 4,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        elevation: KeyNestPlatform.isDesktopOrWeb ? 3 : 4,
+        insetPadding: KeyNestPlatform.isDesktopOrWeb
+            ? const EdgeInsets.only(bottom: 24)
+            : const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         showCloseIcon: true,
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -423,12 +444,26 @@ ThemeData createTheme() {
           if (states.contains(WidgetState.selected)) {
             return KeyNestPalette.primary;
           }
-          return null;
+          return Colors.transparent;
         }),
-        side: const BorderSide(
-          color: KeyNestPalette.cardBorderLight,
-          width: 1.5,
-        ),
+        side: WidgetStateBorderSide.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return const BorderSide(
+              color: Color(0xFFC3C6CF),
+              width: 2.0,
+            );
+          }
+          if (states.contains(WidgetState.selected)) {
+            return const BorderSide(
+              color: KeyNestPalette.primary,
+              width: 2.0,
+            );
+          }
+          return const BorderSide(
+            color: Color(0xFF73777F),
+            width: 2.0,
+          );
+        }),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
       radioTheme: RadioThemeData(
@@ -547,11 +582,19 @@ ThemeData createDarkTheme() {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
+        width: KeyNestPlatform.isDesktopOrWeb ? 380 : null,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
+          borderRadius: BorderRadius.circular(
+            KeyNestPlatform.isDesktopOrWeb ? 10 : KeyNestShapes.radiusCard,
+          ),
+          side: KeyNestPlatform.isDesktopOrWeb
+              ? const BorderSide(color: Color(0xFF383C4A), width: 1)
+              : BorderSide.none,
         ),
-        elevation: 4,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        elevation: KeyNestPlatform.isDesktopOrWeb ? 3 : 4,
+        insetPadding: KeyNestPlatform.isDesktopOrWeb
+            ? const EdgeInsets.only(bottom: 24)
+            : const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         showCloseIcon: true,
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -637,12 +680,26 @@ ThemeData createDarkTheme() {
           if (states.contains(WidgetState.selected)) {
             return KeyNestPalette.primaryDark;
           }
-          return null;
+          return Colors.transparent;
         }),
-        side: const BorderSide(
-          color: KeyNestPalette.cardBorderDark,
-          width: 1.5,
-        ),
+        side: WidgetStateBorderSide.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return const BorderSide(
+              color: Color(0xFF43474E),
+              width: 2.0,
+            );
+          }
+          if (states.contains(WidgetState.selected)) {
+            return const BorderSide(
+              color: KeyNestPalette.primaryDark,
+              width: 2.0,
+            );
+          }
+          return const BorderSide(
+            color: Color(0xFF94A3B8),
+            width: 2.0,
+          );
+        }),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
       radioTheme: RadioThemeData(

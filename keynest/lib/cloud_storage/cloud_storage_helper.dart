@@ -7,6 +7,7 @@ import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
 import 'package:keynest/env/_base.dart';
 import 'package:keynest/utils/path_util.dart';
 import 'package:keynest/utils/path_utils.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:logging/logging.dart';
 import 'package:string_literal_finder_annotations/string_literal_finder_annotations.dart';
 
@@ -30,6 +31,15 @@ class CloudStorageHelper implements CloudStorageHelperBase {
   BiometricStorageFile? _storageFile;
   bool _migrationAttempted = false;
 
+  bool get _useDesktopFileStorage =>
+      _storageFile == null &&
+      (KeyNestPlatform.isWindows || KeyNestPlatform.isLinux);
+
+  Future<File> _getDesktopStorageFile() async {
+    final appDir = await PathUtils().getAppDataDirectory();
+    return File('${appDir.path}/cloud_credentials.json');
+  }
+
   Future<BiometricStorageFile> _getStorageFile() async =>
       _storageFile ??= await BiometricStorage().getStorage(
         nonNls('${env.storageNamespace ?? ''}CloudProviderCreds'),
@@ -37,24 +47,50 @@ class CloudStorageHelper implements CloudStorageHelperBase {
       );
 
   Future<Map<String, dynamic>> _readDataMap() async {
-    final file = await _getStorageFile();
-    final data = await file.read();
-    if (data != null && data.trim().isNotEmpty) {
-      try {
-        return json.decode(data) as Map<String, dynamic>;
-      } catch (e) {
-        _logger.warning(
-          'Failed to parse credentials data from secure storage: $e',
-        );
-        return <String, dynamic>{};
+    if (!_useDesktopFileStorage) {
+      final file = await _getStorageFile();
+      final data = await file.read();
+      if (data != null && data.trim().isNotEmpty) {
+        try {
+          return json.decode(data) as Map<String, dynamic>;
+        } catch (e) {
+          _logger.warning(
+            'Failed to parse credentials data from secure storage: $e',
+          );
+          return <String, dynamic>{};
+        }
       }
+      return <String, dynamic>{};
+    } else {
+      final file = await _getDesktopStorageFile();
+      if (file.existsSync()) {
+        try {
+          final content = await file.readAsString();
+          if (content.trim().isNotEmpty) {
+            final decoded = json.decode(content);
+            if (decoded is Map<String, dynamic>) {
+              return decoded;
+            }
+          }
+        } catch (e) {
+          _logger.warning('Failed to parse desktop cloud credentials: $e');
+        }
+      }
+      return <String, dynamic>{};
     }
-    return <String, dynamic>{};
   }
 
   Future<void> _writeDataMap(Map<String, dynamic> dataMap) async {
-    final file = await _getStorageFile();
-    await file.write(json.encode(dataMap));
+    if (!_useDesktopFileStorage) {
+      final file = await _getStorageFile();
+      await file.write(json.encode(dataMap));
+    } else {
+      final file = await _getDesktopStorageFile();
+      if (!file.parent.existsSync()) {
+        await file.parent.create(recursive: true);
+      }
+      await file.writeAsString(json.encode(dataMap), flush: true);
+    }
   }
 
   /// Migrates any legacy plaintext configuration file containing credentials
@@ -65,6 +101,11 @@ class CloudStorageHelper implements CloudStorageHelperBase {
     File? legacyFileOverride,
     File? configFileOverride,
   }) async {
+    if (_useDesktopFileStorage && legacyFileOverride == null) {
+      // BiometricStorage is not supported on Windows/desktop.
+      // Credentials remain in desktop storage.
+      return;
+    }
     try {
       File legacyFile;
       File configFile;
@@ -247,7 +288,20 @@ class CloudStorageHelper implements CloudStorageHelperBase {
       _migrationAttempted = true;
       await migrateLegacyPlaintextFile();
     }
-    final val = (await _readDataMap())[cloudStorageId] as String?;
+    final dataMap = await _readDataMap();
+    var val = dataMap[cloudStorageId] as String?;
+    if (val != null && val.trim().isNotEmpty) {
+      return val;
+    }
+    if (cloudStorageId == 'DropboxProvider') {
+      val = dataMap['dropbox'] as String? ??
+          dataMap['dropboxRefreshToken'] as String?;
+    } else if (cloudStorageId == 'GoogleDriveDesktop') {
+      val = dataMap['google_drive'] as String? ??
+          dataMap['googleRefreshToken'] as String?;
+    } else if (cloudStorageId == 'WebDavProvider') {
+      val = dataMap['webdav'] as String?;
+    }
     if (val == null || val.trim().isEmpty) {
       return null;
     }
@@ -259,6 +313,19 @@ class CloudStorageHelper implements CloudStorageHelperBase {
     final dataMap = await _readDataMap();
     if (data.trim().isEmpty) {
       dataMap.remove(cloudStorageId);
+      if (cloudStorageId == 'DropboxProvider') {
+        dataMap.remove('dropbox');
+        dataMap.remove('dropboxRefreshToken');
+        dataMap.remove('dropbox_refresh_token');
+      } else if (cloudStorageId == 'GoogleDriveDesktop') {
+        dataMap.remove('google_drive');
+        dataMap.remove('googleRefreshToken');
+        dataMap.remove('google_refresh_token');
+      } else if (cloudStorageId == 'WebDavProvider') {
+        dataMap.remove('webdav');
+        dataMap.remove('webdavPassword');
+        dataMap.remove('webdav_password');
+      }
     } else {
       dataMap[cloudStorageId] = data;
     }

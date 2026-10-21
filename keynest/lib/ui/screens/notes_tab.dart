@@ -153,9 +153,13 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
           .toList();
     }
 
+    final effectiveQuery = KeyNestPlatform.isDesktopOrWeb
+        ? scope.searchQuery
+        : _searchQuery;
+
     final displayedNoteEntries = allNoteEntries.where((entry) {
-      if (_searchQuery.isNotEmpty) {
-        final query = _searchQuery.toLowerCase();
+      if (effectiveQuery.isNotEmpty) {
+        final query = effectiveQuery.toLowerCase();
         final title = entry.label?.toLowerCase() ?? '';
         final notes =
             entry.getString(KdbxKey('Notes'))?.getText()?.toLowerCase() ?? '';
@@ -227,11 +231,28 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
 
           // List of Notes or Empty State
           Expanded(
-            child: allNoteEntries.isEmpty && _searchQuery.isEmpty
+            child: allNoteEntries.isEmpty && effectiveQuery.isEmpty
                 ? KeyNestEmptyState(
                     type: EmptyStateType.notes,
                     actionLabel: 'Add Note',
                     onAction: () {
+                      if (KeyNestPlatform.isDesktopOrWeb &&
+                          widget.onEntrySelected != null) {
+                        final newEntry = kdbxBloc.createEntry(
+                          file: scope.getSelectedVault(kdbxBloc) ??
+                              kdbxBloc.openedFilesKdbx.firstOrNull,
+                          group: scope.getCurrentFolder(
+                            kdbxBloc,
+                            KeyNestTab.notes,
+                          ),
+                        );
+                        KeyNestItemTypeHelper.setItemType(
+                          newEntry,
+                          KeyNestItemType.note,
+                        );
+                        widget.onEntrySelected!(newEntry);
+                        return;
+                      }
                       Navigator.of(
                         context,
                       ).push(NoteDetailsScreen.route(isEditing: true));
@@ -240,8 +261,8 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                 : displayedNoteEntries.isEmpty
                 ? Center(
                     child: Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No notes found matching "$_searchQuery"'
+                      effectiveQuery.isNotEmpty
+                          ? 'No notes found matching "$effectiveQuery"'
                           : (scope.favoritesOnly
                                 ? 'No favorite notes found'
                                 : 'No notes found'),
@@ -281,11 +302,11 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                               '';
                           String snippet = 'No content';
                           if (body.isNotEmpty) {
-                            if (_searchQuery.isNotEmpty) {
+                            if (effectiveQuery.isNotEmpty) {
                               final lines = body.split('\n');
                               final matchingLine = lines.firstWhere(
                                 (l) => l.toLowerCase().contains(
-                                  _searchQuery.toLowerCase(),
+                                  effectiveQuery.toLowerCase(),
                                 ),
                                 orElse: () => lines.first,
                               );
@@ -298,6 +319,7 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
                             child: KeyNestCard(
+                              isSelected: widget.selectedEntry == entry,
                               onTap: () {
                                 if (widget.onEntrySelected != null) {
                                   widget.onEntrySelected!(entry);
@@ -337,7 +359,7 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                                       children: [
                                         KeyNestSearchHighlight.text(
                                           text: title,
-                                          query: _searchQuery,
+                                          query: effectiveQuery,
                                           isDark: isDark,
                                           style: theme.textTheme.titleMedium
                                               ?.copyWith(
@@ -352,7 +374,7 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                                         const SizedBox(height: 4),
                                         KeyNestSearchHighlight.text(
                                           text: snippet,
-                                          query: _searchQuery,
+                                          query: effectiveQuery,
                                           isDark: isDark,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,

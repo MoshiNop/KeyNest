@@ -9,6 +9,7 @@ import 'package:keynest/bloc/kdbx/file_source.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/services/key_file_store.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/select_file_screen.dart';
 import 'package:keynest/ui/widgets/password_strength_display.dart';
 import 'package:keynest/utils/dialog_utils.dart';
@@ -31,10 +32,20 @@ class MasterPasswordChangeScreen extends StatefulWidget {
 
   static Route<void> route({
     FileSource? fileSource,
-  }) => MaterialPageRoute(
-    builder: (context) => MasterPasswordChangeScreen(fileSource: fileSource),
-    settings: const RouteSettings(name: 'masterPasswordChange'),
-  );
+  }) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        builder: (context) => MasterPasswordChangeScreen(fileSource: fileSource),
+        settings: const RouteSettings(name: 'masterPasswordChange'),
+        maxWidth: 500,
+        maxHeight: 600,
+      );
+    }
+    return MaterialPageRoute(
+      builder: (context) => MasterPasswordChangeScreen(fileSource: fileSource),
+      settings: const RouteSettings(name: 'masterPasswordChange'),
+    );
+  }
 
   final FileSource? fileSource;
 
@@ -464,6 +475,14 @@ class _MasterPasswordChangeScreenState
     return Scaffold(
       appBar: AppBar(
         title: const Text('Change Master Password'),
+        actions: [
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(

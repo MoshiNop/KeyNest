@@ -1,4 +1,5 @@
 export 'action_pill.dart';
+export 'anchored_popover.dart';
 export 'animations.dart';
 export 'bottom_sheet.dart';
 export 'design_tokens.dart';

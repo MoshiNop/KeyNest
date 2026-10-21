@@ -7,6 +7,8 @@ import 'package:keynest/bloc/kdbx/file_content.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/models/keynest_csv_mapping.dart';
 import 'package:keynest/services/keynest_import_export_service.dart';
+import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/ui/screens/keynest_csv_import_screen.dart';
 import 'package:keynest/ui/screens/keynest_import_export.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
@@ -777,6 +779,69 @@ Server1,admin,pass1,1234
         expect(find.text('Col 3'), findsOneWidget);
         expect(find.text('Col 4'), findsOneWidget);
         expect(find.text('LIVE RECORD PREVIEW'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Import/Export Theme System: CheckboxTheme and semantic warning/success colors ensure high contrast',
+      (WidgetTester tester) async {
+        final lightTheme = createTheme();
+        final darkTheme = createDarkTheme();
+
+        // Checkbox theme side border thickness must be 2.0 for accessibility
+        expect(
+          WidgetStateProperty.resolveAs(lightTheme.checkboxTheme.side, {}),
+          equals(const BorderSide(color: Color(0xFF73777F), width: 2.0)),
+        );
+        expect(
+          WidgetStateProperty.resolveAs(darkTheme.checkboxTheme.side, {}),
+          equals(const BorderSide(color: Color(0xFF94A3B8), width: 2.0)),
+        );
+
+        // Dark mode warning and success colors must provide high contrast
+        expect(KeyNestPalette.warningColorFor(true), equals(const Color(0xFFF5BD48)));
+        expect(KeyNestPalette.warningColorFor(false), equals(const Color(0xFF7C5800)));
+        expect(KeyNestPalette.successColorFor(true), equals(const Color(0xFF90D889)));
+        expect(KeyNestPalette.successColorFor(false), equals(const Color(0xFF286C2A)));
+      },
+    );
+
+    testWidgets(
+      'KeyNestImportExportScreen renders icons with theme accent color and no container box in dark mode',
+      (WidgetTester tester) async {
+        final credentials = Credentials.composite(
+          ProtectedValue.fromString('pass'),
+          null,
+        );
+        final file = KdbxFormat().create(credentials, 'UI Vault');
+        final mockBloc = MockKdbxBloc();
+        when(mockBloc.openedFilesKdbx).thenReturn([file]);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: createDarkTheme(),
+            home: Provider<KdbxBloc>.value(
+              value: mockBloc,
+              child: const KeyNestImportExportScreen(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Icons must be rendered with dark primary accent
+        final shieldIcon = tester.widget<Icon>(find.byIcon(Icons.shield_rounded));
+        expect(shieldIcon.color, equals(KeyNestPalette.primaryDark));
+
+        final csvIcon = tester.widgetList<Icon>(find.byIcon(Icons.table_chart_rounded)).first;
+        expect(csvIcon.color, equals(KeyNestPalette.primaryDark));
+
+        // Badges for UNENCRYPTED must use dark-mode warning color (Color(0xFFF5BD48))
+        final unencryptedBadgeText = tester.widgetList<Text>(find.text('UNENCRYPTED')).first;
+        expect(unencryptedBadgeText.style?.color, equals(KeyNestTokens.darkWarning));
+
+        // Badges for UNIFIED IMPORT must use dark-mode success color (Color(0xFF90D889))
+        final unifiedBadgeText = tester.widget<Text>(find.text('UNIFIED IMPORT'));
+        expect(unifiedBadgeText.style?.color, equals(KeyNestTokens.darkSuccess));
       },
     );
   });

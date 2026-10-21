@@ -7,6 +7,7 @@ import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/add_payment_card.dart';
 import 'package:keynest/ui/screens/card_details.dart';
+import 'package:keynest/ui/widgets/keynest_card.dart';
 import 'package:keynest/ui/widgets/keynest_chips.dart';
 import 'package:keynest/ui/widgets/keynest_empty_state.dart';
 import 'package:keynest/ui/widgets/keynest_entry_count_header.dart';
@@ -157,9 +158,13 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
           .toList();
     }
 
+    final effectiveQuery = KeyNestPlatform.isDesktopOrWeb
+        ? scope.searchQuery
+        : _searchQuery;
+
     final displayedCardEntries = allCardEntries.where((entry) {
-      if (_searchQuery.isNotEmpty) {
-        final query = _searchQuery.toLowerCase();
+      if (effectiveQuery.isNotEmpty) {
+        final query = effectiveQuery.toLowerCase();
         final title = entry.label?.toLowerCase() ?? '';
         final holder =
             entry.getString(KdbxKey('Cardholder'))?.getText()?.toLowerCase() ??
@@ -298,20 +303,37 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
           Expanded(
             child:
                 allCardEntries.isEmpty &&
-                    _searchQuery.isEmpty &&
+                    effectiveQuery.isEmpty &&
                     _cardTypeFilter == null
                 ? KeyNestEmptyState(
                     type: EmptyStateType.cards,
                     actionLabel: 'Add Card',
                     onAction: () {
+                      if (KeyNestPlatform.isDesktopOrWeb &&
+                          widget.onEntrySelected != null) {
+                        final newEntry = kdbxBloc.createEntry(
+                          file: scope.getSelectedVault(kdbxBloc) ??
+                              kdbxBloc.openedFilesKdbx.firstOrNull,
+                          group: scope.getCurrentFolder(
+                            kdbxBloc,
+                            KeyNestTab.cards,
+                          ),
+                        );
+                        KeyNestItemTypeHelper.setItemType(
+                          newEntry,
+                          KeyNestItemType.card,
+                        );
+                        widget.onEntrySelected!(newEntry);
+                        return;
+                      }
                       Navigator.of(context).push(AddPaymentCardScreen.route());
                     },
                   )
                 : displayedCardEntries.isEmpty
                 ? Center(
                     child: Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No cards found matching "$_searchQuery"'
+                      effectiveQuery.isNotEmpty
+                          ? 'No cards found matching "$effectiveQuery"'
                           : (scope.favoritesOnly
                                 ? 'No favorite cards found'
                                 : 'No cards found'),
@@ -366,6 +388,191 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
                               title.toLowerCase() != 'payment card' &&
                               title.toLowerCase() != holder.toLowerCase();
 
+                          final isSelected = widget.selectedEntry == entry;
+
+                          if (KeyNestPlatform.isDesktopOrWeb) {
+                            final cleanNumber = number.replaceAll(RegExp(r'\D'), '');
+                            final last4 = cleanNumber.length >= 4
+                                ? cleanNumber.substring(cleanNumber.length - 4)
+                                : (cleanNumber.isNotEmpty ? cleanNumber : '••••');
+                            final maskedDisplay = '•••• $last4';
+                            final effectiveTitle = title.isNotEmpty
+                                ? title
+                                : (holder.isNotEmpty && holder.toLowerCase() != 'cardholder name'
+                                    ? holder
+                                    : 'Payment Card');
+
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: KeyNestCard(
+                                isSelected: isSelected,
+                                onTap: () {
+                                  if (widget.onEntrySelected != null) {
+                                    widget.onEntrySelected!(entry);
+                                  } else {
+                                    Navigator.of(context).push(
+                                      CardDetailsScreen.route(entry: entry),
+                                    );
+                                  }
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  child: Row(
+                                    children: [
+                                      // Mini stylized card preview
+                                      Container(
+                                        width: 44,
+                                        height: 30,
+                                        decoration: BoxDecoration(
+                                          color: color,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(alpha: 0.15),
+                                            width: 1,
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: color.withValues(alpha: 0.35),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Stack(
+                                          children: [
+                                            Positioned(
+                                              left: 4,
+                                              top: 5,
+                                              child: Container(
+                                                width: 10,
+                                                height: 7,
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFEAB308),
+                                                  borderRadius: BorderRadius.circular(1.5),
+                                                ),
+                                              ),
+                                            ),
+                                            Positioned(
+                                              right: 4,
+                                              bottom: 3,
+                                              child: Icon(
+                                                Icons.credit_card_rounded,
+                                                color: Colors.white.withValues(alpha: 0.8),
+                                                size: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // Details
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            KeyNestSearchHighlight.text(
+                                              text: effectiveTitle,
+                                              query: effectiveQuery,
+                                              isDark: isDark,
+                                              style: theme.textTheme.titleSmall?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 14,
+                                                color: isDark
+                                                    ? KeyNestPalette.textPrimaryDark
+                                                    : KeyNestPalette.textPrimaryLight,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Row(
+                                              children: [
+                                                Text(
+                                                  maskedDisplay,
+                                                  style: TextStyle(
+                                                    fontFamily: KeyNestTheme.monoFontFamily,
+                                                    fontSize: 12,
+                                                    color: isDark
+                                                        ? KeyNestPalette.textSecondaryDark
+                                                        : KeyNestPalette.textSecondaryLight,
+                                                  ),
+                                                ),
+                                                if (expiry.isNotEmpty && expiry != 'MM/YY') ...[
+                                                  Text(
+                                                    ' • ',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDark
+                                                          ? KeyNestPalette.textSecondaryDark
+                                                          : KeyNestPalette.textSecondaryLight,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    expiry,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDark
+                                                          ? KeyNestPalette.textSecondaryDark
+                                                          : KeyNestPalette.textSecondaryLight,
+                                                    ),
+                                                  ),
+                                                ],
+                                                if (holder.isNotEmpty &&
+                                                    holder != effectiveTitle &&
+                                                    holder.toLowerCase() != 'cardholder name') ...[
+                                                  Text(
+                                                    ' • ',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: isDark
+                                                          ? KeyNestPalette.textSecondaryDark
+                                                          : KeyNestPalette.textSecondaryLight,
+                                                    ),
+                                                  ),
+                                                  Flexible(
+                                                    child: Text(
+                                                      holder,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: isDark
+                                                            ? KeyNestPalette.textSecondaryDark
+                                                            : KeyNestPalette.textSecondaryLight,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? Colors.white.withValues(alpha: 0.08)
+                                              : Colors.black.withValues(alpha: 0.05),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          network != 'Auto' ? network : 'Card',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: isDark
+                                                ? KeyNestPalette.textSecondaryDark
+                                                : KeyNestPalette.textSecondaryLight,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 16),
                             child: KeyNestPressScale(
@@ -378,39 +585,53 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
                                   );
                                 }
                               },
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (showCustomTitle)
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: 6,
-                                        left: 4,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: isSelected
+                                    ? BoxDecoration(
+                                        borderRadius: BorderRadius.circular(18),
+                                        border: Border.all(
+                                          color: isDark
+                                              ? KeyNestPalette.primaryDark
+                                              : KeyNestPalette.primary,
+                                          width: 2.5,
+                                        ),
+                                      )
+                                    : null,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (showCustomTitle)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 6,
+                                          left: 4,
+                                        ),
+                                        child: KeyNestSearchHighlight.text(
+                                          text: title,
+                                          query: effectiveQuery,
+                                          isDark: isDark,
+                                          style: theme.textTheme.titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                                color: isDark
+                                                    ? KeyNestPalette
+                                                          .textPrimaryDark
+                                                    : KeyNestPalette
+                                                          .textPrimaryLight,
+                                              ),
+                                        ),
                                       ),
-                                      child: KeyNestSearchHighlight.text(
-                                        text: title,
-                                        query: _searchQuery,
-                                        isDark: isDark,
-                                        style: theme.textTheme.titleSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                              color: isDark
-                                                  ? KeyNestPalette
-                                                        .textPrimaryDark
-                                                  : KeyNestPalette
-                                                        .textPrimaryLight,
-                                            ),
-                                      ),
+                                    KeyNestPaymentCardView(
+                                      cardholderName: holder,
+                                      cardNumber: number,
+                                      expiry: expiry,
+                                      cardNetwork: network,
+                                      cardColor: color,
+                                      searchQuery: effectiveQuery,
                                     ),
-                                  KeyNestPaymentCardView(
-                                    cardholderName: holder,
-                                    cardNumber: number,
-                                    expiry: expiry,
-                                    cardNetwork: network,
-                                    cardColor: color,
-                                    searchQuery: _searchQuery,
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           );

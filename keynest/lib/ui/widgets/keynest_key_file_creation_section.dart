@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:keynest/services/key_file_store.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_tokens.dart';
+import 'package:keynest/ui/widgets/keynest_desktop_key_file_dialog.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/key_file_handler.dart';
 import 'package:keynest/utils/platform.dart';
@@ -312,6 +313,312 @@ class KeyNestKeyFileCreationSection extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return _buildDesktopLayout(context, isDark);
+    }
+    return _buildMobileLayout(context, isDark);
+  }
+
+  Widget _buildDesktopLayout(BuildContext context, bool isDark) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.vpn_key_rounded,
+                  size: 20,
+                  color: isDark
+                      ? KeyNestPalette.primaryDark
+                      : KeyNestTokens.primary,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Use key file',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: isDark
+                              ? KeyNestTokens.textPrimaryDark
+                              : KeyNestTokens.textPrimaryLight,
+                        ),
+                      ),
+                      Text(
+                        'Protect this vault with a key file in addition to the master password.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark
+                              ? KeyNestTokens.textSecondaryDark
+                              : KeyNestTokens.textSecondaryLight,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Builder(
+                  builder: (switchContext) => Switch.adaptive(
+                    value: controller.useKeyFile,
+                    onChanged: (val) {
+                      controller.useKeyFile = val;
+                      if (val && controller.keyFileBytes == null) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (switchContext.mounted) {
+                            showDesktopKeyFileCreationPopover(
+                              anchorContext: switchContext,
+                              controller: controller,
+                              getVaultName: getVaultName,
+                            );
+                          }
+                        });
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            if (controller.useKeyFile) ...[
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              if (controller.keyFileBytes == null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.black.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.grey.shade300,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 20,
+                        color: Colors.amber.shade700,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Key file not yet configured',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                                color: isDark
+                                    ? KeyNestTokens.textPrimaryDark
+                                    : KeyNestTokens.textPrimaryLight,
+                              ),
+                            ),
+                            Text(
+                              'Generate a new .keyx file or select an existing one.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark
+                                    ? KeyNestTokens.textSecondaryDark
+                                    : KeyNestTokens.textSecondaryLight,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Builder(
+                        builder: (btnContext) => ElevatedButton.icon(
+                          onPressed: () => showDesktopKeyFileCreationPopover(
+                            anchorContext: btnContext,
+                            controller: controller,
+                            getVaultName: getVaultName,
+                          ),
+                          icon: const Icon(Icons.tune_rounded, size: 16),
+                          label: const Text('Configure...'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 9,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                _buildDesktopAttachedTile(context, isDark),
+              ],
+              const SizedBox(height: 10),
+              _buildSecurityNoticeWidget(isDark),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopAttachedTile(BuildContext context, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark
+            ? KeyNestPalette.primaryDark.withValues(alpha: 0.12)
+            : KeyNestTokens.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: (isDark ? KeyNestPalette.primaryDark : KeyNestTokens.primary)
+              .withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.check_circle_rounded,
+            color: isDark ? KeyNestPalette.primaryDark : KeyNestTokens.primary,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  controller.keyFileName ?? 'keyfile',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  controller.keyFileResult?.displayName ?? 'Key File Attached',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark
+                        ? KeyNestTokens.textSecondaryDark
+                        : KeyNestTokens.textSecondaryLight,
+                  ),
+                ),
+                if (controller.keyFilePath != null &&
+                    controller.keyFilePath!.isNotEmpty) ...[
+                  Text(
+                    controller.keyFilePath!,
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: isDark ? Colors.white54 : Colors.black45,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Builder(
+            builder: (btnContext) => OutlinedButton.icon(
+              onPressed: () => showDesktopKeyFileCreationPopover(
+                anchorContext: btnContext,
+                controller: controller,
+                getVaultName: getVaultName,
+              ),
+              icon: const Icon(Icons.edit_outlined, size: 14),
+              label: const Text('Change', style: TextStyle(fontSize: 11)),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, size: 18),
+            onPressed: controller.clear,
+            tooltip: 'Remove key file',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecurityNoticeWidget(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.amber.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.amber,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Important Security Notice',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark
+                        ? Colors.amber.shade200
+                        : Colors.amber.shade900,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Both your master password and this key file are required to unlock your vault. Keep the key file separate from your vault. If you lose this key file, your vault cannot be recovered.',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isDark
+                        ? Colors.amber.shade200
+                        : Colors.amber.shade900,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMobileLayout(BuildContext context, bool isDark) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {

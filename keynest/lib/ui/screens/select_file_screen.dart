@@ -37,12 +37,14 @@ import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/services/autofill_resume_helper.dart';
 import 'package:keynest/services/key_file_store.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
+import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/app_bar_menu.dart';
 import 'package:keynest/ui/screens/create_file.dart';
 import 'package:keynest/ui/screens/keynest_cloud_vault_browser_screen.dart';
 import 'package:keynest/ui/screens/main_app_scaffold.dart';
 import 'package:keynest/ui/widgets/keynest_cloud_connect_modal.dart';
+import 'package:keynest/ui/widgets/keynest_desktop_key_file_dialog.dart';
 import 'package:keynest/ui/widgets/keynest_progress_indicator.dart';
 import 'package:keynest/ui/widgets/link_button.dart';
 import 'package:keynest/ui/widgets/password_input_field.dart';
@@ -59,8 +61,6 @@ import 'package:macos_secure_bookmarks/macos_secure_bookmarks.dart';
 import 'package:path/path.dart' as path;
 import 'package:provider/provider.dart';
 import 'package:string_literal_finder_annotations/string_literal_finder_annotations.dart';
-
-import '../../theme.dart';
 
 final _logger = Logger('keynest.select_file_screen');
 
@@ -346,9 +346,13 @@ class _SelectFileWidgetState extends State<SelectFileWidget>
                   : null),
               const SizedBox(height: 16),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
+                constraints: BoxConstraints(
+                  maxWidth: KeyNestPlatform.isDesktopOrWeb ? 620 : 480,
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: KeyNestPlatform.isDesktopOrWeb ? 28 : 20,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -441,7 +445,9 @@ class _SelectFileWidgetState extends State<SelectFileWidget>
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Open a .kdbx file from phone storage or documents',
+                                    KeyNestPlatform.isDesktopOrWeb
+                                        ? 'Open a .kdbx file from local disk, documents, or cloud storage'
+                                        : 'Open a .kdbx file from phone storage or documents',
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: theme.brightness == Brightness.dark
                                           ? KeyNestPalette.textSecondaryDark
@@ -496,7 +502,9 @@ class _SelectFileWidgetState extends State<SelectFileWidget>
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Create a new encrypted database on your device',
+                                    KeyNestPlatform.isDesktopOrWeb
+                                        ? 'Create a new encrypted database on your computer'
+                                        : 'Create a new encrypted database on your device',
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: theme.brightness == Brightness.dark
                                           ? KeyNestPalette.textSecondaryDark
@@ -1564,82 +1572,80 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                       ),
                     ),
                   ],
-                  KeyNestCompactCard(
-                    onClick: () async {
-                      _invalidPassword = null;
-                      _credentialErrorMessage = null;
-                      if (KeyNestPlatform.isIOS || KeyNestPlatform.isAndroid) {
-                        final fileInfo = await FilePickerWritable().openFile((
-                          fileInfo,
-                          file,
-                        ) async {
-                          final bytes = await file.readAsBytes();
-                          try {
-                            final parsed = KeyNestKeyFile.parse(
-                              bytes,
-                              fileName: fileInfo.fileName,
-                            );
-                            final keyFile = KeyFileInfo(
-                              fileInfo: fileInfo,
-                              bytes: bytes,
-                              formatName: parsed.displayName,
-                            );
+                  Builder(
+                    builder: (tileCtx) => KeyNestCompactCard(
+                      onClick: () async {
+                        _invalidPassword = null;
+                        _credentialErrorMessage = null;
+                        if (KeyNestPlatform.isDesktopOrWeb) {
+                          final result =
+                              await showDesktopKeyFileSelectionPopover(
+                            anchorContext: tileCtx,
+                            currentFileName: _keyFile?.displayName,
+                            currentFormatName: _keyFile?.formatName,
+                          );
+                          if (result != null && mounted) {
                             setState(() {
-                              _keyFile = keyFile;
-                              _keyFileMissingNotice = null;
+                              if (result.cleared) {
+                                _keyFile = null;
+                              } else if (result.bytes != null &&
+                                  result.name != null) {
+                                _keyFile = KeyFileFile(
+                                  XFile(
+                                    result.path ?? '',
+                                    name: result.name,
+                                    bytes: result.bytes,
+                                  ),
+                                  cachedBytes: result.bytes,
+                                  formatName: result.parsed?.displayName,
+                                );
+                                _keyFileMissingNotice = null;
+                              }
                             });
-                          } on KeyFileValidationException catch (e) {
-                            if (mounted) {
-                              await DialogUtils.showSimpleAlertDialog(
-                                context,
-                                'Invalid Key File',
-                                e.message,
-                                routeAppend: 'invalidKeyFile',
-                              );
-                            }
-                            return null;
                           }
-                          return fileInfo;
-                        });
-                        if (fileInfo == null && _keyFile == null) {
-                          setState(() => _keyFile = null);
+                          return;
                         }
-                      } else {
-                        const typeGroup = XTypeGroup(
-                          label: 'Key Files (*.key, *.keyx, *.xml)',
-                          extensions: ['key', 'keyx', 'xml', 'bin', 'txt'],
-                        );
-                        final file = await openFile(
-                          acceptedTypeGroups: [typeGroup],
-                        );
-                        if (file != null) {
-                          final bytes = await file.readAsBytes();
-                          try {
-                            final parsed = KeyNestKeyFile.parse(
-                              bytes,
-                              fileName: file.name,
-                            );
-                            setState(() {
-                              _keyFile = KeyFileFile(
-                                file,
-                                cachedBytes: bytes,
+
+                        if (KeyNestPlatform.isIOS ||
+                            KeyNestPlatform.isAndroid) {
+                          final fileInfo =
+                              await FilePickerWritable().openFile((
+                            fileInfo,
+                            file,
+                          ) async {
+                            final bytes = await file.readAsBytes();
+                            try {
+                              final parsed = KeyNestKeyFile.parse(
+                                bytes,
+                                fileName: fileInfo.fileName,
+                              );
+                              final keyFile = KeyFileInfo(
+                                fileInfo: fileInfo,
+                                bytes: bytes,
                                 formatName: parsed.displayName,
                               );
-                              _keyFileMissingNotice = null;
-                            });
-                          } on KeyFileValidationException catch (e) {
-                            if (mounted) {
-                              await DialogUtils.showSimpleAlertDialog(
-                                context,
-                                'Invalid Key File',
-                                e.message,
-                                routeAppend: 'invalidKeyFile',
-                              );
+                              setState(() {
+                                _keyFile = keyFile;
+                                _keyFileMissingNotice = null;
+                              });
+                            } on KeyFileValidationException catch (e) {
+                              if (mounted) {
+                                await DialogUtils.showSimpleAlertDialog(
+                                  context,
+                                  'Invalid Key File',
+                                  e.message,
+                                  routeAppend: 'invalidKeyFile',
+                                );
+                              }
+                              return null;
                             }
+                            return fileInfo;
+                          });
+                          if (fileInfo == null && _keyFile == null) {
+                            setState(() => _keyFile = null);
                           }
                         }
-                      }
-                    },
+                      },
                     child: Row(
                       children: [
                         KeyNestCompactIconTile(
@@ -1716,7 +1722,8 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
                       ],
                     ),
                   ),
-                  if (_biometricQuickUnlockSupported) ...[
+                ),
+                if (_biometricQuickUnlockSupported) ...[
                     const SizedBox(height: 12),
                     KeyNestCompactCard(
                       child: Row(

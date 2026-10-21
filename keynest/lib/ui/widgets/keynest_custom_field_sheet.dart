@@ -4,6 +4,7 @@ import 'package:kdbx/kdbx.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/screens/barcodescan_screen.dart';
 import 'package:keynest/utils/dialog_utils.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:keynest/utils/totp_parser.dart';
 
 enum CustomFieldKind {
@@ -42,7 +43,9 @@ class CustomFieldModel {
 }
 
 class KeyNestCustomFieldSheet extends StatelessWidget {
-  const KeyNestCustomFieldSheet({super.key});
+  const KeyNestCustomFieldSheet({super.key, this.isDialog = false});
+
+  final bool isDialog;
 
   static const List<CustomFieldTypeItem> fieldTypes = [
     CustomFieldTypeItem(
@@ -84,6 +87,26 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
   ];
 
   static Future<CustomFieldKind?> show(BuildContext context) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return showDialog<CustomFieldKind>(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          clipBehavior: Clip.antiAlias,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 440,
+              maxHeight: 560,
+            ),
+            child: const KeyNestCustomFieldSheet(isDialog: true),
+          ),
+        ),
+      );
+    }
     return showModalBottomSheet<CustomFieldKind>(
       context: context,
       backgroundColor: Colors.transparent,
@@ -706,30 +729,61 @@ class KeyNestCustomFieldSheet extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(KeyNestShapes.radiusSheet),
-        ),
+        borderRadius: isDialog
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(
+                top: Radius.circular(KeyNestShapes.radiusSheet),
+              ),
       ),
-      padding: const EdgeInsets.symmetric(vertical: 20),
+      padding: EdgeInsets.symmetric(vertical: isDialog ? 12 : 20),
       child: SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Handle bar
-            Center(
-              child: Container(
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? KeyNestPalette.cardBorderDark
-                      : KeyNestPalette.dividerLight,
-                  borderRadius: BorderRadius.circular(2),
+            if (!isDialog) ...[
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? KeyNestPalette.cardBorderDark
+                        : KeyNestPalette.dividerLight,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 18),
+              const SizedBox(height: 18),
+            ],
+            if (isDialog) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Select Field Type',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 17,
+                          color: isDark
+                              ? KeyNestPalette.textPrimaryDark
+                              : KeyNestPalette.textPrimaryLight,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      splashRadius: 18,
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             // Field Types
             ...fieldTypes.map(
               (item) => ListTile(

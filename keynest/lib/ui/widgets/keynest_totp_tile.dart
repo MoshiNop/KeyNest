@@ -162,7 +162,6 @@ class _KeyNestTotpTileState extends State<KeyNestTotpTile>
           color: isDark ? KeyNestPalette.cardDark : KeyNestPalette.surfaceLight,
           borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
           child: InkWell(
-            onTap: copyCallback,
             borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
             child: Container(
               padding: widget.compact

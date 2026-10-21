@@ -126,6 +126,22 @@ bool Win32Window::CreateAndShow(const std::wstring& title,
     return false;
   }
 
+  HINSTANCE instance = GetModuleHandle(nullptr);
+  HICON hIconSmall = static_cast<HICON>(LoadImage(
+      instance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+      LR_DEFAULTCOLOR));
+  if (hIconSmall) {
+    SendMessage(window, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hIconSmall));
+  }
+  HICON hIconBig = static_cast<HICON>(LoadImage(
+      instance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON),
+      LR_DEFAULTCOLOR));
+  if (hIconBig) {
+    SendMessage(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hIconBig));
+  }
+
   return OnCreate();
 }
 

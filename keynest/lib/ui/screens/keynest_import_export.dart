@@ -7,8 +7,10 @@ import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/services/keynest_import_export_service.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/keynest_csv_import_screen.dart';
 import 'package:keynest/ui/widgets/keynest_card.dart';
+import 'package:keynest/ui/widgets/keynest_desktop_key_file_dialog.dart';
 import 'package:keynest/ui/widgets/keynest_destination_picker.dart';
 import 'package:keynest/ui/widgets/keynest_export_options_sheet.dart';
 import 'package:keynest/ui/widgets/password_input_field.dart';
@@ -21,10 +23,20 @@ import 'package:provider/provider.dart';
 class KeyNestImportExportScreen extends StatefulWidget {
   const KeyNestImportExportScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute(
-    settings: const RouteSettings(name: '/keynest/import_export'),
-    builder: (context) => const KeyNestImportExportScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/keynest/import_export'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => const KeyNestImportExportScreen(),
+      );
+    }
+    return MaterialPageRoute(
+      settings: const RouteSettings(name: '/keynest/import_export'),
+      builder: (context) => const KeyNestImportExportScreen(),
+    );
+  }
 
   @override
   State<KeyNestImportExportScreen> createState() =>
@@ -326,13 +338,11 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
       final result = await Navigator.of(context)
           .push<KeyNestImportExportResult>(
-            MaterialPageRoute(
-              builder: (ctx) => KeyNestCsvImportScreen(
-                fileName: xFile.name,
-                csvText: csvText,
-                parsedRows: rows,
-                initialDestination: initialDestination,
-              ),
+            KeyNestCsvImportScreen.route(
+              fileName: xFile.name,
+              csvText: csvText,
+              parsedRows: rows,
+              initialDestination: initialDestination,
             ),
           );
 
@@ -440,10 +450,16 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+              content: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: KeyNestPlatform.isDesktopOrWeb
+                      ? 460
+                      : double.infinity,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                   const Text(
                     'Enter master password and/or select key file:',
                     style: TextStyle(fontSize: 13),
@@ -472,7 +488,13 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.vpn_key_rounded, size: 18),
+                        Icon(
+                          Icons.vpn_key_rounded,
+                          size: 18,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -495,79 +517,101 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                             }),
                           )
                         else
-                          TextButton(
-                            onPressed: () async {
-                              try {
-                                if (KeyNestPlatform.isIOS ||
-                                    KeyNestPlatform.isAndroid) {
-                                  await FilePickerWritable().openFile((
-                                    fileInfo,
-                                    file,
-                                  ) async {
-                                    final bytes = await file.readAsBytes();
-                                    try {
-                                      KeyNestKeyFile.parse(
-                                        bytes,
-                                        fileName: fileInfo.fileName,
-                                      );
-                                      setDialogState(() {
-                                        selectedKeyBytes = bytes;
-                                        selectedKeyName = fileInfo.fileName;
-                                      });
-                                    } on KeyFileValidationException catch (e) {
-                                      if (dialogCtx.mounted) {
-                                        await DialogUtils.showSimpleAlertDialog(
-                                          dialogCtx,
-                                          'Invalid Key File',
-                                          e.message,
-                                          routeAppend: 'invalidKeyFile',
-                                        );
+                          Builder(
+                            builder: (btnCtx) => TextButton(
+                              onPressed: () async {
+                                if (KeyNestPlatform.isDesktopOrWeb) {
+                                  final res =
+                                      await showDesktopKeyFileSelectionPopover(
+                                    anchorContext: btnCtx,
+                                    currentFileName: selectedKeyName,
+                                  );
+                                  if (res != null) {
+                                    setDialogState(() {
+                                      if (res.cleared) {
+                                        selectedKeyBytes = null;
+                                        selectedKeyName = null;
+                                      } else {
+                                        selectedKeyBytes = res.bytes;
+                                        selectedKeyName = res.name;
                                       }
-                                    }
-                                    return fileInfo;
-                                  });
-                                } else {
-                                  const typeGroup = XTypeGroup(
-                                    label: 'Key Files (*.key, *.keyx, *.xml)',
-                                    extensions: [
-                                      'key',
-                                      'keyx',
-                                      'xml',
-                                      'bin',
-                                      'txt',
-                                    ],
-                                  );
-                                  final file = await openFile(
-                                    acceptedTypeGroups: [typeGroup],
-                                  );
-                                  if (file != null) {
-                                    final bytes = await file.readAsBytes();
-                                    try {
-                                      KeyNestKeyFile.parse(
-                                        bytes,
-                                        fileName: file.name,
-                                      );
-                                      setDialogState(() {
-                                        selectedKeyBytes = bytes;
-                                        selectedKeyName = file.name;
-                                      });
-                                    } on KeyFileValidationException catch (e) {
-                                      if (dialogCtx.mounted) {
-                                        await DialogUtils.showSimpleAlertDialog(
-                                          dialogCtx,
-                                          'Invalid Key File',
-                                          e.message,
-                                          routeAppend: 'invalidKeyFile',
+                                    });
+                                  }
+                                  return;
+                                }
+
+                                try {
+                                  if (KeyNestPlatform.isIOS ||
+                                      KeyNestPlatform.isAndroid) {
+                                    await FilePickerWritable().openFile((
+                                      fileInfo,
+                                      file,
+                                    ) async {
+                                      final bytes = await file.readAsBytes();
+                                      try {
+                                        KeyNestKeyFile.parse(
+                                          bytes,
+                                          fileName: fileInfo.fileName,
                                         );
+                                        setDialogState(() {
+                                          selectedKeyBytes = bytes;
+                                          selectedKeyName = fileInfo.fileName;
+                                        });
+                                      } on KeyFileValidationException catch (e) {
+                                        if (dialogCtx.mounted) {
+                                          await DialogUtils.showSimpleAlertDialog(
+                                            dialogCtx,
+                                            'Invalid Key File',
+                                            e.message,
+                                            routeAppend: 'invalidKeyFile',
+                                          );
+                                        }
+                                      }
+                                      return fileInfo;
+                                    });
+                                  } else {
+                                    const typeGroup = XTypeGroup(
+                                      label: 'Key Files (*.key, *.keyx, *.xml)',
+                                      extensions: [
+                                        'key',
+                                        'keyx',
+                                        'xml',
+                                        'bin',
+                                        'txt',
+                                      ],
+                                    );
+                                    final file = await openFile(
+                                      acceptedTypeGroups: [typeGroup],
+                                    );
+                                    if (file != null) {
+                                      final bytes = await file.readAsBytes();
+                                      try {
+                                        KeyNestKeyFile.parse(
+                                          bytes,
+                                          fileName: file.name,
+                                        );
+                                        setDialogState(() {
+                                          selectedKeyBytes = bytes;
+                                          selectedKeyName = file.name;
+                                        });
+                                      } on KeyFileValidationException catch (e) {
+                                        if (dialogCtx.mounted) {
+                                          await DialogUtils.showSimpleAlertDialog(
+                                            dialogCtx,
+                                            'Invalid Key File',
+                                            e.message,
+                                            routeAppend: 'invalidKeyFile',
+                                          );
+                                        }
                                       }
                                     }
                                   }
-                                }
-                              } catch (_) {}
-                            },
-                            child: const Text(
-                              'Browse',
-                              style: TextStyle(fontSize: 12),
+                                } catch (_) {}
+                              },
+                              child: const Text(
+                                'Browse',
+                                style: TextStyle(fontSize: 12),
+                              ),
                             ),
                           ),
                       ],
@@ -575,6 +619,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                   ),
                 ],
               ),
+            ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
@@ -618,6 +663,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
   }
 
   void _showSnack(String text, {bool isError = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
@@ -626,7 +672,9 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
           duration: const Duration(milliseconds: 1800),
           backgroundColor: isError
               ? KeyNestPalette.error
-              : KeyNestPalette.success,
+              : (isDark
+                    ? KeyNestPalette.successContainerDark
+                    : KeyNestPalette.success),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
@@ -639,6 +687,9 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final accentColor = isDark
+        ? KeyNestPalette.primaryDark
+        : KeyNestPalette.primary;
 
     return Scaffold(
       backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
@@ -646,6 +697,14 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
         title: const Text('Import & Export'),
         elevation: 0,
         backgroundColor: Colors.transparent,
+        actions: [
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+        ],
       ),
       body: Stack(
         children: [
@@ -658,14 +717,10 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.shield_rounded,
-                iconColor: isDark
-                    ? KeyNestPalette.primaryDark
-                    : KeyNestPalette.primary,
+                iconColor: accentColor,
                 title: 'Export KeePass (.kdbx)',
                 badge: 'ENCRYPTED • RECOMMENDED',
-                badgeColor: isDark
-                    ? KeyNestPalette.primaryDark
-                    : KeyNestPalette.primary,
+                badgeColor: accentColor,
                 subtitle:
                     'KDBX 4.0 database protected with your master password. Safe for cloud and offsite backup.',
                 actionLabel: 'Export KDBX',
@@ -675,10 +730,10 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.table_chart_rounded,
-                iconColor: KeyNestPalette.warning,
+                iconColor: accentColor,
                 title: 'Export CSV Spreadsheet',
                 badge: 'UNENCRYPTED',
-                badgeColor: KeyNestPalette.warning,
+                badgeColor: KeyNestPalette.warningColorFor(isDark),
                 subtitle:
                     'Plain text CSV table containing titles, logins, passwords, URLs, and TOTP secrets.',
                 actionLabel: 'Export CSV',
@@ -688,10 +743,10 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.code_rounded,
-                iconColor: KeyNestPalette.info,
+                iconColor: accentColor,
                 title: 'Export JSON Document',
                 badge: 'UNENCRYPTED',
-                badgeColor: KeyNestPalette.info,
+                badgeColor: KeyNestPalette.warningColorFor(isDark),
                 subtitle:
                     'Structured JSON format with all entry fields, custom attributes, and metadata.',
                 actionLabel: 'Export JSON',
@@ -706,9 +761,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.folder_zip_rounded,
-                iconColor: isDark
-                    ? KeyNestPalette.primaryDark
-                    : KeyNestPalette.primary,
+                iconColor: accentColor,
                 title: 'KeePass Database (.kdbx)',
                 subtitle:
                     'Merge entries from another KeePass 3.x / 4.x vault into your current database.',
@@ -719,14 +772,10 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.table_chart_rounded,
-                iconColor: isDark
-                    ? KeyNestPalette.successDark
-                    : KeyNestPalette.success,
+                iconColor: accentColor,
                 title: 'CSV Spreadsheet (.csv)',
                 badge: 'UNIFIED IMPORT',
-                badgeColor: isDark
-                    ? KeyNestPalette.successDark
-                    : KeyNestPalette.success,
+                badgeColor: KeyNestPalette.successColorFor(isDark),
                 subtitle:
                     'Import credentials from Bitwarden, LastPass, or any CSV with Quick Import or Custom Field Mapping.',
                 actionLabel: 'Import CSV',
@@ -736,7 +785,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
 
               _buildTile(
                 icon: Icons.code_rounded,
-                iconColor: KeyNestPalette.info,
+                iconColor: accentColor,
                 title: 'JSON Document',
                 subtitle:
                     'Import credentials from KeyNest or Bitwarden JSON export files.',
@@ -761,9 +810,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     CircularProgressIndicator(
-                      color: isDark
-                          ? KeyNestPalette.primaryDark
-                          : KeyNestPalette.primary,
+                      color: accentColor,
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -819,17 +866,10 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: iconColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, color: iconColor, size: 22),
+              Padding(
+                padding: const EdgeInsets.only(top: 2, right: 14),
+                child: Icon(icon, color: iconColor, size: 26),
               ),
-              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

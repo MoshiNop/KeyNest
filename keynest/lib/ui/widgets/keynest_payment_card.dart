@@ -244,10 +244,12 @@ class KeyNestPaymentCardView extends StatelessWidget {
         : CrossAxisAlignment.center;
 
     return Center(
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
           gradient: _buildGradient(),
           borderRadius: BorderRadius.circular(22),
           boxShadow: [
@@ -420,6 +422,7 @@ class KeyNestPaymentCardView extends StatelessWidget {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

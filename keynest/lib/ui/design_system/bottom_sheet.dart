@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:keynest/ui/design_system/design_tokens.dart';
+import 'package:keynest/utils/platform.dart';
 
 /// Modal bottom sheet with status bar padding, side insets, and subtle borders.
 class KeyNestBottomSheet extends StatelessWidget {
@@ -68,6 +69,27 @@ class KeyNestBottomSheet extends StatelessWidget {
         };
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return showDialog<T>(
+        context: context,
+        barrierDismissible: isDismissible,
+        barrierColor: Colors.black.withValues(alpha: isDark ? 0.60 : 0.40),
+        builder: (dialogCtx) => Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 440,
+              maxHeight: 540,
+            ),
+            child: effectiveBuilder(dialogCtx),
+          ),
+        ),
+      );
+    }
+
     return showModalBottomSheet<T>(
       context: context,
       isScrollControlled: isScrollControlled,
@@ -108,32 +130,40 @@ class KeyNestBottomSheet extends StatelessWidget {
                   ? Colors.white.withValues(alpha: 0.12)
                   : Colors.black.withValues(alpha: 0.08)));
 
+    final isDesktop = KeyNestPlatform.isDesktopOrWeb;
+    final borderRadius = isDesktop
+        ? BorderRadius.circular(16)
+        : const BorderRadius.vertical(
+            top: Radius.circular(KeyNestTokens.radiusSheet),
+          );
+
     return ClipRRect(
-      borderRadius: const BorderRadius.vertical(
-        top: Radius.circular(KeyNestTokens.radiusSheet),
-      ),
+      borderRadius: borderRadius,
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           decoration: BoxDecoration(
             color: bg,
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(KeyNestTokens.radiusSheet),
-            ),
-            border: Border(
-              top: BorderSide(
-                color: effectiveBorderColor,
-                width: KeyNestTokens.borderWidth,
-              ),
-              left: BorderSide(
-                color: effectiveBorderColor,
-                width: KeyNestTokens.borderWidth,
-              ),
-              right: BorderSide(
-                color: effectiveBorderColor,
-                width: KeyNestTokens.borderWidth,
-              ),
-            ),
+            borderRadius: borderRadius,
+            border: isDesktop
+                ? Border.all(
+                    color: effectiveBorderColor,
+                    width: KeyNestTokens.borderWidth,
+                  )
+                : Border(
+                    top: BorderSide(
+                      color: effectiveBorderColor,
+                      width: KeyNestTokens.borderWidth,
+                    ),
+                    left: BorderSide(
+                      color: effectiveBorderColor,
+                      width: KeyNestTokens.borderWidth,
+                    ),
+                    right: BorderSide(
+                      color: effectiveBorderColor,
+                      width: KeyNestTokens.borderWidth,
+                    ),
+                  ),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.12),

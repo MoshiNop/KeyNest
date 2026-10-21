@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/bloc/analytics.dart';
 import 'package:keynest/bloc/app_data.dart';
@@ -7,7 +8,9 @@ import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/main.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/add_payment_card.dart';
+import 'package:keynest/ui/screens/add_record_catalog.dart';
 import 'package:keynest/ui/screens/card_details.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/screens/keynest_home_shell.dart';
@@ -112,12 +115,14 @@ class FocusWorkaroundPageRoute<T> extends MaterialPageRoute<T> {
 class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey();
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   final List<KdbxEntry> _history = [];
   int _historyIndex = -1;
   KdbxEntry? _selectedEntry;
   double _listPaneWidth = 380.0;
   bool _isDraggingSplitter = false;
   int _activeRailIndex = 0;
+  bool _isNarrowLayout = false;
 
   @override
   void initState() {
@@ -131,19 +136,41 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   void dispose() {
     KeyNestVaultScope.instance.removeListener(_onVaultScopeChanged);
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
   void _onVaultScopeChanged() {
     final idx = KeyNestVaultScope.instance.activeTabIndex;
-    if (idx != null && idx != _activeRailIndex && mounted) {
-      setState(() {
-        _activeRailIndex = idx;
-      });
+    if (idx != null && idx != _activeRailIndex) {
+      _activeRailIndex = idx;
     }
     final q = KeyNestVaultScope.instance.searchQuery;
-    if (_searchController.text != q && mounted) {
+    if (_searchController.text != q) {
       _searchController.text = q;
+    }
+
+    if (_selectedEntry != null &&
+        (KeyNestItemTypeHelper.isEntryInTrash(_selectedEntry!) ||
+            _selectedEntry!.parent == null)) {
+      _selectedEntry = null;
+      _history.removeWhere((e) =>
+          KeyNestItemTypeHelper.isEntryInTrash(e) || e.parent == null);
+      if (_historyIndex >= _history.length) {
+        _historyIndex = _history.length - 1;
+      }
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (context) => EmptyStateInitialRoute(
+            onAddNewItem: _handleAddNewItem,
+          ),
+        ),
+        (route) => route.isFirst,
+      );
+    }
+
+    if (mounted) {
+      setState(() {});
     }
   }
 
@@ -179,7 +206,31 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
+  bool get _canGoBack {
+    if (_isNarrowLayout) {
+      return Navigator.of(context).canPop() || _historyIndex > 0;
+    }
+    return (_navigatorKey.currentState?.canPop() ?? false) ||
+        _historyIndex > 0 ||
+        (_historyIndex == 0 && _selectedEntry != null);
+  }
+
+  bool get _canGoForward {
+    return _historyIndex >= 0 && _historyIndex < _history.length - 1;
+  }
+
   void _navigateBack() {
+    if (_isNarrowLayout) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+        return;
+      }
+    } else {
+      if (_navigatorKey.currentState?.canPop() ?? false) {
+        _navigatorKey.currentState!.pop();
+        return;
+      }
+    }
     if (_historyIndex > 0) {
       setState(() {
         _historyIndex--;
@@ -187,6 +238,19 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       });
       _navigatorKey.currentState?.pushAndRemoveUntil(
         _routeForEntry(_selectedEntry!, false),
+        (route) => route.isFirst,
+      );
+    } else if (_historyIndex == 0 && _selectedEntry != null) {
+      setState(() {
+        _historyIndex = -1;
+        _selectedEntry = null;
+      });
+      _navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (context) => EmptyStateInitialRoute(
+            onAddNewItem: _handleAddNewItem,
+          ),
+        ),
         (route) => route.isFirst,
       );
     }
@@ -205,7 +269,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
-  void _handleAddNewItem() {
+  Future<void> _handleAddNewItem() async {
     final kdbxBloc = context.read<KdbxBloc>();
     final scope = KeyNestVaultScope.instance;
     final activeVault = scope.getSelectedVault(kdbxBloc) ??
@@ -215,6 +279,62 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         : null;
 
     final currentTab = scope.activeTabIndex ?? _activeRailIndex;
+
+    if (_isNarrowLayout) {
+      switch (currentTab) {
+        case 2: // Cards tab
+          Navigator.of(context).push(
+            AddPaymentCardScreen.route(
+              initialFile: activeVault,
+              initialGroup: activeFolder,
+            ),
+          );
+          break;
+        case 3: // Notes tab
+          Navigator.of(context).push(
+            NoteDetailsScreen.route(
+              isEditing: true,
+              initialFile: activeVault,
+              initialGroup: activeFolder,
+            ),
+          );
+          break;
+        case 1: // Records tab
+          final result = await Navigator.of(context).push<dynamic>(
+            AddRecordCatalogScreen.route(
+              initialFile: activeVault,
+              initialGroup: activeFolder,
+            ),
+          );
+          if (result is KdbxEntry && mounted) {
+            Navigator.of(context).push(
+              EntryDetailsScreen.route(entry: result, isNew: true),
+            );
+          }
+          break;
+        case 4: // Authenticator tab
+          final newEntry = kdbxBloc.createEntry(
+            file: activeVault,
+            group: activeFolder,
+          );
+          KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
+          Navigator.of(context).push(
+            EntryDetailsScreen.route(entry: newEntry, isNew: true),
+          );
+          break;
+        case 0: // Secrets tab
+        default:
+          final newEntry = kdbxBloc.createEntry(
+            file: activeVault,
+            group: activeFolder,
+          );
+          Navigator.of(context).push(
+            EntryDetailsScreen.route(entry: newEntry, isNew: true),
+          );
+          break;
+      }
+      return;
+    }
 
     switch (currentTab) {
       case 2: // Cards tab
@@ -243,12 +363,15 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         });
         break;
       case 1: // Records tab
-        final newEntry = kdbxBloc.createEntry(
-          file: activeVault,
-          group: activeFolder,
+        final result = await Navigator.of(context).push<dynamic>(
+          AddRecordCatalogScreen.route(
+            initialFile: activeVault,
+            initialGroup: activeFolder,
+          ),
         );
-        KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.record);
-        _navigateToEntry(newEntry, isNew: true);
+        if (result is KdbxEntry) {
+          _navigateToEntry(result, isNew: true);
+        }
         break;
       case 4: // Authenticator tab
         final newEntry = kdbxBloc.createEntry(
@@ -302,7 +425,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           setState(() {
             _listPaneWidth = (_listPaneWidth + details.delta.dx).clamp(
               280.0,
-              650.0,
+              1600.0,
             );
           });
         },
@@ -331,6 +454,22 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
 
   void _onEntrySelected(KdbxEntry entry, EntrySelectionType type) {
     if (KeyNestPlatform.isDesktopOrWeb) {
+      if (_isNarrowLayout) {
+        if (_historyIndex >= 0 && _historyIndex < _history.length - 1) {
+          _history.removeRange(_historyIndex + 1, _history.length);
+        }
+        _history.add(entry);
+        _historyIndex = _history.length - 1;
+        setState(() => _selectedEntry = entry);
+        Navigator.of(context).push(
+          _routeForEntry(entry, type == EntrySelectionType.newEntry),
+        ).then((_) {
+          if (mounted) {
+            setState(() => _selectedEntry = null);
+          }
+        });
+        return;
+      }
       _navigateToEntry(entry, isNew: type == EntrySelectionType.newEntry);
       return;
     }
@@ -355,16 +494,19 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
-  Widget _buildDesktopTopBar(BuildContext context, bool isDark) {
+  Widget _buildDesktopTopBar(
+    BuildContext context,
+    bool isDark, {
+    bool isNarrow = false,
+  }) {
     final kdbxBloc = context.watch<KdbxBloc>();
     final scope = KeyNestVaultScope.instance;
     final selectedVault = scope.getSelectedVault(kdbxBloc);
     final vaultName = selectedVault?.body.meta.databaseName.get() ??
         (selectedVault != null ? 'Active Vault' : 'All Vaults');
 
-    final canGoBack = _historyIndex > 0;
-    final canGoForward =
-        _historyIndex >= 0 && _historyIndex < _history.length - 1;
+    final canGoBack = _canGoBack;
+    final canGoForward = _canGoForward;
 
     final borderColor = isDark
         ? KeyNestPalette.cardBorderDark
@@ -374,8 +516,8 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         : KeyNestPalette.surfaceLight;
 
     return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
         color: topBarBg,
         border: Border(
@@ -386,38 +528,38 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         children: [
           // Navigation History
           IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, size: 20),
+            icon: const Icon(Icons.arrow_back_rounded, size: 19),
             onPressed: canGoBack ? _navigateBack : null,
             tooltip: 'Back',
-            splashRadius: 18,
+            splashRadius: 16,
             visualDensity: VisualDensity.compact,
             color: canGoBack
                 ? (isDark ? Colors.white : Colors.black87)
                 : (isDark ? Colors.white24 : Colors.black26),
           ),
           IconButton(
-            icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+            icon: const Icon(Icons.arrow_forward_rounded, size: 19),
             onPressed: canGoForward ? _navigateForward : null,
             tooltip: 'Forward',
-            splashRadius: 18,
+            splashRadius: 16,
             visualDensity: VisualDensity.compact,
             color: canGoForward
                 ? (isDark ? Colors.white : Colors.black87)
                 : (isDark ? Colors.white24 : Colors.black26),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           // Search Pill
           Expanded(
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: Container(
-                  height: 36,
+                  height: 32,
                   decoration: BoxDecoration(
                     color: isDark
                         ? const Color(0xFF1E212B)
                         : const Color(0xFFF1F3F5),
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isDark
                           ? const Color(0xFF333846)
@@ -430,7 +572,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                     children: [
                       Icon(
                         Icons.search_rounded,
-                        size: 18,
+                        size: 16,
                         color: isDark
                             ? KeyNestPalette.textSecondaryDark
                             : KeyNestPalette.textSecondaryLight,
@@ -439,21 +581,22 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                       Expanded(
                         child: TextField(
                           controller: _searchController,
+                          focusNode: _searchFocusNode,
                           onChanged: (val) {
                             KeyNestVaultScope.instance.setSearchQuery(val);
                           },
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 12.5,
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                           decoration: InputDecoration(
                             isDense: true,
                             contentPadding:
-                                const EdgeInsets.symmetric(vertical: 8),
+                                const EdgeInsets.symmetric(vertical: 6),
                             border: InputBorder.none,
                             hintText: 'Search in $vaultName',
                             hintStyle: TextStyle(
-                              fontSize: 13,
+                              fontSize: 12.5,
                               color: isDark
                                   ? KeyNestPalette.textSecondaryDark
                                   : KeyNestPalette.textSecondaryLight,
@@ -469,7 +612,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                           },
                           child: Icon(
                             Icons.close_rounded,
-                            size: 16,
+                            size: 15,
                             color: isDark
                                 ? KeyNestPalette.textSecondaryDark
                                 : KeyNestPalette.textSecondaryLight,
@@ -481,40 +624,55 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          // Prominent + New Item Button
-          FilledButton.icon(
-            onPressed: _handleAddNewItem,
-            icon: const Icon(Icons.add_rounded, size: 18),
-            label: const Text(
-              'New Item',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-            ),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF0A85EA),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              elevation: 0,
-            ),
-          ),
+          const SizedBox(width: 10),
+          // Prominent / Compact New Item Button
+          isNarrow
+              ? IconButton.filled(
+                  onPressed: _handleAddNewItem,
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  tooltip: 'New Item',
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A85EA),
+                    foregroundColor: Colors.white,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )
+              : FilledButton.icon(
+                  onPressed: _handleAddNewItem,
+                  icon: const Icon(Icons.add_rounded, size: 17),
+                  label: const Text(
+                    'New Item',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0A85EA),
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
         ],
       ),
     );
   }
 
   Widget _buildDesktopChipsBar(BuildContext context, bool isDark) {
-    final kdbxBloc = context.watch<KdbxBloc>();
-    final scope = KeyNestVaultScope.instance;
-    final selectedVault = scope.getSelectedVault(kdbxBloc);
-    final borderColor = isDark
-        ? KeyNestPalette.cardBorderDark
-        : KeyNestPalette.cardBorderLight;
-    final currentTab = scope.activeTabIndex ?? _activeRailIndex;
+    return ListenableBuilder(
+      listenable: KeyNestVaultScope.instance,
+      builder: (context, _) {
+        final kdbxBloc = context.watch<KdbxBloc>();
+        final scope = KeyNestVaultScope.instance;
+        final selectedVault = scope.getSelectedVault(kdbxBloc);
+        final borderColor = isDark
+            ? KeyNestPalette.cardBorderDark
+            : KeyNestPalette.cardBorderLight;
+        final currentTab = scope.activeTabIndex ?? _activeRailIndex;
 
-    return Container(
+        return Container(
       height: 42,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -526,46 +684,52 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       child: Row(
         children: [
           // 1. Vault Chip
-          KeyNestChip(
-            label: selectedVault == null
-                ? 'All Vault Items'
-                : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
-            icon: Icons.keyboard_arrow_down_rounded,
-            isSelected: selectedVault != null,
-            onTap: () => KeyNestTopChipsBar.showVaultSelectionSheet(
-              context,
-              kdbxBloc,
-              tab: scope.currentActiveTab,
+          Builder(
+            builder: (chipCtx) => KeyNestChip(
+              label: selectedVault == null
+                  ? 'All Vault Items'
+                  : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
+              icon: Icons.keyboard_arrow_down_rounded,
+              isSelected: selectedVault != null,
+              onTap: () => KeyNestTopChipsBar.showVaultSelectionSheet(
+                chipCtx,
+                kdbxBloc,
+                tab: scope.currentActiveTab,
+              ),
             ),
           ),
           const SizedBox(width: 8),
 
           // 2. Sort Chip
-          KeyNestChip(
-            label: KeyNestTopChipsBar.sortLabel(scope.sortMode),
-            icon: Icons.sort_rounded,
-            isSelected: scope.sortMode != VaultSortMode.alphabeticalAsc,
-            onTap: () => _showDesktopSortDialog(context, scope),
+          Builder(
+            builder: (chipCtx) => KeyNestChip(
+              label: KeyNestTopChipsBar.sortLabel(scope.sortMode),
+              icon: Icons.sort_rounded,
+              isSelected: scope.sortMode != VaultSortMode.alphabeticalAsc,
+              onTap: () => _showDesktopSortDialog(chipCtx, scope),
+            ),
           ),
           const SizedBox(width: 8),
 
           // 3. Category Chip (for secrets/passwords tab)
           if (currentTab == 0) ...[
-            KeyNestChip(
-              label: scope.selectedCategory ?? 'Category',
-              icon: Icons.keyboard_arrow_down_rounded,
-              isSelected: scope.selectedCategory != null,
-              onTap: () async {
-                final cat = await KeyNestCategoryPicker.show(
-                  context,
-                  selectedCategory: scope.selectedCategory,
-                );
-                if (cat == null || cat == 'All') {
-                  scope.setSelectedCategory(null);
-                } else {
-                  scope.setSelectedCategory(cat);
-                }
-              },
+            Builder(
+              builder: (chipCtx) => KeyNestChip(
+                label: scope.selectedCategory ?? 'Category',
+                icon: Icons.keyboard_arrow_down_rounded,
+                isSelected: scope.selectedCategory != null,
+                onTap: () async {
+                  final cat = await KeyNestCategoryPicker.show(
+                    chipCtx,
+                    selectedCategory: scope.selectedCategory,
+                  );
+                  if (cat == null || cat == 'All') {
+                    scope.setSelectedCategory(null);
+                  } else {
+                    scope.setSelectedCategory(cat);
+                  }
+                },
+              ),
             ),
             const SizedBox(width: 8),
           ],
@@ -595,42 +759,81 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         ],
       ),
     );
-  }
+  },
+);
+}
 
-  void _showDesktopSortDialog(BuildContext context, KeyNestVaultScope scope) {
-    showDialog<void>(
-      context: context,
+  void _showDesktopSortDialog(
+    BuildContext anchorContext,
+    KeyNestVaultScope scope,
+  ) {
+    showAnchoredPopover<void>(
+      anchorContext: anchorContext,
+      width: 250,
       builder: (dialogContext) {
-        return SimpleDialog(
-          title: const Text('Sort entries by'),
-          children: VaultSortMode.values.map((mode) {
-            final isSelected = scope.sortMode == mode;
-            return SimpleDialogOption(
-              onPressed: () {
-                scope.setSortMode(mode);
-                Navigator.of(dialogContext).pop();
-              },
-              child: Row(
-                children: [
-                  Icon(
-                    isSelected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    size: 18,
-                    color: isSelected ? const Color(0xFF0A85EA) : null,
+        final theme = Theme.of(dialogContext);
+        final isDark = theme.brightness == Brightness.dark;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
+                child: Text(
+                  'Sort entries by',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white70 : Colors.black54,
                   ),
-                  const SizedBox(width: 12),
-                  Text(
-                    KeyNestTopChipsBar.sortLabel(mode),
-                    style: TextStyle(
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              const Divider(height: 8),
+              ...VaultSortMode.values.map((mode) {
+                final isSelected = scope.sortMode == mode;
+                return InkWell(
+                  onTap: () {
+                    scope.setSortMode(mode);
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isSelected ? Icons.check_rounded : null,
+                          size: 16,
+                          color: const Color(0xFF0A85EA),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            KeyNestTopChipsBar.sortLabel(mode),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              color: isSelected
+                                  ? const Color(0xFF0A85EA)
+                                  : (isDark ? Colors.white : Colors.black87),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            );
-          }).toList(),
+                );
+              }),
+            ],
+          ),
         );
       },
     );
@@ -642,59 +845,121 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (isDesktopOrWeb) {
-      return Scaffold(
-        backgroundColor:
-            isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
-        body: Row(
-          children: <Widget>[
-            // 1. Desktop & Web Navigation Rail (Leftmost)
-            KeyNestDesktopNavRail(
-              currentIndex: _activeRailIndex,
-              onTap: (index) {
-                setState(() {
-                  _activeRailIndex = index;
-                });
-                KeyNestVaultScope.instance.setActiveTab(index);
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final isNarrow = constraints.maxWidth < 780.0;
+          _isNarrowLayout = isNarrow;
+
+          final maxAllowedListWidth =
+              (constraints.maxWidth - 340.0).clamp(280.0, 1600.0);
+          final effectiveListWidth =
+              _listPaneWidth.clamp(280.0, maxAllowedListWidth);
+
+          return CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              const SingleActivator(LogicalKeyboardKey.digit1, control: true): () {
+                setState(() => _activeRailIndex = 0);
+                KeyNestVaultScope.instance.setActiveTab(0);
               },
-            ),
-            // 2. Right of Rail: Top Bar + Chips Bar + List & Detail Panes
-            Expanded(
-              child: Column(
-                children: [
-                  _buildDesktopTopBar(context, isDark),
-                  _buildDesktopChipsBar(context, isDark),
+              const SingleActivator(LogicalKeyboardKey.digit2, control: true): () {
+                setState(() => _activeRailIndex = 1);
+                KeyNestVaultScope.instance.setActiveTab(1);
+              },
+              const SingleActivator(LogicalKeyboardKey.digit3, control: true): () {
+                setState(() => _activeRailIndex = 2);
+                KeyNestVaultScope.instance.setActiveTab(2);
+              },
+              const SingleActivator(LogicalKeyboardKey.digit4, control: true): () {
+                setState(() => _activeRailIndex = 3);
+                KeyNestVaultScope.instance.setActiveTab(3);
+              },
+              const SingleActivator(LogicalKeyboardKey.digit5, control: true): () {
+                setState(() => _activeRailIndex = 4);
+                KeyNestVaultScope.instance.setActiveTab(4);
+              },
+              const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+                _searchFocusNode.requestFocus();
+              },
+              const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+                _handleAddNewItem();
+              },
+            },
+            child: Scaffold(
+              backgroundColor:
+                  isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
+              body: Row(
+                children: <Widget>[
+                  // 1. Desktop & Web Navigation Rail (Leftmost) - hidden in narrow mode
+                  if (!isNarrow)
+                    KeyNestDesktopNavRail(
+                      currentIndex: _activeRailIndex,
+                      onTap: (index) {
+                        setState(() {
+                          _activeRailIndex = index;
+                        });
+                        KeyNestVaultScope.instance.setActiveTab(index);
+                      },
+                    ),
+                  // 2. Right of Rail: Top Bar + Chips Bar + List & Detail Panes
                   Expanded(
-                    child: Row(
+                    child: Column(
                       children: [
-                        // Middle Pane: List
-                        SizedBox(
-                          width: _listPaneWidth,
-                          child: KeyNestHomeShell(
-                            selectedEntry: _selectedEntry,
-                            isDesktopMaster: true,
-                            onEntrySelected: _onEntrySelected,
-                            onAddNewItem: _handleAddNewItem,
-                          ),
+                        _buildDesktopTopBar(
+                          context,
+                          isDark,
+                          isNarrow: isNarrow,
                         ),
-                        // Splitter
-                        _buildSplitterHandle(context, isDark),
-                        // Right Pane: Detail (Full-featured screens via Navigator)
+                        _buildDesktopChipsBar(context, isDark),
                         Expanded(
-                          child: Navigator(
-                            key: _navigatorKey,
-                            requestFocus: false,
-                            onGenerateRoute: (settings) {
-                              assert(
-                                settings.name == Navigator.defaultRouteName,
-                              );
-                              return MaterialPageRoute<void>(
-                                settings: settings,
-                                builder: (context) => EmptyStateInitialRoute(
-                                  onAddNewItem: _handleAddNewItem,
+                          child: isNarrow
+                              ? ScaffoldMessenger(
+                                  child: KeyNestHomeShell(
+                                    selectedEntry: _selectedEntry,
+                                    isDesktopMaster: false,
+                                    onEntrySelected: _onEntrySelected,
+                                    onAddNewItem: _handleAddNewItem,
+                                  ),
+                                )
+                              : Row(
+                                  children: [
+                                    // Middle Pane: List
+                                    SizedBox(
+                                      width: effectiveListWidth,
+                                      child: ScaffoldMessenger(
+                                        child: KeyNestHomeShell(
+                                          selectedEntry: _selectedEntry,
+                                          isDesktopMaster: true,
+                                          onEntrySelected: _onEntrySelected,
+                                          onAddNewItem: _handleAddNewItem,
+                                        ),
+                                      ),
+                                    ),
+                                    // Splitter
+                                    _buildSplitterHandle(context, isDark),
+                                    // Right Pane: Detail (Full-featured screens via Navigator)
+                                    Expanded(
+                                      child: ScaffoldMessenger(
+                                        child: Navigator(
+                                          key: _navigatorKey,
+                                        requestFocus: false,
+                                        onGenerateRoute: (settings) {
+                                          assert(
+                                            settings.name ==
+                                                Navigator.defaultRouteName,
+                                          );
+                                          return MaterialPageRoute<void>(
+                                            settings: settings,
+                                            builder: (context) =>
+                                                EmptyStateInitialRoute(
+                                              onAddNewItem: _handleAddNewItem,
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 ),
-                              );
-                            },
-                          ),
                         ),
                       ],
                     ),
@@ -702,8 +967,8 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                 ],
               ),
             ),
-          ],
-        ),
+          );
+        },
       );
     }
 
@@ -755,86 +1020,108 @@ class EmptyStateInitialRoute extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: (isDark
+    return ListenableBuilder(
+      listenable: KeyNestVaultScope.instance,
+      builder: (context, _) {
+        final activeTab = KeyNestVaultScope.instance.activeTabIndex ?? 0;
+        final String buttonLabel;
+        final String typeDescription;
+        switch (activeTab) {
+          case 1:
+            buttonLabel = 'Add Record';
+            typeDescription =
+                'Select a record from the list to view or edit details';
+            break;
+          case 2:
+            buttonLabel = 'Add Card';
+            typeDescription =
+                'Select a card from the list to view or edit details';
+            break;
+          case 3:
+            buttonLabel = 'Add Note';
+            typeDescription =
+                'Select a note from the list to view or edit details';
+            break;
+          case 4:
+            buttonLabel = 'Add 2FA Code';
+            typeDescription =
+                'Select a 2FA account from the list to view or edit details';
+            break;
+          case 0:
+          default:
+            buttonLabel = loc.addNewPasswordButtonLabel;
+            typeDescription =
+                'Select an item from the list to view or edit details';
+            break;
+        }
+
+        return Scaffold(
+          backgroundColor:
+              isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 84,
+                  height: 84,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (isDark
+                            ? KeyNestPalette.primaryDark
+                            : KeyNestPalette.primary)
+                        .withValues(alpha: isDark ? 0.16 : 0.10),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Image.asset(
+                    AssetConstants.logoIcon,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  AppConstants.keyNest,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  typeDescription,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: isDark
+                        ? KeyNestPalette.textSecondaryDark
+                        : KeyNestPalette.textSecondaryLight,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                FilledButton.icon(
+                  onPressed: onAddNewItem,
+                  icon: const Icon(Icons.add_rounded, size: 20),
+                  label: Text(buttonLabel),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isDark
                         ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary)
-                    .withValues(alpha: isDark ? 0.16 : 0.10),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Image.asset(
-                AssetConstants.logoIcon,
-                fit: BoxFit.contain,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              AppConstants.keyNest,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Select an item from the list to view or edit details',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: isDark
-                    ? KeyNestPalette.textSecondaryDark
-                    : KeyNestPalette.textSecondaryLight,
-              ),
-            ),
-            const SizedBox(height: 28),
-            FilledButton.icon(
-              onPressed: onAddNewItem ?? () {
-                final kdbxBloc = context.read<KdbxBloc>();
-                final scope = KeyNestVaultScope.instance;
-                final activeVault = scope.getSelectedVault(kdbxBloc) ??
-                    kdbxBloc.openedFilesKdbx.firstOrNull;
-                final activeFolder = (activeVault != null)
-                    ? (scope.getCurrentFolder(kdbxBloc) ??
-                        activeVault.body.rootGroup)
-                    : null;
-                final newEntry = kdbxBloc.createEntry(
-                  file: activeVault,
-                  group: activeFolder,
-                );
-                Navigator.of(context).push(
-                  EntryDetailsScreen.route(entry: newEntry, isNew: true),
-                );
-              },
-              icon: const Icon(Icons.add_rounded, size: 20),
-              label: Text(loc.addNewPasswordButtonLabel),
-              style: FilledButton.styleFrom(
-                backgroundColor: isDark
-                    ? KeyNestPalette.primaryDark
-                    : KeyNestPalette.primary,
-                foregroundColor: isDark
-                    ? const Color(0xFF00315D)
-                    : Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 22,
-                  vertical: 14,
+                        : KeyNestPalette.primary,
+                    foregroundColor: isDark
+                        ? const Color(0xFF00315D)
+                        : Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 14,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

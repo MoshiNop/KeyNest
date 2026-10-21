@@ -21,6 +21,11 @@ const String kDefaultGoogleDesktopClientId = String.fromEnvironment(
   defaultValue: '',
 );
 
+const String kDefaultGoogleDesktopClientSecret = String.fromEnvironment(
+  'KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET',
+  defaultValue: '',
+);
+
 const String kDefaultDropboxAppKey = String.fromEnvironment(
   'KEYNEST_DROPBOX_APP_KEY',
   defaultValue: String.fromEnvironment(
@@ -50,6 +55,7 @@ class CloudConfigStore {
   String? _dropboxAppKey;
   String? _googleWebClientId;
   String? _googleDesktopClientId;
+  String? _googleDesktopClientSecret;
   bool _loaded = false;
 
   Future<void> load({
@@ -106,6 +112,10 @@ class CloudConfigStore {
                 (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_ID'] ??
                         map['googleDesktopClientId'])
                     as String?;
+            _googleDesktopClientSecret =
+                (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET'] ??
+                        map['googleDesktopClientSecret'])
+                    as String?;
           } catch (_) {}
         }
       }
@@ -123,6 +133,10 @@ class CloudConfigStore {
             (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_ID'] ??
                     map['googleDesktopClientId'])
                 as String?;
+        _googleDesktopClientSecret =
+            (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET'] ??
+                    map['googleDesktopClientSecret'])
+                as String?;
         _logger.info('Loaded custom cloud configuration from storage.');
       }
     } catch (e, stack) {
@@ -135,6 +149,7 @@ class CloudConfigStore {
     String? dropboxAppKey,
     String? googleWebClientId,
     String? googleDesktopClientId,
+    String? googleDesktopClientSecret,
     File? configFileOverride,
   }) async {
     if (dropboxAppKey != null) {
@@ -151,6 +166,11 @@ class CloudConfigStore {
       _googleDesktopClientId = googleDesktopClientId.trim().isEmpty
           ? null
           : googleDesktopClientId.trim();
+    }
+    if (googleDesktopClientSecret != null) {
+      _googleDesktopClientSecret = googleDesktopClientSecret.trim().isEmpty
+          ? null
+          : googleDesktopClientSecret.trim();
     }
 
     await _writeConfigFile(configFileOverride);
@@ -179,6 +199,12 @@ class CloudConfigStore {
           _googleDesktopClientId!.isNotEmpty) {
         data['KEYNEST_GOOGLE_DESKTOP_CLIENT_ID'] = _googleDesktopClientId;
         data['googleDesktopClientId'] = _googleDesktopClientId;
+      }
+      if (_googleDesktopClientSecret != null &&
+          _googleDesktopClientSecret!.isNotEmpty) {
+        data['KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET'] =
+            _googleDesktopClientSecret;
+        data['googleDesktopClientSecret'] = _googleDesktopClientSecret;
       }
       if (!file.parent.existsSync()) {
         file.parent.createSync(recursive: true);
@@ -215,6 +241,7 @@ class CloudConfigStore {
   Future<void> clearAll({File? configFileOverride}) async {
     _googleWebClientId = null;
     _googleDesktopClientId = null;
+    _googleDesktopClientSecret = null;
     _dropboxAppKey = null;
     await _writeConfigFile(configFileOverride);
   }
@@ -222,6 +249,22 @@ class CloudConfigStore {
   String? get dropboxAppKey => _dropboxAppKey;
   String? get googleWebClientId => _googleWebClientId;
   String? get googleDesktopClientId => _googleDesktopClientId;
+  String? get googleDesktopClientSecret => _googleDesktopClientSecret;
+
+  String get effectiveGoogleDesktopClientSecret {
+    final runtime = _googleDesktopClientSecret?.trim();
+    if (runtime != null && runtime.isNotEmpty) {
+      return runtime;
+    }
+    if (kDefaultGoogleDesktopClientSecret.isNotEmpty) {
+      return kDefaultGoogleDesktopClientSecret;
+    }
+    final secret = Env.value?.secrets?.googleClientSecret;
+    if (secret != null && secret.isNotEmpty) {
+      return secret;
+    }
+    return '';
+  }
 
   /// Effective Google Web Client ID with strict precedence:
   /// 1. User runtime override (_googleWebClientId)
@@ -384,5 +427,6 @@ class CloudConfigStore {
     _dropboxAppKey = null;
     _googleWebClientId = null;
     _googleDesktopClientId = null;
+    _googleDesktopClientSecret = null;
   }
 }

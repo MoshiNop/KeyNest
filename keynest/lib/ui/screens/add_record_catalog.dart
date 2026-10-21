@@ -8,6 +8,7 @@ import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/widgets/keynest_search_bar.dart';
 import 'package:keynest/ui/widgets/keynest_settings_tile.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class RecordTypeItem {
@@ -37,13 +38,23 @@ class AddRecordCatalogScreen extends StatefulWidget {
   static Route<void> route({
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
-  }) => KeyNestPushPageRoute(
-    settings: const RouteSettings(name: '/addRecord'),
-    builder: (context) => AddRecordCatalogScreen(
-      initialFile: initialFile,
-      initialGroup: initialGroup,
-    ),
-  );
+  }) => KeyNestPlatform.isDesktopOrWeb
+      ? KeyNestDesktopDialogRoute<void>(
+          settings: const RouteSettings(name: '/addRecord'),
+          maxWidth: 520,
+          maxHeight: 600,
+          builder: (context) => AddRecordCatalogScreen(
+            initialFile: initialFile,
+            initialGroup: initialGroup,
+          ),
+        )
+      : KeyNestPushPageRoute(
+          settings: const RouteSettings(name: '/addRecord'),
+          builder: (context) => AddRecordCatalogScreen(
+            initialFile: initialFile,
+            initialGroup: initialGroup,
+          ),
+        );
 
   @override
   State<AddRecordCatalogScreen> createState() => _AddRecordCatalogScreenState();
@@ -349,6 +360,11 @@ class _AddRecordCatalogScreenState extends State<AddRecordCatalogScreen> {
       }
     }
 
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      Navigator.of(context).pop(entry);
+      return;
+    }
+
     final saved = await Navigator.of(context).push<bool>(
       EntryDetailsScreen.route(entry: entry, isNew: true),
     );
@@ -392,7 +408,11 @@ class _AddRecordCatalogScreenState extends State<AddRecordCatalogScreen> {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
+          icon: Icon(
+            KeyNestPlatform.isDesktopOrWeb
+                ? Icons.close_rounded
+                : Icons.arrow_back_rounded,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),

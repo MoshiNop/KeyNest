@@ -17,6 +17,7 @@ class KeyNestCard extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.accentColor,
+    this.isSelected = false,
   });
 
   final Widget child;
@@ -28,6 +29,7 @@ class KeyNestCard extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final Color? accentColor;
+  final bool isSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -51,23 +53,45 @@ class KeyNestCard extends StatelessWidget {
                     )
                   : KeyNestTokens.lightSurface));
 
+    final selectedBorderColor = isDark
+        ? KeyNestPalette.primaryDark
+        : KeyNestPalette.primary;
+
+    final effectiveBg = isSelected
+        ? (isDark
+            ? Color.alphaBlend(
+                selectedBorderColor.withValues(alpha: 0.12),
+                bg,
+              )
+            : Color.alphaBlend(
+                selectedBorderColor.withValues(alpha: 0.08),
+                bg,
+              ))
+        : bg;
+
     final effectiveBorderColor = accentColor != null
         ? accentColor!.withValues(alpha: KeyNestTokens.tintedBorderAlpha)
         : (isDark
               ? KeyNestPalette.entryBorderDark
               : KeyNestPalette.entryBorderLight);
 
+    final effectiveBorder = border ??
+        (isSelected
+            ? Border.all(
+                color: selectedBorderColor,
+                width: 2.0,
+              )
+            : Border.all(
+                color: effectiveBorderColor,
+                width: KeyNestTokens.borderWidth,
+              ));
+
     Widget content = Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: bg,
+        color: effectiveBg,
         borderRadius: r,
-        border:
-            border ??
-            Border.all(
-              color: effectiveBorderColor,
-              width: KeyNestTokens.borderWidth,
-            ),
+        border: effectiveBorder,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),

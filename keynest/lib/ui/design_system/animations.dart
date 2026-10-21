@@ -226,6 +226,72 @@ class KeyNestPushPageRoute<T> extends PageRouteBuilder<T> {
        );
 }
 
+/// Modal floating dialog route for desktop and web screens (Settings, Vault Manager, etc.)
+class KeyNestDesktopDialogRoute<T> extends PageRouteBuilder<T> {
+  KeyNestDesktopDialogRoute({
+    required WidgetBuilder builder,
+    super.settings,
+    double maxWidth = 540,
+    double maxHeight = 600,
+    Offset? origin,
+    super.barrierDismissible = true,
+  }) : super(
+         opaque: false,
+         barrierColor: Colors.black54,
+         pageBuilder: (context, animation, secondaryAnimation) {
+           return Center(
+             child: Dialog(
+               backgroundColor: Colors.transparent,
+               elevation: 0,
+               insetPadding: const EdgeInsets.symmetric(
+                 horizontal: 24,
+                 vertical: 20,
+               ),
+               child: ConstrainedBox(
+                 constraints: BoxConstraints(
+                   maxWidth: maxWidth,
+                   maxHeight: maxHeight,
+                 ),
+                 child: ClipRRect(
+                   borderRadius: BorderRadius.circular(16),
+                   child: ScaffoldMessenger(
+                     child: builder(context),
+                   ),
+                 ),
+               ),
+             ),
+           );
+         },
+         transitionDuration: const Duration(milliseconds: 200),
+         reverseTransitionDuration: const Duration(milliseconds: 160),
+         transitionsBuilder: (context, animation, secondaryAnimation, child) {
+           final curvedAnimation = CurvedAnimation(
+             parent: animation,
+             curve: KeyNestTokens.fastOutSlowIn,
+             reverseCurve: Curves.easeInCubic,
+           );
+           final mediaSize = MediaQuery.maybeOf(context)?.size;
+           final Alignment alignment;
+           if (origin != null && mediaSize != null && mediaSize.width > 0 && mediaSize.height > 0) {
+             alignment = Alignment(
+               ((origin.dx / mediaSize.width) * 2 - 1).clamp(-1.0, 1.0),
+               ((origin.dy / mediaSize.height) * 2 - 1).clamp(-1.0, 1.0),
+             );
+           } else {
+             alignment = Alignment.center;
+           }
+           return FadeTransition(
+             opacity: curvedAnimation,
+             child: ScaleTransition(
+               scale: Tween<double>(begin: 0.92, end: 1.0).animate(curvedAnimation),
+               alignment: alignment,
+               child: child,
+             ),
+           );
+         },
+       );
+}
+
 /// Transition widget for AnimatedSwitcher that implements reference screenEnter / screenExit physics:
 /// Enter: 320ms, scale 0.95 -> 1.0 + fade in, fastOutSlowIn curve.
 /// Exit: 220ms, scale 1.0 -> 0.95 + fade out.

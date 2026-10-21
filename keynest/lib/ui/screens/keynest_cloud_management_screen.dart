@@ -12,6 +12,7 @@ import 'package:keynest/cloud_storage/keynest_cloud_sync_manager.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/keynest_cloud_vault_browser_screen.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class KeyNestCloudManagementScreen extends StatefulWidget {
@@ -23,6 +24,14 @@ class KeyNestCloudManagementScreen extends StatefulWidget {
   final CloudStorageProvider provider;
 
   static Route<void> route(CloudStorageProvider provider) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: RouteSettings(name: '/cloud/manage/${provider.id}'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (_) => KeyNestCloudManagementScreen(provider: provider),
+      );
+    }
     return MaterialPageRoute<void>(
       settings: RouteSettings(name: '/cloud/manage/${provider.id}'),
       builder: (_) => KeyNestCloudManagementScreen(provider: provider),
@@ -160,6 +169,12 @@ class _KeyNestCloudManagementScreenState
               );
             },
           ),
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
         ],
       ),
       body: ListenableBuilder(

@@ -3,10 +3,12 @@ import 'package:kdbx/kdbx.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/password_list.dart' show VaultSortMode;
 import 'package:keynest/ui/widgets/keynest_category_picker.dart';
 import 'package:keynest/ui/widgets/keynest_chips.dart';
 import 'package:keynest/ui/widgets/keynest_search_bar.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 /// Standard, unified top chip toolbar used consistently across all tabs.
@@ -105,230 +107,267 @@ class KeyNestTopChipsBar extends StatelessWidget {
       tab,
     );
 
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color:
-                              (isDark
-                                      ? KeyNestPalette.primaryDark
-                                      : KeyNestPalette.primary)
-                                  .withValues(alpha: isDark ? 0.20 : 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          Icons.inventory_2_outlined,
-                          color: isDark
-                              ? KeyNestPalette.primaryDark
-                              : KeyNestPalette.primary,
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Select Vault',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            'Switch active database or view all',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? KeyNestPalette.textSecondaryDark
-                                  : KeyNestPalette.textSecondaryLight,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(),
-                ListTile(
-                  leading: Icon(
-                    Icons.all_inclusive_rounded,
-                    color: isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary,
-                  ),
-                  title: const Text(
-                    'All Vault Items',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Text(
-                    'Displays items from all opened vaults (${openedFiles.length})',
-                  ),
-                  trailing: selectedVault == null
-                      ? Icon(
-                          Icons.check_circle_rounded,
-                          color: isDark
-                              ? KeyNestPalette.primaryDark
-                              : KeyNestPalette.primary,
-                        )
-                      : null,
-                  onTap: () {
-                    KeyNestVaultScope.instance.setSelectedVault(
-                      kdbxBloc,
-                      null,
-                      tab,
-                    );
-                    Navigator.pop(ctx);
-                  },
-                ),
-                if (openedFiles.isNotEmpty)
-                  const Divider(indent: 16, endIndent: 16),
-                ...openedFiles.map((file) {
-                  final isSelected = file == selectedVault;
-                  final vaultName = KeyNestVaultScope.cleanVaultName(
-                    kdbxBloc,
-                    file,
-                  );
-                  final count = file.body.rootGroup
-                      .getAllEntries()
-                      .where((e) => !e.isInRecycleBin())
-                      .length;
-                  return ListTile(
-                    leading: Icon(
-                      Icons.shield_rounded,
-                      color: isSelected
-                          ? (isDark
-                                ? KeyNestPalette.primaryDark
-                                : KeyNestPalette.primary)
-                          : (isDark ? Colors.white70 : Colors.black87),
-                    ),
-                    title: Text(
-                      vaultName,
-                      style: TextStyle(
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.w500,
-                        color: isSelected
-                            ? (isDark
+    Widget buildContent(BuildContext ctx) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 8,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color:
+                          (isDark
                                   ? KeyNestPalette.primaryDark
                                   : KeyNestPalette.primary)
-                            : null,
-                      ),
+                              .withValues(alpha: isDark ? 0.20 : 0.12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    subtitle: Text('$count items'),
-                    trailing: isSelected
-                        ? Icon(
-                            Icons.check_circle_rounded,
+                    child: Icon(
+                      Icons.inventory_2_outlined,
+                      color: isDark
+                          ? KeyNestPalette.primaryDark
+                          : KeyNestPalette.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Select Vault',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Switch active database or view all',
+                          style: theme.textTheme.bodySmall?.copyWith(
                             color: isDark
-                                ? KeyNestPalette.primaryDark
-                                : KeyNestPalette.primary,
-                          )
-                        : null,
-                    onTap: () {
-                      KeyNestVaultScope.instance.setSelectedVault(
-                        kdbxBloc,
-                        file,
-                        tab,
-                      );
-                      Navigator.pop(ctx);
-                    },
-                  );
-                }),
-              ],
+                                ? KeyNestPalette.textSecondaryDark
+                                : KeyNestPalette.textSecondaryLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (KeyNestPlatform.isDesktopOrWeb)
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
+            const Divider(),
+            ListTile(
+              leading: Icon(
+                Icons.all_inclusive_rounded,
+                color: isDark
+                    ? KeyNestPalette.primaryDark
+                    : KeyNestPalette.primary,
+              ),
+              title: const Text(
+                'All Vault Items',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              subtitle: Text(
+                'Displays items from all opened vaults (${openedFiles.length})',
+              ),
+              trailing: selectedVault == null
+                  ? Icon(
+                      Icons.check_circle_rounded,
+                      color: isDark
+                          ? KeyNestPalette.primaryDark
+                          : KeyNestPalette.primary,
+                    )
+                  : null,
+              onTap: () {
+                KeyNestVaultScope.instance.setSelectedVault(
+                  kdbxBloc,
+                  null,
+                  tab,
+                );
+                Navigator.pop(ctx);
+              },
+            ),
+            if (openedFiles.isNotEmpty)
+              const Divider(indent: 16, endIndent: 16),
+            ...openedFiles.map((file) {
+              final isSelected = file == selectedVault;
+              final vaultName = KeyNestVaultScope.cleanVaultName(
+                kdbxBloc,
+                file,
+              );
+              final count = file.body.rootGroup
+                  .getAllEntries()
+                  .where((e) => !e.isInRecycleBin())
+                  .length;
+              return ListTile(
+                leading: Icon(
+                  Icons.shield_rounded,
+                  color: isSelected
+                      ? (isDark
+                            ? KeyNestPalette.primaryDark
+                            : KeyNestPalette.primary)
+                      : (isDark ? Colors.white70 : Colors.black87),
+                ),
+                title: Text(
+                  vaultName,
+                  style: TextStyle(
+                    fontWeight: isSelected
+                        ? FontWeight.bold
+                        : FontWeight.w500,
+                    color: isSelected
+                        ? (isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary)
+                        : null,
+                  ),
+                ),
+                subtitle: Text('$count items'),
+                trailing: isSelected
+                    ? Icon(
+                        Icons.check_circle_rounded,
+                        color: isDark
+                            ? KeyNestPalette.primaryDark
+                            : KeyNestPalette.primary,
+                      )
+                    : null,
+                onTap: () {
+                  KeyNestVaultScope.instance.setSelectedVault(
+                    kdbxBloc,
+                    file,
+                    tab,
+                  );
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      );
+    }
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      showAnchoredPopover<void>(
+        anchorContext: context,
+        width: 320,
+        maxHeight: 460,
+        builder: (ctx) => SingleChildScrollView(child: buildContent(ctx)),
+      );
+    } else {
+      showModalBottomSheet<void>(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => SafeArea(child: buildContent(ctx)),
+      );
+    }
   }
 
   static void showSortModal(
     BuildContext context, {
     KeyNestTab tab = KeyNestTab.secrets,
   }) {
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 8,
-                  ),
-                  child: Text(
-                    'Sort Vault Items',
-                    style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+    final theme = Theme.of(context);
+
+    Widget buildSortContent(BuildContext ctx) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 8,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Sort Vault Items',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                const Divider(),
-                RadioGroup<VaultSortMode>(
-                  groupValue: KeyNestVaultScope.instance.getSortMode(tab),
-                  onChanged: (val) {
-                    if (val != null) {
-                      KeyNestVaultScope.instance.setSortMode(val, tab);
-                      Navigator.pop(ctx);
-                    }
-                  },
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      RadioListTile<VaultSortMode>(
-                        title: Text('Title (A → Z)'),
-                        subtitle: Text('Alphabetical order'),
-                        value: VaultSortMode.alphabeticalAsc,
-                      ),
-                      RadioListTile<VaultSortMode>(
-                        title: Text('Title (Z → A)'),
-                        subtitle: Text('Reverse alphabetical order'),
-                        value: VaultSortMode.alphabeticalDesc,
-                      ),
-                      RadioListTile<VaultSortMode>(
-                        title: Text('Date Modified'),
-                        subtitle: Text('Recently updated items first'),
-                        value: VaultSortMode.lastModified,
-                      ),
-                      RadioListTile<VaultSortMode>(
-                        title: Text('Date Created'),
-                        subtitle: Text('Newest items first'),
-                        value: VaultSortMode.dateCreated,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                  if (KeyNestPlatform.isDesktopOrWeb)
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
+            const Divider(),
+            RadioGroup<VaultSortMode>(
+              groupValue: KeyNestVaultScope.instance.getSortMode(tab),
+              onChanged: (val) {
+                if (val != null) {
+                  KeyNestVaultScope.instance.setSortMode(val, tab);
+                  Navigator.pop(ctx);
+                }
+              },
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RadioListTile<VaultSortMode>(
+                    title: Text('Title (A → Z)'),
+                    subtitle: Text('Alphabetical order'),
+                    value: VaultSortMode.alphabeticalAsc,
+                  ),
+                  RadioListTile<VaultSortMode>(
+                    title: Text('Title (Z → A)'),
+                    subtitle: Text('Reverse alphabetical order'),
+                    value: VaultSortMode.alphabeticalDesc,
+                  ),
+                  RadioListTile<VaultSortMode>(
+                    title: Text('Date Modified'),
+                    subtitle: Text('Recently updated items first'),
+                    value: VaultSortMode.lastModified,
+                  ),
+                  RadioListTile<VaultSortMode>(
+                    title: Text('Date Created'),
+                    subtitle: Text('Newest items first'),
+                    value: VaultSortMode.dateCreated,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      showAnchoredPopover<void>(
+        anchorContext: context,
+        width: 290,
+        builder: (ctx) => SingleChildScrollView(child: buildSortContent(ctx)),
+      );
+    } else {
+      showModalBottomSheet<void>(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => SafeArea(child: buildSortContent(ctx)),
+      );
+    }
   }
 
   @override
@@ -379,38 +418,44 @@ class KeyNestTopChipsBar extends StatelessWidget {
               },
             ),
             const SizedBox(width: 8),
-            KeyNestChip(
-              label: selectedVault == null
-                  ? 'All Vault Items'
-                  : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
-              icon: Icons.keyboard_arrow_down_rounded,
-              isSelected: selectedVault != null,
-              onTap: () => showVaultSelectionSheet(context, kdbxBloc, tab: tab),
+            Builder(
+              builder: (chipCtx) => KeyNestChip(
+                label: selectedVault == null
+                    ? 'All Vault Items'
+                    : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
+                icon: Icons.keyboard_arrow_down_rounded,
+                isSelected: selectedVault != null,
+                onTap: () => showVaultSelectionSheet(chipCtx, kdbxBloc, tab: tab),
+              ),
             ),
             const SizedBox(width: 8),
-            KeyNestChip(
-              label: sortLabel(sortMode),
-              icon: Icons.sort_rounded,
-              isSelected: sortMode != VaultSortMode.alphabeticalAsc,
-              onTap: () => showSortModal(context, tab: tab),
+            Builder(
+              builder: (chipCtx) => KeyNestChip(
+                label: sortLabel(sortMode),
+                icon: Icons.sort_rounded,
+                isSelected: sortMode != VaultSortMode.alphabeticalAsc,
+                onTap: () => showSortModal(chipCtx, tab: tab),
+              ),
             ),
             if (showCategoryChip) ...[
               const SizedBox(width: 8),
-              KeyNestChip(
-                label: scope.selectedCategory ?? 'Category',
-                icon: Icons.keyboard_arrow_down_rounded,
-                isSelected: scope.selectedCategory != null,
-                onTap: () async {
-                  final cat = await KeyNestCategoryPicker.show(
-                    context,
-                    selectedCategory: scope.selectedCategory,
-                  );
-                  if (cat == null || cat == 'All') {
-                    scope.setSelectedCategory(null);
-                  } else {
-                    scope.setSelectedCategory(cat);
-                  }
-                },
+              Builder(
+                builder: (chipCtx) => KeyNestChip(
+                  label: scope.selectedCategory ?? 'Category',
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  isSelected: scope.selectedCategory != null,
+                  onTap: () async {
+                    final cat = await KeyNestCategoryPicker.show(
+                      chipCtx,
+                      selectedCategory: scope.selectedCategory,
+                    );
+                    if (cat == null || cat == 'All') {
+                      scope.setSelectedCategory(null);
+                    } else {
+                      scope.setSelectedCategory(cat);
+                    }
+                  },
+                ),
               ),
             ],
             const SizedBox(width: 8),

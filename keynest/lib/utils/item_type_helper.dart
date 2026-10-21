@@ -415,16 +415,13 @@ class KeyNestItemTypeHelper {
 
   /// Returns whether [entry] has been deleted or moved to trash.
   static bool isEntryInTrash(KdbxEntry entry) {
-    final cached = _trashCache[entry];
-    if (cached != null) {
-      return cached;
-    }
-    final inTrash = _computeIsEntryInTrash(entry);
-    _trashCache[entry] = inTrash;
-    return inTrash;
+    return _computeIsEntryInTrash(entry);
   }
 
   static bool _computeIsEntryInTrash(KdbxEntry entry) {
+    if (entry.parent == null) {
+      return true;
+    }
     if (entry.isInRecycleBin()) {
       return true;
     }

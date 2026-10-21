@@ -73,6 +73,14 @@ class KeyNestCloudVaultBrowserScreen extends StatefulWidget {
   final CloudStorageProvider provider;
 
   static Route<void> route(CloudStorageProvider provider) {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: RouteSettings(name: '/cloud/browser/${provider.id}'),
+        maxWidth: 580,
+        maxHeight: 700,
+        builder: (_) => KeyNestCloudVaultBrowserScreen(provider: provider),
+      );
+    }
     return MaterialPageRoute<void>(
       settings: RouteSettings(name: '/cloud/browser/${provider.id}'),
       builder: (_) => KeyNestCloudVaultBrowserScreen(provider: provider),
@@ -1154,6 +1162,12 @@ class _KeyNestCloudVaultBrowserScreenState
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _isLoading ? null : _fetchCloudVaults,
           ),
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
         ],
       ),
       body: _isLoading

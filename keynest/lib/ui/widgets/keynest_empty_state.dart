@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/utils/platform.dart';
 
 enum EmptyStateType {
   secrets,
@@ -59,6 +60,91 @@ class KeyNestEmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      final String emptyText;
+      final IconData emptyIcon;
+      switch (type) {
+        case EmptyStateType.secrets:
+          emptyText = 'No items';
+          emptyIcon = Icons.lock_outline_rounded;
+          break;
+        case EmptyStateType.records:
+          emptyText = 'No records';
+          emptyIcon = Icons.source_outlined;
+          break;
+        case EmptyStateType.cards:
+          emptyText = 'No cards';
+          emptyIcon = Icons.credit_card_outlined;
+          break;
+        case EmptyStateType.notes:
+          emptyText = 'No notes';
+          emptyIcon = Icons.description_outlined;
+          break;
+        case EmptyStateType.twoFactor:
+          emptyText = 'No 2FA accounts';
+          emptyIcon = Icons.shield_outlined;
+          break;
+      }
+
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF222736)
+                      : const Color(0xFFF1F3F5),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark
+                        ? const Color(0xFF333848)
+                        : const Color(0xFFE2E4E8),
+                    width: 1.0,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  emptyIcon,
+                  size: 22,
+                  color: isDark
+                      ? KeyNestPalette.primaryDark
+                      : KeyNestPalette.primary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title ?? emptyText,
+                style: TextStyle(
+                  color: isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle ?? 'Items will appear here once added',
+                style: TextStyle(
+                  color: isDark
+                      ? KeyNestPalette.textSecondaryDark
+                      : KeyNestPalette.textSecondaryLight,
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     final defaultTitle = _getDefaultTitle();
     final defaultSubtitle = _getDefaultSubtitle();

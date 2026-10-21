@@ -10,6 +10,7 @@ import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/screens/keynest_duplicates_screen.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/item_type_helper.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 import 'package:zxcvbn/zxcvbn.dart';
 
@@ -257,10 +258,20 @@ class KeyNestVaultHealthScanner {
 class KeyNestVaultHealthScreen extends StatefulWidget {
   const KeyNestVaultHealthScreen({super.key});
 
-  static Route<void> route() => MaterialPageRoute(
-    settings: const RouteSettings(name: '/vaultHealth'),
-    builder: (context) => const KeyNestVaultHealthScreen(),
-  );
+  static Route<void> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<void>(
+        settings: const RouteSettings(name: '/vaultHealth'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (context) => const KeyNestVaultHealthScreen(),
+      );
+    }
+    return MaterialPageRoute(
+      settings: const RouteSettings(name: '/vaultHealth'),
+      builder: (context) => const KeyNestVaultHealthScreen(),
+    );
+  }
 
   @override
   State<KeyNestVaultHealthScreen> createState() =>
@@ -374,6 +385,12 @@ class _KeyNestVaultHealthScreenState extends State<KeyNestVaultHealthScreen> {
                 ? () => _startScan(_scannedFile!)
                 : null,
           ),
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
         ],
       ),
       body: _buildBody(openedFiles, isDark),

@@ -269,12 +269,19 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
         elevation: 0,
         backgroundColor: Colors.transparent,
       ),
-      body: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            child: Theme(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: KeyNestPlatform.isDesktopOrWeb ? 640 : double.infinity,
+          ),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.symmetric(
+              horizontal: KeyNestPlatform.isDesktopOrWeb ? 32 : 24,
+              vertical: KeyNestPlatform.isDesktopOrWeb ? 24 : 12,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Theme(
               data: theme.copyWith(
                 inputDecorationTheme: theme.inputDecorationTheme.copyWith(
                   filled: true,
@@ -477,13 +484,17 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
                               // Option 1: Custom Path / Phone Folder (Default)
                               RadioListTile<_StorageLocationType>(
                                 value: _StorageLocationType.customPath,
-                                title: const Text(
-                                  'Phone Folder / Custom Path (Default)',
+                                title: Text(
+                                  KeyNestPlatform.isDesktopOrWeb
+                                      ? 'Local Disk / Custom Folder (Default)'
+                                      : 'Phone Folder / Custom Path (Default)',
                                 ),
                                 subtitle: Text(
                                   _customPathLabel != null
                                       ? 'Selected: $_customPathLabel'
-                                      : 'Save directly to your phone storage, Documents, or SD card.',
+                                      : (KeyNestPlatform.isDesktopOrWeb
+                                            ? 'Save directly to Documents, Desktop, or a custom folder.'
+                                            : 'Save directly to your phone storage, Documents, or SD card.'),
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: _customPathLabel != null
@@ -749,8 +760,9 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   VoidCallback? _submitCallback() => asyncTaskCallback((progress) async {
     if (_formKey.currentState!.validate()) {

@@ -42,10 +42,20 @@ final _logger = Logger('keynest_vault_manager');
 class KeyNestVaultManagerScreen extends StatefulWidget {
   const KeyNestVaultManagerScreen({super.key});
 
-  static Route<KdbxGroup?> route() => KeyNestPageRoute<KdbxGroup?>(
-    settings: const RouteSettings(name: '/vault_manager'),
-    builder: (_) => const KeyNestVaultManagerScreen(),
-  );
+  static Route<KdbxGroup?> route() {
+    if (KeyNestPlatform.isDesktopOrWeb) {
+      return KeyNestDesktopDialogRoute<KdbxGroup?>(
+        settings: const RouteSettings(name: '/vault_manager'),
+        maxWidth: 540,
+        maxHeight: 620,
+        builder: (_) => const KeyNestVaultManagerScreen(),
+      );
+    }
+    return KeyNestPageRoute<KdbxGroup?>(
+      settings: const RouteSettings(name: '/vault_manager'),
+      builder: (_) => const KeyNestVaultManagerScreen(),
+    );
+  }
 
   @override
   State<KeyNestVaultManagerScreen> createState() =>
@@ -90,6 +100,12 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
             tooltip: 'Add / Open Vault',
             onPressed: _isProcessing ? null : () => _showAddVaultSheet(context),
           ),
+          if (KeyNestPlatform.isDesktopOrWeb)
+            IconButton(
+              icon: const Icon(Icons.close_rounded),
+              tooltip: 'Close',
+              onPressed: () => Navigator.of(context).pop(),
+            ),
         ],
       ),
       body: _isProcessing
@@ -2562,8 +2578,14 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
                   const Text('Create KDBX Vault'),
                 ],
               ),
-              content: SingleChildScrollView(
-                child: Form(
+              content: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: KeyNestPlatform.isDesktopOrWeb
+                      ? 520
+                      : double.infinity,
+                ),
+                child: SingleChildScrollView(
+                  child: Form(
                   key: formKey,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -2821,6 +2843,7 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
                   ),
                 ),
               ),
+            ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(ctx).pop(false),
