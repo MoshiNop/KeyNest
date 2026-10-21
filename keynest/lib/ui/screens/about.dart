@@ -620,13 +620,6 @@ class _AboutScreenState extends State<AboutScreen> {
           subtitle: 'Safely prepare and share diagnostic info',
           onTap: () => KeyNestSupportService.sendLogs(context),
         ),
-        _buildDivider(isDark),
-        _buildListRow(
-          icon: Icons.help_outline_rounded,
-          title: 'Official GitHub User Guide',
-          subtitle: 'Step-by-step documentation',
-          onTap: () => KeyNestSupportService.openUserGuide(context),
-        ),
       ],
     );
   }
