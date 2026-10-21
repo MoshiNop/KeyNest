@@ -21,6 +21,7 @@ import 'package:keynest/env/_base.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/services/keynest_dynamic_icon_service.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
+import 'package:keynest/services/keynest_support_service.dart';
 import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/common_fields.dart';
@@ -172,6 +173,7 @@ class _PreferencesBodyState extends State<PreferencesBody>
 
   late AppDataBloc _appDataBloc;
   AppData? _appData;
+  bool _keyNestSectionExpanded = false;
 
   Analytics get _analytics => context.read<Analytics>();
 
@@ -876,18 +878,46 @@ class _PreferencesBodyState extends State<PreferencesBody>
           children: [
             KeyNestSettingsTile(
               title: 'KeyNest Password Manager',
-              subtitle: 'Version 1.0.0 • Open Source',
+              subtitle: _keyNestSectionExpanded
+                  ? 'Tap to collapse options'
+                  : 'Help, About, and Contact • v1.0.0',
               icon: Icons.shield_rounded,
+              trailing: AnimatedRotation(
+                turns: _keyNestSectionExpanded ? 0.25 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 22,
+                ),
+              ),
               onTap: () {
-                showAboutDialog(
-                  context: context,
-                  applicationName: 'KeyNest',
-                  applicationVersion: '1.0.0',
-                  applicationLegalese:
-                      'A secure, offline-first KeePass compatible password manager.',
-                );
+                setState(() {
+                  _keyNestSectionExpanded = !_keyNestSectionExpanded;
+                });
               },
             ),
+            if (_keyNestSectionExpanded) ...[
+              KeyNestSettingsTile(
+                title: 'Help',
+                subtitle: 'Official GitHub user guide and documentation',
+                icon: Icons.help_outline_rounded,
+                onTap: () => KeyNestSupportService.openUserGuide(context),
+              ),
+              KeyNestSettingsTile(
+                title: 'About',
+                subtitle:
+                    'Version info, GitHub contributors, releases & licenses',
+                icon: Icons.info_outline_rounded,
+                onTap: () => KeyNestSupportService.openAbout(context),
+              ),
+              KeyNestSettingsTile(
+                title: 'Contact',
+                subtitle:
+                    'Reach out to support at ${KeyNestSupportService.supportEmail}',
+                icon: Icons.mail_outline_rounded,
+                onTap: () => KeyNestSupportService.contactSupport(context),
+              ),
+            ],
           ],
         ),
       ],

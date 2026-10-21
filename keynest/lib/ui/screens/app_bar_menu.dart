@@ -6,7 +6,7 @@ import 'package:keynest/bloc/deps.dart';
 import 'package:keynest/bloc/kdbx/file_source_ui.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
-import 'package:keynest/ui/screens/about.dart';
+import 'package:keynest/services/keynest_support_service.dart';
 import 'package:keynest/ui/screens/keynest_duplicates_screen.dart';
 import 'package:keynest/ui/screens/keynest_import_export.dart';
 import 'package:keynest/ui/screens/keynest_vault_health_screen.dart';
@@ -131,28 +131,40 @@ class AppBarMenu {
         ),
         PopupMenuItem(
           value: () {
-            analytics.events.trackActionPressed(action: 'emailSupport');
-            DialogUtils.sendLogs(context);
+            KeyNestSupportService.sendLogs(context);
           },
           child: const ListTile(
-            leading: Icon(Icons.email_outlined),
+            leading: Icon(Icons.description_outlined),
             title: Text('Send Logs'),
           ),
         ),
         PopupMenuItem(
-          value: () async {
-            analytics.events.trackActionPressed(action: 'help');
-            await DialogUtils.openUrl(
-              'https://keynest.app/docs/?utm_source=app'
-              '&utm_medium=app_help&utm_campaign=app_help#documentation',
-            );
+          value: () {
+            KeyNestSupportService.openUserGuide(context);
           },
           child: const ListTile(
             leading: Icon(Icons.help_outline_rounded),
             title: Text('Help'),
           ),
         ),
-        KeyNestAboutDialog.createAboutMenuItem(context),
+        PopupMenuItem(
+          value: () {
+            KeyNestSupportService.openAbout(context);
+          },
+          child: const ListTile(
+            leading: ImageIcon(AssetImage('assets/images/logo_icon.png')),
+            title: Text('About'),
+          ),
+        ),
+        PopupMenuItem(
+          value: () {
+            KeyNestSupportService.contactSupport(context);
+          },
+          child: const ListTile(
+            leading: Icon(Icons.mail_outline_rounded),
+            title: Text('Contact'),
+          ),
+        ),
       ];
     }
     return [
@@ -298,19 +310,16 @@ class AppBarMenu {
                 ),
               ),
             ],
-      if (DialogUtils.sendLogsSupported()) ...[
-        PopupMenuItem(
-          value: () {
-            analytics.events.trackActionPressed(action: 'emailSupport');
-            DialogUtils.sendLogs(context);
-          },
-          child: ListTile(
-            leading: const Icon(Icons.email),
-            title: Text(loc.menuItemSupport),
-            subtitle: Text(loc.menuItemSupportSubtitle),
-          ),
+      PopupMenuItem(
+        value: () {
+          KeyNestSupportService.sendLogs(context);
+        },
+        child: ListTile(
+          leading: const Icon(Icons.description_outlined),
+          title: Text(loc.menuItemSupport),
+          subtitle: const Text('Share diagnostic logs'),
         ),
-      ],
+      ),
       PopupMenuItem(
         onTap: () async {
           analytics.events.trackActionPressed(action: 'forum');
@@ -334,20 +343,34 @@ class AppBarMenu {
         ),
       ),
       PopupMenuItem(
-        value: () async {
-          analytics.events.trackActionPressed(action: 'help');
-          await DialogUtils.openUrl(
-            'https://keynest.app/docs/?utm_source=app'
-            '&utm_medium=app_help&utm_campaign=app_help#documentation',
-          );
+        value: () {
+          KeyNestSupportService.openUserGuide(context);
         },
         child: ListTile(
-          leading: const Icon(Icons.help),
+          leading: const Icon(Icons.help_outline_rounded),
           title: Text(loc.menuItemHelp),
           subtitle: Text(loc.menuItemHelpSubtitle),
         ),
       ),
-      KeyNestAboutDialog.createAboutMenuItem(context),
+      PopupMenuItem(
+        value: () {
+          KeyNestSupportService.openAbout(context);
+        },
+        child: ListTile(
+          leading: const ImageIcon(AssetImage('assets/images/logo_icon.png')),
+          title: Text(loc.menuItemAbout),
+        ),
+      ),
+      PopupMenuItem(
+        value: () {
+          KeyNestSupportService.contactSupport(context);
+        },
+        child: const ListTile(
+          leading: Icon(Icons.mail_outline_rounded),
+          title: Text('Contact'),
+          subtitle: Text('Email support team'),
+        ),
+      ),
     ];
   }
 
