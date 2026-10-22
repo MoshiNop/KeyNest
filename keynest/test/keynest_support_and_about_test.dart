@@ -257,7 +257,7 @@ void main() {
             body: ListTile(
               key: const ValueKey('keyNestHeaderTile'),
               title: const Text('KeyNest Password Manager'),
-              subtitle: const Text('Help, About, and Contact • v1.0.0'),
+              subtitle: const Text('Help, About, and Contact • v1.0.1'),
               onTap: () {
                 openedAbout = true;
               },
@@ -269,7 +269,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('KeyNest Password Manager'), findsOneWidget);
-      expect(find.text('Help, About, and Contact • v1.0.0'), findsOneWidget);
+      expect(find.text('Help, About, and Contact • v1.0.1'), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('keyNestHeaderTile')));
       await tester.pump();

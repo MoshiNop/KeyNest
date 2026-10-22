@@ -877,7 +877,7 @@ class _PreferencesBodyState extends State<PreferencesBody>
           children: [
             KeyNestSettingsTile(
               title: 'KeyNest Password Manager',
-              subtitle: 'Help, About, and Contact • v1.0.0',
+              subtitle: 'Help, About, and Contact • v1.0.1',
               icon: Icons.shield_rounded,
               onTap: () => KeyNestSupportService.openAbout(context),
             ),

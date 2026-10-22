@@ -1,7 +1,7 @@
 name: keynest
 description: KeyNest - Password Manager with support for kdbx 3.x and 4.x
 publish_to: none
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.10.0 <4.0.0'

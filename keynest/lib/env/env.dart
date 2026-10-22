@@ -14,12 +14,12 @@ const _DEFAULT_APP_NAME = AppConstants.keyNest;
 @NonNls
 const _DEFAULT_VERSION = String.fromEnvironment(
   'KEYNEST_VERSION',
-  defaultValue: '1.0.0',
+  defaultValue: '1.0.1',
 );
 @NonNls
 const _DEFAULT_BUILD_NUMBER = int.fromEnvironment(
   'KEYNEST_BUILD_NUMBER',
-  defaultValue: 1,
+  defaultValue: 2,
 );
 @NonNls
 const _DEFAULT_PACKAGE_NAME = String.fromEnvironment(

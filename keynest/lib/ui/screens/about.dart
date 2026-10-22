@@ -224,7 +224,7 @@ class _AboutScreenState extends State<AboutScreen> {
   Widget _buildAppIdentityCard(bool isDark, Color cardBg, Color borderColor) {
     final versionStr = _packageInfo != null
         ? 'v${_packageInfo!.version} (Build ${_packageInfo!.buildNumber})'
-        : 'v1.0.0 (Build 1)';
+        : 'v1.0.1 (Build 2)';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
@@ -577,7 +577,7 @@ class _AboutScreenState extends State<AboutScreen> {
               applicationName: 'KeyNest',
               applicationVersion: _packageInfo != null
                   ? 'v${_packageInfo!.version} (Build ${_packageInfo!.buildNumber})'
-                  : 'v1.0.0',
+                  : 'v1.0.1',
               applicationIcon: Padding(
                 padding: const EdgeInsets.all(8.0),
                 child: Image.asset(
