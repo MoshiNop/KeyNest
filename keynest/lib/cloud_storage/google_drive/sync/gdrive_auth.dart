@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:google_sign_in_platform_interface/google_sign_in_platform_interface.dart';
 import 'package:http/http.dart' as http;
 import 'package:keynest/cloud_storage/cloud_config_store.dart';
 import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
@@ -347,100 +348,97 @@ class GisGoogleTokenSource implements GoogleDriveTokenSource {
       return _inMemoryAccessToken;
     }
 
-    if (_currentUser == null) {
-      final signedIn = await isSignedIn();
-      if (!signedIn) {
-        return null;
-      }
-      if (!forceRefresh &&
-          _inMemoryAccessToken != null &&
-          (_tokenExpiresAt == null || now.isBefore(_tokenExpiresAt!))) {
-        return _inMemoryAccessToken;
-      }
-
-      // Attempt silent lightweight authentication only when a token is actually needed and account was saved
-      try {
-        final user = await GoogleSignIn.instance
-            .attemptLightweightAuthentication();
-        if (user != null) {
-          _currentUser = user;
-          _cachedEmail = user.email;
-          _cachedDisplayName = user.displayName;
-        }
-      } catch (e) {
-        _logger.fine('Silent token restoration attempt failed: $e');
-      }
-    }
-
-    if (_currentUser == null) {
-      if (_inMemoryAccessToken != null) {
-        return _inMemoryAccessToken;
-      }
+    final signedIn = await isSignedIn();
+    if (!signedIn) {
       return null;
     }
 
-    final user = _currentUser!;
-    try {
-      if (forceRefresh && _inMemoryAccessToken != null) {
-        await clearCachedAccessToken();
-      }
+    if (!forceRefresh &&
+        _inMemoryAccessToken != null &&
+        (_tokenExpiresAt == null || now.isBefore(_tokenExpiresAt!))) {
+      return _inMemoryAccessToken;
+    }
 
-      final headers = await user.authorizationClient.authorizationHeaders(
-        _scopes,
-      );
-      if (headers == null || !headers.containsKey('Authorization')) {
-        // Request authorization for scope
-        final clientAuth = await user.authorizationClient.authorizeScopes(
-          _scopes,
-        );
-        _inMemoryAccessToken = clientAuth.accessToken;
-        _tokenExpiresAt = DateTime.now().add(const Duration(minutes: 55));
-        await _saveAccountMetadata(
-          user.email,
-          user.displayName,
-          accessToken: _inMemoryAccessToken,
-          expiresAt: _tokenExpiresAt,
-        );
-        return clientAuth.accessToken;
-      }
+    final effectiveEmail = _currentUser?.email ?? _cachedEmail;
+    if (effectiveEmail == null || effectiveEmail.isEmpty) {
+      return _inMemoryAccessToken;
+    }
 
-      final authHeader = headers['Authorization']!;
-      final token = authHeader.replaceFirst(RegExp(r'^Bearer\s+'), '');
-      _inMemoryAccessToken = token;
+    if (forceRefresh && _inMemoryAccessToken != null) {
+      await clearCachedAccessToken();
+    }
+
+    String? freshToken;
+
+    // 1. If we have _currentUser in memory, try silent non-interactive authorization
+    if (_currentUser != null) {
+      try {
+        final clientAuth = await _currentUser!.authorizationClient
+            .authorizationForScopes(_scopes);
+        freshToken = clientAuth?.accessToken;
+      } catch (e) {
+        _logger.fine('Silent authorization via current user failed: $e');
+      }
+    }
+
+    // 2. Query platform authorization silently with promptIfUnauthorized: false
+    // This allows Android / platform Google Play Services to silently restore/refresh
+    // tokens using the saved account email WITHOUT summoning Credential Manager bottom sheets,
+    // passkeys, or account-picker dialogs.
+    if (freshToken == null || freshToken.isEmpty) {
+      try {
+        final tokenData = await GoogleSignInPlatform.instance
+            .clientAuthorizationTokensForScopes(
+              ClientAuthorizationTokensForScopesParameters(
+                request: AuthorizationRequestDetails(
+                  scopes: _scopes,
+                  userId: _currentUser?.id,
+                  email: effectiveEmail,
+                  promptIfUnauthorized: false,
+                ),
+              ),
+            );
+        freshToken = tokenData?.accessToken;
+      } catch (e) {
+        _logger.fine('Silent token fetch via GoogleSignInPlatform failed: $e');
+      }
+    }
+
+    if (freshToken != null && freshToken.isNotEmpty) {
+      _inMemoryAccessToken = freshToken;
       _tokenExpiresAt = DateTime.now().add(const Duration(minutes: 55));
       await _saveAccountMetadata(
-        user.email,
-        user.displayName,
+        effectiveEmail,
+        _currentUser?.displayName ?? _cachedDisplayName,
         accessToken: _inMemoryAccessToken,
         expiresAt: _tokenExpiresAt,
       );
-      return token;
-    } catch (e) {
-      _logger.warning('Failed to get authorization headers/token: $e');
-      if (e.toString().contains('invalid_grant')) {
-        await disconnect();
-        throw GoogleDriveInvalidGrantException('Session expired or revoked.');
-      }
-      if (_inMemoryAccessToken != null) {
-        return _inMemoryAccessToken;
-      }
-      return null;
+      return _inMemoryAccessToken;
     }
+
+    // If silent acquisition did not yield a fresh token, never trigger interactive UI.
+    // Return existing cached token if available as a best effort, otherwise null.
+    if (_inMemoryAccessToken != null) {
+      return _inMemoryAccessToken;
+    }
+    return null;
   }
 
   @override
   Future<void> clearCachedAccessToken() async {
-    if (_currentUser != null && _inMemoryAccessToken != null) {
-      try {
-        await _currentUser!.authorizationClient.clearAuthorizationToken(
-          accessToken: _inMemoryAccessToken!,
-        );
-      } catch (e) {
-        _logger.fine('Error clearing auth token: $e');
-      }
-    }
+    final tokenToClear = _inMemoryAccessToken;
     _inMemoryAccessToken = null;
     _tokenExpiresAt = null;
+
+    if (tokenToClear != null && tokenToClear.isNotEmpty) {
+      try {
+        await GoogleSignInPlatform.instance.clearAuthorizationToken(
+          ClearAuthorizationTokenParams(accessToken: tokenToClear),
+        );
+      } catch (e) {
+        _logger.fine('Error clearing auth token on platform: $e');
+      }
+    }
   }
 
   @override
