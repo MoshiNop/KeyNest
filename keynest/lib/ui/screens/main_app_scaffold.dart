@@ -6,7 +6,9 @@ import 'package:keynest/bloc/app_data.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/main.dart';
+import 'package:keynest/services/keynest_pending_login_memory.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
+import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/add_payment_card.dart';
@@ -15,12 +17,16 @@ import 'package:keynest/ui/screens/authenticator_tab.dart';
 import 'package:keynest/ui/screens/card_details.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/screens/keynest_home_shell.dart';
+import 'package:keynest/ui/screens/keynest_vault_manager_screen.dart';
+import 'package:keynest/ui/screens/locked_screen.dart';
 import 'package:keynest/ui/screens/note_details.dart';
 import 'package:keynest/ui/screens/password_list.dart';
+import 'package:keynest/ui/screens/preferences.dart';
 import 'package:keynest/ui/widgets/keyboard_handler.dart';
 import 'package:keynest/ui/widgets/keynest_category_picker.dart';
 import 'package:keynest/ui/widgets/keynest_chips.dart';
 import 'package:keynest/ui/widgets/keynest_desktop_nav_rail.dart';
+import 'package:keynest/ui/widgets/keynest_nav_bar.dart';
 import 'package:keynest/ui/widgets/keynest_top_chips_bar.dart';
 import 'package:keynest/ui/widgets/utils/back_button_navigator_delegate.dart';
 import 'package:keynest/utils/constants.dart';
@@ -113,6 +119,19 @@ class FocusWorkaroundPageRoute<T> extends MaterialPageRoute<T> {
   }
 }
 
+class _DetailPaneRouteObserver extends NavigatorObserver {
+  _DetailPaneRouteObserver({required this.onPoppedToRoot});
+  final VoidCallback onPoppedToRoot;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    super.didPop(route, previousRoute);
+    if (previousRoute?.isFirst == true) {
+      onPoppedToRoot();
+    }
+  }
+}
+
 class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey();
   final GlobalKey _masterPaneKey = GlobalKey();
@@ -126,6 +145,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   bool _isDraggingSplitter = false;
   int _activeRailIndex = 0;
   bool _isNarrowLayout = false;
+  late final _DetailPaneRouteObserver _detailPaneObserver;
 
   Future<bool> _confirmDiscardActiveDetailIfNeeded() async {
     return KeyNestDetailPaneGuard.confirmDiscardInSubtree(
@@ -136,6 +156,18 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   @override
   void initState() {
     super.initState();
+    _detailPaneObserver = _DetailPaneRouteObserver(
+      onPoppedToRoot: () {
+        if (mounted && _selectedEntry != null) {
+          setState(() {
+            _selectedEntry = null;
+            if (_historyIndex >= 0) {
+              _historyIndex = -1;
+            }
+          });
+        }
+      },
+    );
     _activeRailIndex = KeyNestVaultScope.instance.activeTabIndex ?? 0;
     _searchController.text = KeyNestVaultScope.instance.searchQuery;
     KeyNestVaultScope.instance.addListener(_onVaultScopeChanged);
@@ -242,11 +274,22 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     if (_isNarrowLayout) {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
+        if (mounted) {
+          setState(() => _selectedEntry = null);
+        }
         return;
       }
     } else {
       if (_navigatorKey.currentState?.canPop() ?? false) {
         _navigatorKey.currentState!.pop();
+        if (mounted) {
+          setState(() {
+            _selectedEntry = null;
+            if (_historyIndex >= 0) {
+              _historyIndex = -1;
+            }
+          });
+        }
         return;
       }
     }
@@ -515,15 +558,43 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       return;
     }
 
-    if (_selectedEntry != entry || type == EntrySelectionType.newEntry) {
-      _navigateToEntry(entry, isNew: type == EntrySelectionType.newEntry);
+    if (type == EntrySelectionType.passiveHighlight) {
+      if (_selectedEntry != entry) {
+        _navigateToEntry(entry, isNew: false);
+      }
+      return;
     }
+
+    // Active user selection or new entry: always navigate so clicking a previously viewed entry reopens it
+    _navigateToEntry(entry, isNew: type == EntrySelectionType.newEntry);
+  }
+
+  Future<void> _lockVault(BuildContext context) async {
+    context.read<Analytics>().events.trackActionPressed(
+      action: 'lockFiles',
+    );
+    final nav = Navigator.of(context, rootNavigator: true);
+    final kdbxBloc = context.read<KdbxBloc>();
+    KeyNestClipboard.clearNow();
+    QuickUnlockStorage.clearSession();
+    KeyNestPendingLoginMemory.instance.clear();
+    if (kdbxBloc.isSaving) {
+      try {
+        await kdbxBloc.waitForPendingSaves();
+      } catch (_) {}
+    }
+    await kdbxBloc.closeAllFiles(clearQuickUnlock: false);
+    nav.pushAndRemoveUntil(
+      LockedScreen.route(),
+      (_) => false,
+    );
   }
 
   Widget _buildDesktopTopBar(
     BuildContext context,
     bool isDark, {
     bool isNarrow = false,
+    bool isVeryNarrow = false,
   }) {
     final kdbxBloc = context.watch<KdbxBloc>();
     final scope = KeyNestVaultScope.instance;
@@ -689,6 +760,93 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                     elevation: 0,
                   ),
                 ),
+          if (isNarrow) ...[
+            const SizedBox(width: 4),
+            if (isVeryNarrow)
+              PopupMenuButton<VoidCallback>(
+                icon: const Icon(Icons.more_vert_rounded, size: 19),
+                tooltip: 'More actions',
+                splashRadius: 16,
+                padding: EdgeInsets.zero,
+                color: isDark ? KeyNestPalette.surfaceDark : Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: borderColor, width: 1),
+                ),
+                onSelected: (action) => action(),
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(
+                    value: () => Navigator.of(context).push(
+                      KeyNestVaultManagerScreen.route(),
+                    ),
+                    child: const ListTile(
+                      leading: Icon(Icons.folder_outlined),
+                      title: Text('Manage Vaults'),
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: () => Navigator.of(context).push(
+                      PreferencesScreen.route(),
+                    ),
+                    child: const ListTile(
+                      leading: Icon(Icons.settings_outlined),
+                      title: Text('Settings'),
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: () => _lockVault(context),
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.lock_outline_rounded,
+                        color: isDark ? KeyNestTokens.darkError : KeyNestPalette.error,
+                      ),
+                      title: Text(
+                        'Lock Vault',
+                        style: TextStyle(
+                          color: isDark ? KeyNestTokens.darkError : KeyNestPalette.error,
+                        ),
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              )
+            else ...[
+              IconButton(
+                icon: const Icon(Icons.folder_outlined, size: 19),
+                onPressed: () => Navigator.of(context).push(
+                  KeyNestVaultManagerScreen.route(),
+                ),
+                tooltip: 'Manage Vaults',
+                splashRadius: 16,
+                visualDensity: VisualDensity.compact,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined, size: 19),
+                onPressed: () => Navigator.of(context).push(
+                  PreferencesScreen.route(),
+                ),
+                tooltip: 'Settings',
+                splashRadius: 16,
+                visualDensity: VisualDensity.compact,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              IconButton(
+                icon: const Icon(Icons.lock_outline_rounded, size: 19),
+                onPressed: () => _lockVault(context),
+                tooltip: 'Lock Vault',
+                splashRadius: 16,
+                visualDensity: VisualDensity.compact,
+                color: isDark ? KeyNestTokens.darkError : KeyNestPalette.error,
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -890,6 +1048,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       return LayoutBuilder(
         builder: (context, constraints) {
           final isNarrow = constraints.maxWidth < 780.0;
+          final isVeryNarrow = constraints.maxWidth < 520.0;
           _isNarrowLayout = isNarrow;
 
           final maxAllowedListWidth =
@@ -917,6 +1076,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
             child: Navigator(
               key: _navigatorKey,
               requestFocus: false,
+              observers: [_detailPaneObserver],
               onGenerateRoute: (settings) {
                 assert(settings.name == Navigator.defaultRouteName);
                 return MaterialPageRoute<void>(
@@ -983,6 +1143,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                           context,
                           isDark,
                           isNarrow: isNarrow,
+                          isVeryNarrow: isVeryNarrow,
                         ),
                         _buildDesktopChipsBar(context, isDark),
                         Expanded(
@@ -1014,6 +1175,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                   ),
                 ],
               ),
+              bottomNavigationBar: isNarrow
+                  ? KeyNestBottomNav(
+                      currentIndex: _activeRailIndex,
+                      onTap: switchToTab,
+                    )
+                  : null,
             ),
           );
         },
