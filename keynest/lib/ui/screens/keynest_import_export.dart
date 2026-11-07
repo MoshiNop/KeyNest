@@ -433,7 +433,8 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
     Uint8List? selectedKeyBytes;
     String? selectedKeyName;
 
-    return await showDialog<({String password, Uint8List? keyFileBytes})>(
+    try {
+      return await showDialog<({String password, Uint8List? keyFileBytes})>(
       context: context,
       builder: (dialogCtx) {
         return StatefulBuilder(
@@ -659,7 +660,11 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
           },
         );
       },
-    );
+      );
+    } finally {
+      controller.clear();
+      controller.dispose();
+    }
   }
 
   void _showSnack(String text, {bool isError = false}) {

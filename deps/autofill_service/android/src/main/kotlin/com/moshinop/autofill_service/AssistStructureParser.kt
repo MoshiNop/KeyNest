@@ -2,6 +2,10 @@ package com.moshinop.autofill_service
 
 import android.annotation.TargetApi
 import android.app.assist.AssistStructure
+import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.verify.domain.DomainVerificationManager
+import android.content.pm.verify.domain.DomainVerificationUserState
 import android.os.*
 import android.view.*
 import android.view.autofill.AutofillId
@@ -62,19 +66,41 @@ class AssistStructureParser(structure: AssistStructure) {
             ?: ""
     }
 
-    fun getPrimaryWebDomain(): String? {
+    fun getPrimaryWebDomain(context: Context? = null): String? {
+        val callerPkg = getTargetPackage()
         // Prioritize domain from the node containing password, username or email
         for (type in listOf(AutofillInputType.Password, AutofillInputType.NewPassword, AutofillInputType.UserName, AutofillInputType.Email)) {
             val matched = fieldIds[type]?.firstOrNull()
             if (matched != null) {
                 val node = allNodes.firstOrNull { it.autofillId == matched.autofillId }
                 if (node?.webDomain != null && node.webDomain!!.isNotBlank()) {
+                    val scheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) node.webScheme else null
+                    if (scheme != null && scheme.equals("http", ignoreCase = true)) {
+                        // Do not auto-upgrade insecure HTTP webScheme to trusted HTTPS origin
+                        continue
+                    }
                     val sanitized = sanitizeWebDomain(node.webDomain)
-                    if (sanitized != null) return sanitized
+                    if (sanitized != null && isOriginVerifiedForWebDomain(context, callerPkg, sanitized)) {
+                        return sanitized
+                    }
                 }
             }
         }
-        return webDomain.firstNotNullOfOrNull { sanitizeWebDomain(it.domain) }
+        return webDomain.firstNotNullOfOrNull { wd ->
+            if (wd.scheme != null && wd.scheme.equals("http", ignoreCase = true)) {
+                null
+            } else {
+                sanitizeWebDomain(wd.domain)?.takeIf { isOriginVerifiedForWebDomain(context, callerPkg, it) }
+            }
+        }
+    }
+
+    fun getVerifiedWebDomains(context: Context? = null): Set<WebDomain> {
+        val callerPkg = getTargetPackage()
+        return webDomain.filter { wd ->
+            val sanitized = sanitizeWebDomain(wd.domain)
+            sanitized != null && isOriginVerifiedForWebDomain(context, callerPkg, sanitized)
+        }.toSet()
     }
 
     private fun traverseStructure(structure: AssistStructure) {
@@ -85,7 +111,7 @@ class AssistStructureParser(structure: AssistStructure) {
 
         logger.debug { "Traversing windowNodes $windowNodes" }
         windowNodes.forEach { windowNode: AssistStructure.WindowNode ->
-            windowNode.rootViewNode?.let { traverseNode(it, null) }
+            windowNode.rootViewNode?.let { traverseNode(it, null, true) }
         }
     }
 
@@ -100,37 +126,38 @@ class AssistStructureParser(structure: AssistStructure) {
         }
 
     @TargetApi(Build.VERSION_CODES.O)
-    private fun traverseNode(viewNode: AssistStructure.ViewNode, parentNode: AssistStructure.ViewNode? = null) {
-        allNodes.add(viewNode)
-
-        viewNode.autofillId?.let { autoFillIds.add(it) }
-
-        viewNode.idPackage?.let { idPackage ->
-            if (idPackage.isNotBlank() && idPackage != "android") {
-                if (primaryPackageName.isNullOrBlank()) {
-                    primaryPackageName = idPackage
-                }
-                packageName.add(idPackage)
-            } else if (idPackage.isNotBlank()) {
-                packageName.add(idPackage)
-            }
+    private fun traverseNode(
+        viewNode: AssistStructure.ViewNode,
+        parentNode: AssistStructure.ViewNode? = null,
+        ancestorVisible: Boolean = true,
+    ) {
+        val isChainVisible = ancestorVisible && viewNode.visibility == View.VISIBLE
+        if (isChainVisible) {
+            allNodes.add(viewNode)
+            viewNode.autofillId?.let { autoFillIds.add(it) }
         }
-        viewNode.webDomain?.let { myWebDomain ->
-            val cleanDomain = sanitizeWebDomain(myWebDomain)
-            if (cleanDomain != null) {
-                webDomain.add(
-                    WebDomain(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            viewNode.webScheme
-                        } else {
-                            null
-                        }, cleanDomain
+
+        // Security: Never extract caller package identity from viewNode.idPackage (controlled by ViewStructure.setId).
+        // Caller package identity is strictly bound to structure.activityComponent.packageName in init{}.
+        if (isChainVisible) {
+            viewNode.webDomain?.let { myWebDomain ->
+                val cleanDomain = sanitizeWebDomain(myWebDomain)
+                if (cleanDomain != null) {
+                    webDomain.add(
+                        WebDomain(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                viewNode.webScheme
+                            } else {
+                                null
+                            }, cleanDomain
+                        )
                     )
-                )
+                }
             }
         }
         viewNode.autofillId?.let { autofillId ->
-            val isVisible = viewNode.visibility == View.VISIBLE
+            val isWebNode = viewNode.htmlInfo != null || !viewNode.webDomain.isNullOrBlank()
+            val hasValidDimensions = isWebNode || (viewNode.width > 0 && viewNode.height > 0)
             val notExcluded = !isExcluded(viewNode)
             val isInputCandidate = viewNode.autofillType != View.AUTOFILL_TYPE_NONE ||
                     viewNode.inputType != 0 ||
@@ -139,7 +166,7 @@ class AssistStructureParser(structure: AssistStructure) {
                     viewNode.className?.contains("TextField", ignoreCase = true) == true ||
                     viewNode.isFocused
 
-            if (isVisible && notExcluded && isInputCandidate) {
+            if (isChainVisible && hasValidDimensions && notExcluded && isInputCandidate) {
                 AutofillInputType.values().forEach { type ->
                     fieldIds.getOrPut(type) { mutableListOf() }.addAll(
                         type.heuristics
@@ -156,7 +183,7 @@ class AssistStructureParser(structure: AssistStructure) {
             }
 
         children?.forEach { childNode: AssistStructure.ViewNode ->
-            traverseNode(childNode, viewNode)
+            traverseNode(childNode, viewNode, isChainVisible)
         }
     }
 
@@ -177,8 +204,9 @@ class AssistStructureParser(structure: AssistStructure) {
         return EXCLUDED_KEYWORDS.any { combined.contains(it) }
     }
 
-    fun isTrustedBrowser(): Boolean {
-        return packageName.any { isBrowserPackage(it) }
+    fun isTrustedBrowser(context: Context? = null): Boolean {
+        val pkg = getTargetPackage()
+        return isBrowserPackage(pkg) && isCallerTrustedPackage(context, pkg)
     }
 
     companion object {
@@ -187,6 +215,7 @@ class AssistStructureParser(structure: AssistStructure) {
             "com.chrome.beta",
             "com.chrome.dev",
             "com.chrome.canary",
+            "org.chromium.chrome",
             "com.google.android.apps.chrome",
             "org.mozilla.firefox",
             "org.mozilla.firefox_beta",
@@ -212,18 +241,72 @@ class AssistStructureParser(structure: AssistStructure) {
             "com.huawei.browser",
             "com.torproject.torbrowser",
             "mark.via.gp",
-            "io.github.forkmaintainers.iceraven"
+            "io.github.forkmaintainers.iceraven",
+            "org.cromite.cromite",
+            "com.yandex.browser",
+            "com.ecosia.android",
+            "com.aloha.browser",
+            "net.waterfox.android.release",
+            "us.spotco.mulch",
+            "us.spotco.fennec_dos"
         )
 
         fun isBrowserPackage(pkg: String): Boolean {
             val clean = pkg.trim().lowercase()
             if (clean.isEmpty()) return false
-            if (TRUSTED_BROWSERS.contains(clean)) return true
-            return clean.endsWith(".browser") ||
-                    clean.contains("chrome") ||
-                    clean.contains("firefox") ||
-                    clean.contains("browser") ||
-                    clean.contains("fenix")
+            return TRUSTED_BROWSERS.contains(clean)
+        }
+
+        fun isCallerTrustedPackage(context: Context?, pkg: String): Boolean {
+            val clean = pkg.trim().lowercase()
+            if (clean.isEmpty()) return false
+            if (context == null) return true
+            return try {
+                val selfDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                if (selfDebuggable) return true
+                val callerInfo = context.packageManager.getApplicationInfo(clean, 0)
+                (callerInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        /**
+         * Verifies whether [packageName] is authorized to request credentials for [webDomain].
+         * - Trusted browsers are permitted (when release-signed in release builds).
+         * - Non-browser native apps MUST pass Android Digital Asset Links verification
+         *   (`DomainVerificationManager` `DOMAIN_STATE_VERIFIED` on Android 12+).
+         */
+        fun isOriginVerifiedForWebDomain(context: Context?, packageName: String, webDomain: String): Boolean {
+            val cleanPkg = packageName.trim().lowercase()
+            val cleanDomain = sanitizeWebDomain(webDomain)?.lowercase() ?: return false
+            if (cleanPkg.isEmpty()) return false
+
+            if (isBrowserPackage(cleanPkg)) {
+                return isCallerTrustedPackage(context, cleanPkg)
+            }
+
+            if (context == null) return false
+            if (!isCallerTrustedPackage(context, cleanPkg)) return false
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    val dvm = context.getSystemService(DomainVerificationManager::class.java) ?: return false
+                    val userState = dvm.getDomainVerificationUserState(cleanPkg) ?: return false
+                    val hostMap = userState.hostToStateMap
+                    for ((verifiedHost, state) in hostMap) {
+                        if (state == DomainVerificationUserState.DOMAIN_STATE_VERIFIED) {
+                            val cleanVerified = verifiedHost.trim().lowercase().removePrefix("*.")
+                            if (cleanDomain == cleanVerified || cleanDomain.endsWith(".$cleanVerified")) {
+                                return true
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    return false
+                }
+            }
+            return false
         }
 
         fun sanitizeWebDomain(raw: String?): String? {

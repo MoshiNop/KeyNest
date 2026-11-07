@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:keynest/bloc/kdbx/file_content.dart';
 import 'package:keynest/utils/constants.dart';
-import 'package:keynest/utils/platform.dart';
 import 'package:keynest/utils/storage_location_helper.dart';
 import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
@@ -234,19 +233,29 @@ abstract class FileSource {
 class FileSourceUrl extends FileSource {
   FileSourceUrl(this.url, {super.databaseName, required super.uuid});
 
-  @NonNls
-  static const _webCorsProxy = 'https://cors-anywhere.herokuapp.com/';
-
   final Uri? url;
 
-  Uri? get _url =>
-      KeyNestPlatform.isWeb && !url.toString().contains(_webCorsProxy)
-      ? Uri.parse([_webCorsProxy, url].join())
-      : url;
+  static bool _isSecureOrLoopbackUri(Uri uri) {
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'https') {
+      return true;
+    }
+    if (scheme == 'http') {
+      final host = uri.host.toLowerCase();
+      return host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    }
+    return false;
+  }
 
   @override
   Stream<FileContent> load() async* {
-    final response = await http.readBytes(_url!);
+    final targetUrl = url;
+    if (targetUrl == null || !_isSecureOrLoopbackUri(targetUrl)) {
+      throw UnsupportedError(
+        'Refusing to download vault over insecure or unsupported URL scheme: ${targetUrl?.scheme ?? "null"}. Only HTTPS is permitted.',
+      );
+    }
+    final response = await http.readBytes(targetUrl);
     yield FileContent(response);
   }
 

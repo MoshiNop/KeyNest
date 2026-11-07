@@ -12,6 +12,9 @@ import android.os.ParcelFileDescriptor
 import androidx.core.content.res.ResourcesCompat
 import java.io.ByteArrayOutputStream
 import java.io.FileNotFoundException
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.SecureRandom
 
 class AutofillLockStateProvider : ContentProvider() {
 
@@ -36,7 +39,15 @@ class AutofillLockStateProvider : ContentProvider() {
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
-        val path = uri.lastPathSegment ?: throw FileNotFoundException("Invalid uri: $uri")
+        val providedToken = uri.getQueryParameter("t") ?: throw FileNotFoundException("Not found")
+        if (!MessageDigest.isEqual(
+                providedToken.toByteArray(StandardCharsets.UTF_8),
+                capabilityTokenBytes
+            )
+        ) {
+            throw FileNotFoundException("Not found")
+        }
+        val path = uri.lastPathSegment ?: throw FileNotFoundException("Invalid uri")
         val ctx = context ?: throw FileNotFoundException("Context is null")
 
         val bytes = getBytesForPath(ctx, path)
@@ -54,6 +65,13 @@ class AutofillLockStateProvider : ContentProvider() {
     }
 
     companion object {
+        private val capabilityToken: String = run {
+            val raw = ByteArray(16)
+            SecureRandom().nextBytes(raw)
+            raw.joinToString("") { "%02x".format(it) }
+        }
+        private val capabilityTokenBytes: ByteArray = capabilityToken.toByteArray(StandardCharsets.UTF_8)
+
         private var actionLockPng: ByteArray? = null
         private var fallbackLockPng: ByteArray? = null
         private var personPng: ByteArray? = null
@@ -61,15 +79,15 @@ class AutofillLockStateProvider : ContentProvider() {
         private var transparentPng: ByteArray? = null
 
         fun getLockUri(packageName: String): Uri {
-            return Uri.parse("content://$packageName.autofill_lock_state/action_lock.png")
+            return Uri.parse("content://$packageName.autofill_lock_state/action_lock.png?t=$capabilityToken")
         }
 
         fun getFallbackIconUri(packageName: String): Uri {
-            return Uri.parse("content://$packageName.autofill_lock_state/fallback_icon.png")
+            return Uri.parse("content://$packageName.autofill_lock_state/fallback_icon.png?t=$capabilityToken")
         }
 
         fun getFallbackTotpUri(packageName: String): Uri {
-            return Uri.parse("content://$packageName.autofill_lock_state/fallback_totp.png")
+            return Uri.parse("content://$packageName.autofill_lock_state/fallback_totp.png?t=$capabilityToken")
         }
 
         private fun getTransparentPng(): ByteArray {

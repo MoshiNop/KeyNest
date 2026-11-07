@@ -45,12 +45,12 @@ public class MainActivity extends FlutterFragmentActivity {
         if (isSecureWindowEnabled()) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getWindow().setHideOverlayWindows(true);
+        }
         super.onCreate(savedInstanceState);
         Intent intent = getIntent();
-        logger.debug("onCreate " + intent);
-        if (getIntent() != null) {
-            logger.debug("onCreate Intent extras: " + getIntent().getExtras());
-        }
+        logger.debug("onCreate action=" + (intent != null ? intent.getAction() : "null"));
     }
 
     private boolean isSecureWindowEnabled() {
@@ -82,10 +82,7 @@ public class MainActivity extends FlutterFragmentActivity {
     protected void onNewIntent(@NotNull Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        logger.debug("onNewIntent " + intent);
-        if (intent.getExtras() != null) {
-            logger.debug("onNewIntent Intent extras: " + intent.getExtras());
-        }
+        logger.debug("onNewIntent action=" + intent.getAction());
     }
 
     private static final int REQUEST_CODE_PICK_DIR_TREE = 4221;
@@ -154,6 +151,16 @@ public class MainActivity extends FlutterFragmentActivity {
         new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL).setMethodCallHandler((call, result) -> {
             if ("isFirebaseTestLab".equals(call.method)) {
                 result.success("true".equals(Settings.System.getString(getContentResolver(), "firebase.test.lab")));
+                return;
+            } else if ("setSecureWindow".equals(call.method)) {
+                Boolean enabled = call.argument("enabled");
+                boolean secure = enabled == null || enabled;
+                if (secure) {
+                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                } else {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+                }
+                result.success(true);
                 return;
             } else if ("setSensitiveClipboard".equals(call.method)) {
                 String text = call.argument("text");

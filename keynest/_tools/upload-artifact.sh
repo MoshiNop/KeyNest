@@ -37,13 +37,11 @@ if [ -z "${ARTIFACT_TOKEN:+set}" ]; then
   exit 1
 fi
 
-token="${ARTIFACT_TOKEN}"
-
-curl --request POST \
+printf '%s' "${ARTIFACT_TOKEN}" | curl --request POST \
     --url "${ARTIFACT_PUSH_URL:-https://data.keynest.app/data/artifact.push}" \
     --fail \
     --progress-bar \
-    --form token="${token}" \
+    --form "token=<-" \
     --form upload="@${upload_file}" \
     --form filename="${remote_name}" | cat
 
@@ -61,10 +59,10 @@ curl --request POST \
 # allow-list knows manifests; a silent-refusal state is not worth keeping.
 manifest_file="${upload_file}.manifest.json"
 if [ -f "${manifest_file}" ]; then
-  curl --request POST \
+  printf '%s' "${ARTIFACT_TOKEN}" | curl --request POST \
       --url "${ARTIFACT_PUSH_URL:-https://data.keynest.app/data/artifact.push}" \
       --fail \
-      --form token="${token}" \
+      --form "token=<-" \
       --form upload="@${manifest_file}" \
       --form filename="${remote_name}.manifest.json" | cat \
     || echo "WARNING: manifest upload refused — add ${remote_name}.manifest.json's pattern to artifact-push.php's allow-list" >&2

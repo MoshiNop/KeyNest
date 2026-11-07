@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:math' as math;
 
+import 'package:autofill_shared/credential_matcher.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:autofill_shared/credential_matcher.dart';
 import 'package:kdbx/kdbx.dart';
 
 /// Channel the native credential provider talks to. Same name on iOS and
@@ -161,9 +163,125 @@ class AutofillVaultService {
   }
 
   String? _totpFor(KdbxEntry entry) {
-    return entry.getString(KdbxKeyCommon.OTP)?.getText()?.trim() ??
+    final raw = entry.getString(KdbxKeyCommon.OTP)?.getText()?.trim() ??
         entry.getString(KdbxKey('otp'))?.getText()?.trim() ??
-        entry.getString(KdbxKey('TOTP Settings'))?.getText()?.trim();
+        entry.getString(KdbxKey('TimeOtp-Secret-Base32'))?.getText()?.trim() ??
+        entry.getString(KdbxKey('TOTP Seed'))?.getText()?.trim();
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    final settings = entry.getString(KdbxKey('TOTP Settings'))?.getText()?.trim();
+    return _computeRfc6238Totp(raw, totpSettings: settings);
+  }
+
+  static String? _computeRfc6238Totp(
+    String rawSecretOrUri, {
+    String? totpSettings,
+  }) {
+    try {
+      String secretBase32 = rawSecretOrUri.trim();
+      int digits = 6;
+      int period = 30;
+      String algorithm = 'SHA1';
+
+      if (secretBase32.toLowerCase().startsWith('otpauth://')) {
+        final uri = Uri.tryParse(secretBase32);
+        if (uri == null || uri.host.toLowerCase() == 'hotp') {
+          return null;
+        }
+        final secretParam = uri.queryParameters['secret'];
+        if (secretParam == null || secretParam.trim().isEmpty) {
+          return null;
+        }
+        secretBase32 = secretParam.trim();
+        final parsedDigits = int.tryParse(uri.queryParameters['digits'] ?? '');
+        if (parsedDigits != null && parsedDigits >= 6 && parsedDigits <= 10) {
+          digits = parsedDigits;
+        }
+        final parsedPeriod = int.tryParse(uri.queryParameters['period'] ?? '');
+        if (parsedPeriod != null && parsedPeriod > 0) {
+          period = parsedPeriod;
+        }
+        final parsedAlgo = uri.queryParameters['algorithm']?.toUpperCase();
+        if (parsedAlgo == 'SHA1' ||
+            parsedAlgo == 'SHA256' ||
+            parsedAlgo == 'SHA512') {
+          algorithm = parsedAlgo!;
+        }
+      } else if (totpSettings != null && totpSettings.isNotEmpty) {
+        final parts = totpSettings.split(';');
+        if (parts.isNotEmpty) {
+          final p = int.tryParse(parts[0].trim());
+          if (p != null && p > 0) {
+            period = p;
+          }
+        }
+        if (parts.length > 1) {
+          final d = int.tryParse(parts[1].trim());
+          if (d != null && d >= 6 && d <= 10) {
+            digits = d;
+          }
+        }
+      }
+
+      final secretBytes = _decodeBase32(secretBase32);
+      if (secretBytes == null || secretBytes.isEmpty) {
+        return null;
+      }
+
+      final counter =
+          (DateTime.now().millisecondsSinceEpoch ~/ 1000) ~/ period;
+      final counterBytes = Uint8List(8);
+      var c = counter;
+      for (var i = 7; i >= 0; i--) {
+        counterBytes[i] = c & 0xff;
+        c >>= 8;
+      }
+
+      final Hash hashAlgo = switch (algorithm) {
+        'SHA256' => sha256,
+        'SHA512' => sha512,
+        _ => sha1,
+      };
+      final mac = Hmac(hashAlgo, secretBytes).convert(counterBytes).bytes;
+      secretBytes.fillRange(0, secretBytes.length, 0);
+
+      final offset = mac.last & 0x0f;
+      final binary = ((mac[offset] & 0x7f) << 24) |
+          ((mac[offset + 1] & 0xff) << 16) |
+          ((mac[offset + 2] & 0xff) << 8) |
+          (mac[offset + 3] & 0xff);
+      final mod = math.pow(10, digits).toInt();
+      return (binary % mod).toString().padLeft(digits, '0');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Uint8List? _decodeBase32(String input) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    final cleaned = input
+        .toUpperCase()
+        .replaceAll(RegExp(r'[\s\-=]'), '');
+    if (cleaned.isEmpty) {
+      return null;
+    }
+    var buffer = 0;
+    var bitsLeft = 0;
+    final out = <int>[];
+    for (var i = 0; i < cleaned.length; i++) {
+      final idx = alphabet.indexOf(cleaned[i]);
+      if (idx < 0) {
+        return null;
+      }
+      buffer = (buffer << 5) | idx;
+      bitsLeft += 5;
+      if (bitsLeft >= 8) {
+        bitsLeft -= 8;
+        out.add((buffer >> bitsLeft) & 0xff);
+      }
+    }
+    return Uint8List.fromList(out);
   }
 
   KdbxFile _requireFile() {

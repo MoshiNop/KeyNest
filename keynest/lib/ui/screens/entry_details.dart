@@ -852,17 +852,22 @@ class _EntryDetailsState extends State<EntryDetails>
               if (!ctrl.selection.isCollapsed && ctrl.selection.isNormalized) {
                 final data = ctrl.selection.textInside(ctrl.text);
                 if (data.isNotEmpty) {
-                  Clipboard.setData(ClipboardData(text: data));
-                  if (mounted) {
-                    final loc = AppLocalizations.of(context);
-                    ScaffoldMessenger.of(context)
-                      ..clearSnackBars()
-                      ..showSnackBar(
-                        SnackBar(
-                          content: Text(loc.copiedToClipboard),
-                          duration: const Duration(milliseconds: 1500),
-                        ),
-                      );
+                  final ancestorField = context
+                      .findAncestorStateOfType<_EntryFieldState>();
+                  if (ancestorField != null && ancestorField._isProtected) {
+                    SecurityService.copySensitive(
+                      context,
+                      data,
+                      label:
+                          ancestorField.widget.commonField?.displayName ??
+                          ancestorField.widget.fieldKey.key,
+                    );
+                  } else {
+                    SecurityService.copyNonSensitive(
+                      context,
+                      data,
+                      label: 'Selection',
+                    );
                   }
                   return;
                 }
@@ -1930,11 +1935,12 @@ class _EntryFieldState extends State<EntryField>
               kind: _customKind,
             ));
 
+  bool _controllerInitialized = false;
+
   String? get _valueCurrent =>
-      (_isValueObscured
-          ? widget.entry.getString(widget.fieldKey)?.getText()
-          : _controller.text) ??
-      _fieldValue?.getText();
+      (_controllerInitialized ? _controller.text : null) ??
+      _fieldValue?.getText() ??
+      widget.entry.getString(widget.fieldKey)?.getText();
 
   final GlobalKey<HighlightWidgetState> _highlightWidgetKey =
       GlobalKey<HighlightWidgetState>();
@@ -1946,11 +1952,17 @@ class _EntryFieldState extends State<EntryField>
     _initController();
   }
 
-  void _initController() {
-    _isValueObscured = false;
-    _controller = TextEditingController(
-      text: _fieldValue?.getText() ?? CharConstants.empty,
-    );
+  void _initController({bool? obscuredOverride}) {
+    _isValueObscured = obscuredOverride ?? _isProtected;
+    final initialText = _fieldValue?.getText() ?? CharConstants.empty;
+    if (_controllerInitialized) {
+      if (_controller.text != initialText) {
+        _controller.text = initialText;
+      }
+    } else {
+      _controller = TextEditingController(text: initialText);
+      _controllerInitialized = true;
+    }
   }
 
   @override
@@ -2223,17 +2235,13 @@ class _EntryFieldState extends State<EntryField>
         setState(() {
           if (_isProtected) {
             _fieldValue = PlainValue(_valueCurrent ?? CharConstants.empty);
-            _isValueObscured = false;
+            _initController(obscuredOverride: false);
           } else {
-            _logger.fine(
-              'protected: $_isProtected, obscured: $_isValueObscured, current: $_valueCurrent',
-            );
             _fieldValue = ProtectedValue.fromString(
               _valueCurrent ?? CharConstants.empty,
             );
-            _isValueObscured = true;
+            _initController(obscuredOverride: true);
           }
-          _initController();
         });
         break;
       case EntryAction.delete:
@@ -2649,6 +2657,13 @@ class _EntryFieldState extends State<EntryField>
       formFieldKey: _formFieldKey,
       focusNode: _focusNode,
       delegate: this,
+      isProtected: _isProtected,
+      isObscured: _isProtected && _isValueObscured,
+      onToggleObscured: () {
+        setState(() {
+          _isValueObscured = !_isValueObscured;
+        });
+      },
     );
   }
 
@@ -2899,7 +2914,8 @@ class _OtpEntryFieldState extends _EntryFieldState with WidgetsBindingObserver {
     bool isProtected = _isProtected;
     final formKey = GlobalKey<FormState>();
 
-    final updated = await showDialog<bool>(
+    try {
+      final updated = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
@@ -3091,6 +3107,12 @@ class _OtpEntryFieldState extends _EntryFieldState with WidgetsBindingObserver {
       });
       widget.onChangedMetadata();
     }
+    } finally {
+      secretController.text = '';
+      secretController.dispose();
+      periodController.dispose();
+      digitsController.dispose();
+    }
   }
 
   @override
@@ -3214,6 +3236,9 @@ class StringEntryFieldEditor extends StatelessWidget {
     required this.commonField,
     required this.fieldKey,
     required this.delegate,
+    this.isProtected = false,
+    this.isObscured = false,
+    this.onToggleObscured,
   });
 
   final Key formFieldKey;
@@ -3223,6 +3248,9 @@ class StringEntryFieldEditor extends StatelessWidget {
   final TextEditingController? controller;
   final FormFieldSetter<String> onSaved;
   final FieldDelegate delegate;
+  final bool isProtected;
+  final bool isObscured;
+  final VoidCallback? onToggleObscured;
 
   @override
   Widget build(BuildContext context) {
@@ -3231,6 +3259,7 @@ class StringEntryFieldEditor extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final loc = AppLocalizations.of(context);
     final isMonospace =
+        isProtected ||
         fieldKey == commonFields.password.key ||
         fieldKey.key.toLowerCase().contains('key') ||
         fieldKey.key.toLowerCase().contains('secret') ||
@@ -3245,6 +3274,7 @@ class StringEntryFieldEditor extends StatelessWidget {
         fieldKeyLower.contains('desc') ||
         fieldKeyLower.contains('address') ||
         (controller?.text.contains('\n') ?? false);
+    final effectiveObscured = isObscured && !isMultiline;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3252,9 +3282,12 @@ class StringEntryFieldEditor extends StatelessWidget {
         Expanded(
           child: TextFormField(
             key: formFieldKey,
-            maxLines: isMultiline ? null : 4,
-            minLines: isNotes ? 3 : (isMultiline ? 2 : 1),
-            textInputAction: isMultiline
+            obscureText: effectiveObscured,
+            maxLines: effectiveObscured ? 1 : (isMultiline ? null : 4),
+            minLines: effectiveObscured
+                ? 1
+                : (isNotes ? 3 : (isMultiline ? 2 : 1)),
+            textInputAction: isMultiline && !effectiveObscured
                 ? TextInputAction.newline
                 : TextInputAction.next,
             focusNode: focusNode,
@@ -3264,7 +3297,7 @@ class StringEntryFieldEditor extends StatelessWidget {
               color: isDark
                   ? KeyNestPalette.textPrimaryDark
                   : KeyNestPalette.textPrimaryLight,
-              letterSpacing: isMonospace ? 0.4 : 0,
+              letterSpacing: effectiveObscured ? 2.0 : (isMonospace ? 0.4 : 0),
             ),
             decoration: InputDecoration(
               isDense: true,
@@ -3288,13 +3321,16 @@ class StringEntryFieldEditor extends StatelessWidget {
                 fontSize: 15,
               ),
             ),
-            keyboardType: isMultiline
+            keyboardType: (isMultiline && !effectiveObscured)
                 ? TextInputType.multiline
                 : commonField?.keyboardType,
-            autocorrect: commonField?.autocorrect ?? true,
-            enableSuggestions: commonField?.enableSuggestions ?? true,
-            textCapitalization:
-                commonField?.textCapitalization ?? TextCapitalization.sentences,
+            autocorrect: !isProtected && (commonField?.autocorrect ?? true),
+            enableSuggestions:
+                !isProtected && (commonField?.enableSuggestions ?? true),
+            textCapitalization: isProtected
+                ? TextCapitalization.none
+                : (commonField?.textCapitalization ??
+                      TextCapitalization.sentences),
             controller: controller,
             validator: (val) {
               if (fieldKey == commonFields.title.key) {
@@ -3307,6 +3343,30 @@ class StringEntryFieldEditor extends StatelessWidget {
             onSaved: onSaved,
           ),
         ),
+        if (isProtected && !isMultiline && onToggleObscured != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+              iconSize: 20,
+              tooltip: effectiveObscured
+                  ? loc.entryFieldActionRevealField
+                  : 'Hide field',
+              icon: Icon(
+                effectiveObscured
+                    ? Icons.visibility_rounded
+                    : Icons.visibility_off_rounded,
+                color: isDark
+                    ? KeyNestPalette.textSecondaryDark
+                    : KeyNestPalette.textSecondaryLight,
+              ),
+              onPressed: onToggleObscured,
+            ),
+          ),
         ValueListenableBuilder<TextEditingValue>(
           valueListenable: controller!,
           builder: (context, value, child) {

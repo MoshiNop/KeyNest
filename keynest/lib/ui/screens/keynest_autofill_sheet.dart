@@ -198,7 +198,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
 
   Future<void> _loadAutofillMetadata() async {
     try {
-      if (widget.kdbxBloc.openedFilesKdbx.isEmpty &&
+      if (widget.kdbxBloc.autofillEnabledFilesKdbx.isEmpty &&
           widget.kdbxBloc.canSilentQuickUnlock() &&
           mounted) {
         final loc = AppLocalizations.of(context);
@@ -262,7 +262,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           })
         >[];
 
-    final openFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetContext = _formatTargetTitle();
     final remembered = KeyNestPendingLoginMemory.instance.getRemembered(
       targetContext,
@@ -367,7 +367,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           })
         >[];
 
-    final openFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetContext = _formatTargetTitle();
     final remembered = KeyNestPendingLoginMemory.instance.getRemembered(
       targetContext,
@@ -741,7 +741,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           >[]
         : _getAllVaultEntries();
     final targetTitle = _formatTargetTitle();
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final isUnverified =
         !_isCreatingNewLogin && _isUnverifiedContext(suggestedMatches);
 
@@ -1584,7 +1584,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   void _startNewLoginFlow() {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     if (openedFiles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1651,7 +1651,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       return _cachedAllUsernames!;
     }
     final allUsernames = <String>{};
-    for (final f in widget.kdbxBloc.openedFilesKdbx) {
+    for (final f in widget.kdbxBloc.autofillEnabledFilesKdbx) {
       for (final e in f.body.rootGroup.getAllEntries()) {
         if (e.isInRecycleBin()) {
           continue;
@@ -2661,7 +2661,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
     }
 
     final targetFile =
-        _newSelectedFile ?? widget.kdbxBloc.openedFilesKdbx.firstOrNull;
+        _newSelectedFile ?? widget.kdbxBloc.autofillEnabledFilesKdbx.firstOrNull;
     if (targetFile == null) {
       setState(() {
         _newLoginErrorMessage =
@@ -2742,7 +2742,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Widget _buildNewLoginView(bool isDark, ThemeData theme) {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final usernameSuggestions = _getUsernameSuggestions(
       _newUsernameController.text,
     );
@@ -3356,7 +3356,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Widget _buildNoMatchesView(bool isDark, ThemeData theme) {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetTitle = _formatTargetTitle();
 
     return Padding(

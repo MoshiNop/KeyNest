@@ -204,6 +204,7 @@ class QuickUnlockStorage {
   static void clearSession() {
     _inMemorySessionCredentials = null;
     _lastActiveSessionTimestamp = null;
+    _knownVaultHashes.clear();
     if (KeyNestPlatform.isAndroid) {
       unawaited(AutofillService().clearSessionTokens());
       unawaited(AutofillService().clearCredentials());
@@ -591,6 +592,10 @@ class KdbxBloc {
   OpenedKdbxFiles get openedFiles => _openedFiles.value;
   List<KdbxFile> get openedFilesKdbx =>
       _openedFiles.value.values.map((value) => value.kdbxFile).toList();
+  List<KdbxFile> get autofillEnabledFilesKdbx => _openedFiles.value.values
+      .where((value) => value.openedFile.autofillEnabledOrDefault)
+      .map((value) => value.kdbxFile)
+      .toList();
   ValueStream<OpenedKdbxFiles> get openedFilesChanged => _openedFiles.stream;
 
   int _activeSaveCount = 0;
@@ -674,6 +679,9 @@ class KdbxBloc {
       // autofill on published nothing, and switching it off published
       // everything.
       await _publishAutofillIdentities();
+      if (KeyNestPlatform.isAndroid) {
+        await _syncAndroidAutofillStore(immediate: true);
+      }
     }
     _logger.info('new values: ${_openedFiles.value}');
     return newFile;
@@ -1100,7 +1108,7 @@ class KdbxBloc {
   }
 
   Future<void> _executeAndroidAutofillSync() async {
-    final openFiles = openedFilesKdbx;
+    final openFiles = autofillEnabledFilesKdbx;
     if (openFiles.isEmpty) {
       await AutofillService().clearCredentials();
       return;

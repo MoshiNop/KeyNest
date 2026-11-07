@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:autofill_service/autofill_service.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_async_utils/flutter_async_utils.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -519,8 +520,13 @@ class _PreferencesBodyState extends State<PreferencesBody>
                 trailing: Switch(
                   value: !appData.secureWindowOrDefault,
                   onChanged: (value) {
+                    final secureEnabled = !value;
                     _appDataBloc.update(
-                      (builder, data) => builder.secureWindow = !value,
+                      (builder, data) => builder.secureWindow = secureEnabled,
+                    );
+                    const MethodChannel('app.keynest/misc').invokeMethod<void>(
+                      'setSecureWindow',
+                      {'enabled': secureEnabled},
                     );
                     _analytics.events.trackPreferences(
                       setting: 'allowScreenshots',

@@ -227,10 +227,36 @@ class KeyNestSupportService {
   static String sanitizeLogContent(String raw) {
     var sanitized = raw;
 
+    // Redact otpauth:// and otpauth-migration:// URIs entirely
+    sanitized = sanitized.replaceAll(
+      RegExp(r'otpauth(?:-migration)?://[^\s"''<>]+', caseSensitive: false),
+      'otpauth://[REDACTED]',
+    );
+
+    // Redact JSON-quoted secret fields (including multi-word passphrases)
+    sanitized = sanitized.replaceAllMapped(
+      RegExp(
+        r'"(password|passphrase|secret|token|bearer|access_token|refresh_token|client_secret|masterPassword|otp|totp|otpSecret|transformedKey)"\s*:\s*"[^"]*"',
+        caseSensitive: false,
+      ),
+      (match) => '"${match.group(1)}": "[REDACTED]"',
+    );
+
+    // Redact URL query parameters holding secrets/keys/tokens
+    sanitized = sanitized.replaceAllMapped(
+      RegExp(
+        r'([?&])(secret|key|token|access_token|refresh_token|client_secret|password)=([^&\s"''#]+)',
+        caseSensitive: false,
+      ),
+      (match) => '${match.group(1)}${match.group(2)}=[REDACTED]',
+    );
+
     // Redact password fields and values
     sanitized = sanitized.replaceAllMapped(
-      RegExp(r'(password|passphrase|secret|token|bearer|key|masterPassword)[\s:=]+([^\s,;]+)',
-          caseSensitive: false),
+      RegExp(
+        r'(password|passphrase|secret|token|bearer|key|masterPassword)[\s:=]+([^\s,;]+)',
+        caseSensitive: false,
+      ),
       (match) => '${match.group(1)}: [REDACTED]',
     );
 
@@ -242,15 +268,19 @@ class KeyNestSupportService {
 
     // Redact refresh/access tokens
     sanitized = sanitized.replaceAllMapped(
-      RegExp(r'(refresh_token|access_token|client_secret)[\s:=]+([^\s,;]+)',
-          caseSensitive: false),
+      RegExp(
+        r'(refresh_token|access_token|client_secret)[\s:=]+([^\s,;]+)',
+        caseSensitive: false,
+      ),
       (match) => '${match.group(1)}: [REDACTED]',
     );
 
     // Redact potential 32/64 char hex/base64 crypto keys in logging statements
     sanitized = sanitized.replaceAllMapped(
-      RegExp(r'(keyData|kdbxKey|encryptionKey)[\s:=]+([A-Fa-f0-9]{32,64})',
-          caseSensitive: false),
+      RegExp(
+        r'(keyData|kdbxKey|encryptionKey)[\s:=]+([A-Fa-f0-9]{32,64})',
+        caseSensitive: false,
+      ),
       (match) => '${match.group(1)}: [REDACTED_KEY]',
     );
 
@@ -320,13 +350,26 @@ class KeyNestSupportService {
 
     final sanitizedContent = sanitizeLogContent(rawBuffer.toString());
 
-    // 3. Write sanitized log to temporary file
+    // 3. Write sanitized log to temporary file (and remove any legacy copy in appData)
     io.File? sanitizedFile;
     if (!KeyNestPlatform.isWeb) {
       try {
         final appData = await PathUtils().getAppDataDirectory();
-        sanitizedFile = io.File(p.join(appData.path, 'keynest_sanitized_diagnostic.txt'));
-        await sanitizedFile.writeAsString(sanitizedContent);
+        final legacyDiag = io.File(
+          p.join(appData.path, 'keynest_sanitized_diagnostic.txt'),
+        );
+        if (legacyDiag.existsSync()) {
+          await legacyDiag.delete();
+        }
+      } catch (_) {}
+      try {
+        final tempDir = await PathUtils().getTemporaryDirectory(
+          subNamespace: 'diagnostics',
+        );
+        sanitizedFile = io.File(
+          p.join(tempDir.path, 'keynest_sanitized_diagnostic.txt'),
+        );
+        await sanitizedFile.writeAsString(sanitizedContent, flush: true);
       } catch (e) {
         _logger.warning('Failed to write temporary sanitized log file: $e');
       }

@@ -8,9 +8,9 @@
         </encoder>
     </appender>
 
-    <logger name="com.moshinop" level="TRACE" />
+    <logger name="com.moshinop" level="WARN" />
 
-    <root level="DEBUG">
+    <root level="WARN">
         <appender-ref ref="logcat" />
     </root>
 </configuration>

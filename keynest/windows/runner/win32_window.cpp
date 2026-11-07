@@ -126,6 +126,11 @@ bool Win32Window::CreateAndShow(const std::wstring& title,
     return false;
   }
 
+  // Exclude vault window from screen capture / Windows Recall (WDA_EXCLUDEFROMCAPTURE = 0x11).
+  if (!SetWindowDisplayAffinity(window, 0x00000011)) {
+    SetWindowDisplayAffinity(window, WDA_MONITOR);
+  }
+
   HINSTANCE instance = GetModuleHandle(nullptr);
   HICON hIconSmall = static_cast<HICON>(LoadImage(
       instance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,

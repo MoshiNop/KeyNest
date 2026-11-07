@@ -6,6 +6,7 @@ import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/services/keynest_import_export_service.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/screens/master_password_change.dart';
 import 'package:keynest/ui/widgets/keynest_key_file_creation_section.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:keynest/utils/platform.dart';
@@ -107,9 +108,13 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
   final TextEditingController _newPasswordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
+  final TextEditingController _verifyPasswordController =
+      TextEditingController();
 
   bool _obscureNew = true;
   bool _obscureConfirm = true;
+  bool _obscureVerify = true;
+  bool _isVerifying = false;
   String? _errorMessage;
   final KeyNestKeyFileCreationController _keyFileController =
       KeyNestKeyFileCreationController();
@@ -126,8 +131,12 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
 
   @override
   void dispose() {
+    _newPasswordController.clear();
+    _confirmPasswordController.clear();
+    _verifyPasswordController.clear();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
+    _verifyPasswordController.dispose();
     _keyFileController.dispose();
     super.dispose();
   }
@@ -268,6 +277,37 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
         );
         return;
       }
+    } else {
+      // Require Master Password re-verification before unencrypted CSV/JSON export
+      final targetVault =
+          _selectedFile ??
+          _selectedFolder?.file ??
+          _selectedEntries.values.firstOrNull?.file ??
+          widget.initialFile;
+      final currentPass = _verifyPasswordController.text;
+      setState(() => _isVerifying = true);
+      final isValid = await MasterPasswordChangeScreen.validateCurrentPassword(
+        kdbxBloc: widget.kdbxBloc,
+        file: targetVault,
+        currentPassword: currentPass,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isVerifying = false);
+      if (!isValid) {
+        final vaultName = KeyNestVaultScope.cleanVaultName(
+          widget.kdbxBloc,
+          targetVault,
+        );
+        setState(
+          () => _errorMessage = currentPass.isEmpty
+              ? 'Please enter the master password for "$vaultName" to authorize unencrypted export.'
+              : 'Incorrect master password for "$vaultName".',
+        );
+        return;
+      }
+      _verifyPasswordController.clear();
     }
 
     if (!mounted) {
@@ -899,44 +939,85 @@ class _KeyNestExportOptionsSheetState extends State<KeyNestExportOptionsSheet> {
                                   Text(
                                     widget.format == KeyNestExportFormat.csv
                                         ? 'CSV files are completely unencrypted. All usernames, passwords, and 2FA secrets will be stored in plain text readable by any application.'
-                                        : 'JSON exports are stored as unencrypted plain text. Keep this file strictly in secure offline storage.',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      height: 1.35,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.black87,
+                                          : 'JSON exports are stored as unencrypted plain text. Keep this file strictly in secure offline storage.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        height: 1.35,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black87,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildSectionTitle('VERIFY VAULT MASTER PASSWORD'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _verifyPasswordController,
+                          obscureText: _obscureVerify,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          enabled: !_isVerifying,
+                          decoration: InputDecoration(
+                            labelText: 'Vault Master Password',
+                            prefixIcon: Icon(
+                              Icons.lock_outline_rounded,
+                              size: 20,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscureVerify
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                                size: 20,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscureVerify = !_obscureVerify,
                               ),
                             ),
-                          ],
+                            filled: true,
+                            fillColor: isDark
+                                ? KeyNestPalette.surfaceContainerDark
+                                : KeyNestPalette.surfaceContainerLight,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
+                        const SizedBox(height: 16),
+                      ],
 
-                    // Security Section: KDBX Master Password Setup
-                    if (widget.format == KeyNestExportFormat.kdbx) ...[
-                      const Divider(),
-                      const SizedBox(height: 8),
+                      // Security Section: KDBX Master Password Setup
+                      if (widget.format == KeyNestExportFormat.kdbx) ...[
+                        const Divider(),
+                        const SizedBox(height: 8),
 
-                      _buildSectionTitle('SET EXPORT MASTER PASSWORD'),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Create a new master password to encrypt the exported KDBX database. Never reuse credentials blindly.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark
-                              ? KeyNestPalette.textSecondaryDark
-                              : KeyNestPalette.textSecondaryLight,
+                        _buildSectionTitle('SET EXPORT MASTER PASSWORD'),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Create a new master password to encrypt the exported KDBX database. Never reuse credentials blindly.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? KeyNestPalette.textSecondaryDark
+                                : KeyNestPalette.textSecondaryLight,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _newPasswordController,
-                        obscureText: _obscureNew,
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _newPasswordController,
+                          obscureText: _obscureNew,
+                          enableSuggestions: false,
+                          autocorrect: false,
                         decoration: InputDecoration(
                           labelText: 'New Master Password for Export',
                           prefixIcon: Icon(

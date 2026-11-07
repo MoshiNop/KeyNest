@@ -1,6 +1,7 @@
 // ignore_for_file: always_put_control_body_on_new_line, unawaited_futures
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
@@ -25,7 +26,39 @@ class KeyNestDynamicIconService {
       <String, Future<Uint8List?>>{};
   static const Duration _failedDomainTtl = Duration(minutes: 5);
   static Directory? _cachedDiskDirectory;
+  static List<int>? _cacheSalt;
   bool _networkFetchEnabled = false;
+
+  static List<int> _ensureSaltForDir(Directory cacheDir) {
+    if (_cacheSalt != null) {
+      return _cacheSalt!;
+    }
+    try {
+      final saltFile = cacheDir.childFile('.salt');
+      if (saltFile.existsSync()) {
+        final bytes = saltFile.readAsBytesSync();
+        if (bytes.length >= 16) {
+          _cacheSalt = bytes;
+          return bytes;
+        }
+      }
+      final rng = Random.secure();
+      final generated = Uint8List.fromList(
+        List<int>.generate(32, (_) => rng.nextInt(256)),
+      );
+      if (!cacheDir.existsSync()) {
+        cacheDir.createSync(recursive: true);
+      }
+      saltFile.writeAsBytesSync(generated, flush: true);
+      _cacheSalt = generated;
+      return generated;
+    } catch (_) {
+      final rng = Random.secure();
+      final fallback = List<int>.generate(32, (_) => rng.nextInt(256));
+      _cacheSalt = fallback;
+      return fallback;
+    }
+  }
 
   /// Controls whether network requests for website icons are permitted.
   /// Defaults to false. When disabled, only cached icons are served.
@@ -57,13 +90,43 @@ class KeyNestDynamicIconService {
       return;
     }
     try {
-      final docDir = await PathUtils().getAppDocDirectory(ensureCreated: true);
-      final cacheDir = docDir.childDirectory('icon_cache');
+      final appDataDir = await PathUtils().getAppDataDirectory();
+      final cacheDir = appDataDir.childDirectory('icon_cache');
       if (!cacheDir.existsSync()) {
         await cacheDir.create(recursive: true);
       }
+      _ensureSaltForDir(cacheDir);
       _cachedDiskDirectory = cacheDir;
     } catch (_) {}
+  }
+
+  static bool _isPrivateOrInternalHost(String host) {
+    if (host.isEmpty || !host.contains('.')) {
+      return true;
+    }
+    // Reject IPv6 literals
+    if (host.contains(':') || host.contains('[') || host.contains(']')) {
+      return true;
+    }
+    if (host == 'localhost' ||
+        host.endsWith('.localhost') ||
+        host.endsWith('.local') ||
+        host.endsWith('.internal') ||
+        host.endsWith('.corp') ||
+        host.endsWith('.lan') ||
+        host.endsWith('.home') ||
+        host.endsWith('.intranet') ||
+        host.endsWith('.arpa') ||
+        host.endsWith('.onion')) {
+      return true;
+    }
+    // Reject all raw IPv4 literals (including RFC 1918, link-local 169.254.*, loopback)
+    final ipv4Match = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$')
+        .firstMatch(host);
+    if (ipv4Match != null) {
+      return true;
+    }
+    return false;
   }
 
   /// Extracts and normalizes the public root domain from a given URL or host string.
@@ -83,6 +146,9 @@ class KeyNestDynamicIconService {
     }
 
     if (!trimmed.contains('://')) {
+      if (trimmed.startsWith('[')) {
+        return null;
+      }
       trimmed = 'https://$trimmed';
     }
 
@@ -93,24 +159,21 @@ class KeyNestDynamicIconService {
       }
 
       var host = uri.host.toLowerCase().trim();
-
-      // Remove port if present in host
-      if (host.contains(':')) {
-        host = host.split(':').first;
+      while (host.endsWith('.')) {
+        host = host.substring(0, host.length - 1);
       }
 
-      // Ignore local or loopback domains
-      if (host == 'localhost' ||
-          host == '127.0.0.1' ||
-          host.startsWith('192.168.') ||
-          host.startsWith('10.') ||
-          !host.contains('.')) {
+      if (_isPrivateOrInternalHost(host)) {
         return null;
       }
 
       // Normalize www.
       if (host.startsWith('www.')) {
         host = host.substring(4);
+      }
+
+      if (_isPrivateOrInternalHost(host)) {
+        return null;
       }
 
       return host.isNotEmpty ? host : null;
@@ -133,7 +196,9 @@ class KeyNestDynamicIconService {
         _cachedDiskDirectory != null &&
         !_diskMissDomains.contains(domain)) {
       try {
-        final file = _cachedDiskDirectory!.childFile(_diskFileName(domain));
+        final file = _cachedDiskDirectory!.childFile(
+          _diskFileName(domain, _cachedDiskDirectory!),
+        );
         if (file.existsSync()) {
           final bytes = file.readAsBytesSync();
           if (bytes.isNotEmpty) {
@@ -363,21 +428,22 @@ class KeyNestDynamicIconService {
     return false;
   }
 
-  String _diskFileName(String domain) {
-    final hash = md5.convert(utf8.encode(domain)).toString();
+  String _diskFileName(String domain, Directory cacheDir) {
+    final salt = _ensureSaltForDir(cacheDir);
+    final hash = Hmac(sha256, salt).convert(utf8.encode(domain)).toString();
     return 'favicon_$hash.png';
   }
 
   Future<Uint8List?> _readFromDiskCache(String domain) async {
     try {
-      final docDir = await PathUtils().getAppDocDirectory(ensureCreated: true);
-      final cacheDir = docDir.childDirectory('icon_cache');
+      final appDataDir = await PathUtils().getAppDataDirectory();
+      final cacheDir = appDataDir.childDirectory('icon_cache');
       _cachedDiskDirectory = cacheDir;
       if (!cacheDir.existsSync()) {
         return null;
       }
 
-      final file = cacheDir.childFile(_diskFileName(domain));
+      final file = cacheDir.childFile(_diskFileName(domain, cacheDir));
       if (file.existsSync()) {
         return await file.readAsBytes();
       }
@@ -387,13 +453,13 @@ class KeyNestDynamicIconService {
 
   Future<void> _saveToDiskCache(String domain, Uint8List bytes) async {
     try {
-      final docDir = await PathUtils().getAppDocDirectory(ensureCreated: true);
-      final cacheDir = docDir.childDirectory('icon_cache');
+      final appDataDir = await PathUtils().getAppDataDirectory();
+      final cacheDir = appDataDir.childDirectory('icon_cache');
       _cachedDiskDirectory = cacheDir;
       if (!cacheDir.existsSync()) {
         await cacheDir.create(recursive: true);
       }
-      final file = cacheDir.childFile(_diskFileName(domain));
+      final file = cacheDir.childFile(_diskFileName(domain, cacheDir));
       await file.writeAsBytes(bytes, flush: true);
       _diskMissDomains.remove(domain);
     } catch (_) {}

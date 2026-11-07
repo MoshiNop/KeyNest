@@ -49,6 +49,17 @@ class MasterPasswordChangeScreen extends StatefulWidget {
 
   final FileSource? fileSource;
 
+  static Future<String?> _tryGetVaultUuid(
+    KdbxBloc kdbxBloc,
+    KdbxFile file,
+  ) async {
+    try {
+      return kdbxBloc.fileForKdbxFile(file).fileSource.uuid;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> validateCurrentPassword({
     required KdbxBloc kdbxBloc,
     required KdbxFile file,
@@ -56,24 +67,44 @@ class MasterPasswordChangeScreen extends StatefulWidget {
   }) async {
     try {
       final existingCreds = file.credentials;
+      KeyFileCredentials? activeKeyFile;
+      if (existingCreds is KeyFileComposite && existingCreds.keyFile != null) {
+        activeKeyFile = existingCreds.keyFile;
+      } else {
+        final vaultUuid = await _tryGetVaultUuid(kdbxBloc, file);
+        if (vaultUuid != null) {
+          final storedBytes = await KeyNestKeyFileStore.instance
+              .resolveKeyFileBytes(vaultUuid);
+          if (storedBytes != null && storedBytes.isNotEmpty) {
+            final parsed = KeyNestKeyFile.parse(storedBytes);
+            activeKeyFile = KeyFileCredentials.fromBytes(parsed.keyBytes);
+          } else if (await KeyNestKeyFileStore.instance.hasKeyFile(vaultUuid)) {
+            // Vault has a configured key file that could not be resolved.
+            return false;
+          }
+        }
+      }
+
+      final passwordCreds = currentPassword.isNotEmpty
+          ? PasswordCredentials(ProtectedValue.fromString(currentPassword))
+          : null;
+      final Credentials candidate = activeKeyFile != null
+          ? KeyFileComposite(
+              password: passwordCreds,
+              keyFile: activeKeyFile,
+            )
+          : Credentials(ProtectedValue.fromString(currentPassword));
+
       if (existingCreds is KeyFileComposite) {
-        final candidate = KeyFileComposite(
-          password: PasswordCredentials(
-            ProtectedValue.fromString(currentPassword),
-          ),
-          keyFile: existingCreds.keyFile,
-        );
         return listEquals(candidate.getHash(), existingCreds.getHash());
       }
 
       try {
         final existingHash = existingCreds.getHash();
-        final candidate = Credentials(
-          ProtectedValue.fromString(currentPassword),
-        );
         if (listEquals(candidate.getHash(), existingHash)) {
           return true;
         }
+        return false;
       } on UnsupportedError {
         // getHash() not supported for post-KDF TransformedKeyCredentials
       }
@@ -81,14 +112,6 @@ class MasterPasswordChangeScreen extends StatefulWidget {
       // Fallback: test read against cached bytes
       final openedFile = kdbxBloc.fileForKdbxFile(file);
       final cachedBytes = openedFile.kdbxFileContent.content;
-      final candidate = existingCreds is KeyFileComposite
-          ? KeyFileComposite(
-              password: PasswordCredentials(
-                ProtectedValue.fromString(currentPassword),
-              ),
-              keyFile: existingCreds.keyFile,
-            )
-          : Credentials(ProtectedValue.fromString(currentPassword));
       await kdbxBloc.kdbxFormat.read(cachedBytes, candidate);
       return true;
     } catch (e) {
@@ -112,14 +135,36 @@ class MasterPasswordChangeScreen extends StatefulWidget {
         password: PasswordCredentials(ProtectedValue.fromString(newPassword)),
         keyFile: KeyFileCredentials.fromBytes(keyResult.keyBytes),
       );
-    } else if (file.credentials is KeyFileComposite) {
+    } else if (file.credentials is KeyFileComposite &&
+        (file.credentials as KeyFileComposite).keyFile != null) {
       final existingComposite = file.credentials as KeyFileComposite;
       newCredentials = KeyFileComposite(
         password: PasswordCredentials(ProtectedValue.fromString(newPassword)),
         keyFile: existingComposite.keyFile,
       );
     } else {
-      newCredentials = Credentials(ProtectedValue.fromString(newPassword));
+      KeyFileCredentials? storedKeyFile;
+      final vaultUuid = await _tryGetVaultUuid(kdbxBloc, file);
+      if (vaultUuid != null &&
+          await KeyNestKeyFileStore.instance.hasKeyFile(vaultUuid)) {
+        final storedBytes = await KeyNestKeyFileStore.instance
+            .resolveKeyFileBytes(vaultUuid);
+        if (storedBytes == null || storedBytes.isEmpty) {
+          throw StateError(
+            'Vault is protected with a key file that could not be read. Please re-select the key file before updating the master password.',
+          );
+        }
+        final parsed = KeyNestKeyFile.parse(storedBytes);
+        storedKeyFile = KeyFileCredentials.fromBytes(parsed.keyBytes);
+      }
+      if (storedKeyFile != null) {
+        newCredentials = KeyFileComposite(
+          password: PasswordCredentials(ProtectedValue.fromString(newPassword)),
+          keyFile: storedKeyFile,
+        );
+      } else {
+        newCredentials = Credentials(ProtectedValue.fromString(newPassword));
+      }
     }
     final savedContent = await kdbxBloc.saveFile(
       file,
@@ -166,6 +211,7 @@ class _MasterPasswordChangeScreenState
   bool _isSaving = false;
 
   bool _removeKeyFile = false;
+  bool _hasStoredKeyFile = false;
   Uint8List? _newKeyFileBytes;
   String? _newKeyFileName;
   String? _newKeyFilePath;
@@ -182,10 +228,38 @@ class _MasterPasswordChangeScreenState
   void initState() {
     super.initState();
     _selectedFileSource = widget.fileSource;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _refreshStoredKeyFileState();
+      }
+    });
+  }
+
+  Future<void> _refreshStoredKeyFileState([FileSource? sourceOverride]) async {
+    try {
+      final kdbxBloc = context.read<KdbxBloc>();
+      final openedFilesList = kdbxBloc.openedFilesWithSources.toList();
+      final source =
+          sourceOverride ??
+          _selectedFileSource ??
+          openedFilesList.firstOrNull?.key;
+      if (source == null) {
+        return;
+      }
+      final hasRef = await KeyNestKeyFileStore.instance.hasKeyFile(source.uuid);
+      if (mounted && _hasStoredKeyFile != hasRef) {
+        setState(() {
+          _hasStoredKeyFile = hasRef;
+        });
+      }
+    } catch (_) {}
   }
 
   @override
   void dispose() {
+    _currentPasswordController.clear();
+    _newPasswordController.clear();
+    _confirmPasswordController.clear();
     _currentPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
@@ -209,11 +283,13 @@ class _MasterPasswordChangeScreenState
       _confirmPasswordError = null;
       _newPasswordStrength = null;
       _removeKeyFile = false;
+      _hasStoredKeyFile = false;
       _newKeyFileBytes = null;
       _newKeyFileName = null;
       _newKeyFilePath = null;
       _newKeyFileResult = null;
     });
+    _refreshStoredKeyFileState(newSource);
   }
 
   Future<void> _pickNewKeyFile() async {
@@ -315,8 +391,8 @@ class _MasterPasswordChangeScreenState
     if (newPassword.isEmpty) {
       _newPasswordError = 'Please enter a new master password';
       hasValidationErrors = true;
-    } else if (newPassword.length < 4) {
-      _newPasswordError = 'Password must be at least 4 characters';
+    } else if (newPassword.length < 8) {
+      _newPasswordError = 'Password must be at least 8 characters';
       hasValidationErrors = true;
     }
 
@@ -597,6 +673,8 @@ class _MasterPasswordChangeScreenState
                   controller: _currentPasswordController,
                   focusNode: _currentFocusNode,
                   obscureText: _obscureCurrent,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   enabled: !_isSaving,
                   textInputAction: TextInputAction.next,
                   onFieldSubmitted: (_) => _newFocusNode.requestFocus(),
@@ -643,6 +721,8 @@ class _MasterPasswordChangeScreenState
                   controller: _newPasswordController,
                   focusNode: _newFocusNode,
                   obscureText: _obscureNew,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   enabled: !_isSaving,
                   textInputAction: TextInputAction.next,
                   onFieldSubmitted: (_) => _confirmFocusNode.requestFocus(),
@@ -705,6 +785,8 @@ class _MasterPasswordChangeScreenState
                   controller: _confirmPasswordController,
                   focusNode: _confirmFocusNode,
                   obscureText: _obscureConfirm,
+                  enableSuggestions: false,
+                  autocorrect: false,
                   enabled: !_isSaving,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _handleSubmit(
@@ -770,7 +852,11 @@ class _MasterPasswordChangeScreenState
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (selectedFile.credentials is KeyFileComposite &&
+                      if (((selectedFile.credentials is KeyFileComposite &&
+                                  (selectedFile.credentials as KeyFileComposite)
+                                          .keyFile !=
+                                      null) ||
+                              _hasStoredKeyFile) &&
                           !_removeKeyFile &&
                           _newKeyFileBytes == null) ...[
                         Row(

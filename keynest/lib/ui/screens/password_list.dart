@@ -236,7 +236,7 @@ class PasswordList extends StatelessWidget {
       Provider.of<Analytics>(context).events.trackPasswordListEmpty();
       final loc = AppLocalizations.of(context);
       return Container(
-        color: Colors.white,
+        color: Theme.of(context).scaffoldBackgroundColor,
         alignment: Alignment.center,
         child: PrimaryButton(
           onPressed: () {

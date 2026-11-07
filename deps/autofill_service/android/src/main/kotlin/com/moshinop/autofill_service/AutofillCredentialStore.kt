@@ -518,28 +518,12 @@ object AutofillCredentialStore {
         return associatedAppMap[normalized]?.firstOrNull()
     }
 
-    fun deriveDomainFromPackage(packageName: String): String? {
-        val parts = packageName.trim().lowercase().split(".").filter { it.isNotEmpty() }
-        if (parts.size >= 2) {
-            val tld = parts[0]
-            val brand = parts[1]
-            val knownTlds = setOf(
-                "com", "org", "net", "io", "app", "co", "us", "de", "uk",
-                "ch", "fr", "it", "es", "nl", "ca", "in", "me", "tv"
-            )
-            if (knownTlds.contains(tld) && brand.length >= 2) {
-                return "$brand.$tld"
-            }
-        }
-        return null
-    }
-
     /**
      * Resolves matching credentials against target package and domain.
      * Evaluates package equality, associated app packages, exact host, and eTLD+1 base domains.
-     * Strictly rejects unsafe lookalike substrings.
+     * Strictly rejects unsafe lookalike substrings and unverified web origins.
      */
-    fun findMatches(targetPackage: String, targetDomain: String): List<NativeAutofillEntry> {
+    fun findMatches(targetPackage: String, targetDomain: String, context: Context? = null): List<NativeAutofillEntry> {
         synchronized(lock) {
             val sourceEntries = if (isUnlockedAndActive()) {
                 touchActive()
@@ -552,11 +536,21 @@ object AutofillCredentialStore {
             val normalizedPackage = targetPackage.trim().lowercase()
             val normalizedDomain = AssistStructureParser.sanitizeWebDomain(targetDomain)?.lowercase() ?: ""
             val isBrowser = AssistStructureParser.isBrowserPackage(normalizedPackage)
-            val hasTargetDomain = normalizedDomain.isNotEmpty()
+            val callerTrusted = normalizedPackage.isEmpty() || AssistStructureParser.isCallerTrustedPackage(context, normalizedPackage)
+            if (!callerTrusted) {
+                return emptyList()
+            }
+
+            // Only trust targetDomain if caller is a trusted browser OR passes Digital Asset Links verification
+            val hasVerifiedTargetDomain = normalizedDomain.isNotEmpty() && (
+                isBrowser ||
+                normalizedPackage.isEmpty() ||
+                AssistStructureParser.isOriginVerifiedForWebDomain(context, normalizedPackage, normalizedDomain)
+            )
 
             // If a web browser requests credentials without an identified web domain,
             // never suggest stored logins (prevents leakages on unknown/unrelated pages)
-            if (isBrowser && !hasTargetDomain) {
+            if (isBrowser && !hasVerifiedTargetDomain) {
                 return emptyList()
             }
 
@@ -566,18 +560,13 @@ object AutofillCredentialStore {
                 emptyList()
             }
 
-            val derivedDomain = if (normalizedPackage.isNotEmpty() && !isBrowser) {
-                deriveDomainFromPackage(normalizedPackage)
-            } else null
-
-
             val scoredMatches = mutableListOf<Pair<NativeAutofillEntry, Int>>()
 
             for (entry in sourceEntries) {
                 var score = 0
 
                 // 1. Check direct package name match (strictly for native non-browser apps)
-                if (normalizedPackage.isNotEmpty() && !isBrowser && !hasTargetDomain) {
+                if (normalizedPackage.isNotEmpty() && !isBrowser && !hasVerifiedTargetDomain) {
                     val packageMatch = entry.packageNames.any { pkg ->
                         val cleanPkg = pkg.trim().lowercase()
                         cleanPkg.isNotBlank() &&
@@ -599,19 +588,8 @@ object AutofillCredentialStore {
                     }
                 }
 
-                // 2b. Check derived package domain match (reverse domain notation, e.g. com.todoist -> todoist.com)
-                if (derivedDomain != null && !isBrowser) {
-                    for (entryUrl in entry.urls) {
-                        val host = extractHost(entryUrl)
-                        if (host != null && (host == derivedDomain || host.endsWith(".$derivedDomain") || isRegistrableDomainMatch(host, derivedDomain))) {
-                            score = maxOf(score, 75)
-                        }
-                    }
-                }
-
-
-                // 3. Check web domain match (based strictly on legitimate web origin matching)
-                if (hasTargetDomain) {
+                // 3. Check web domain match (based strictly on verified web origin matching)
+                if (hasVerifiedTargetDomain) {
                     val cleanTargetHost = normalizedDomain.removePrefix("www.").trim('.')
                     val targetRegistrable = getRegistrableDomain(cleanTargetHost)
 
@@ -656,7 +634,7 @@ object AutofillCredentialStore {
                 .toMutableList()
 
             // If a credential was explicitly selected or remembered for this context, prepend it
-            val contextKey = if (hasTargetDomain) normalizedDomain else normalizedPackage
+            val contextKey = if (hasVerifiedTargetDomain) normalizedDomain else normalizedPackage
             val pending = getValidPendingLogin(contextKey)
             if (pending != null) {
                 val pendingEntry = sourceEntries.firstOrNull { it.id == pending.entryId }

@@ -1383,6 +1383,17 @@ class _CredentialsScreenState extends State<CredentialsScreen> {
     );
   }
 
+  @override
+  void dispose() {
+    _controller.clear();
+    _controller.dispose();
+    final kf = _keyFile;
+    if (kf is KeyFileResolved) {
+      kf.bytes.fillRange(0, kf.bytes.length, 0);
+    }
+    super.dispose();
+  }
+
   Future<void> _loadSavedKeyFileReference() async {
     try {
       final ref = await KeyNestKeyFileStore.instance.getReference(

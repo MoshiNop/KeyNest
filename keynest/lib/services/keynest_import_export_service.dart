@@ -1644,13 +1644,28 @@ class KeyNestImportExportService {
   }
 
   static String _escapeCsv(String val) {
-    if (val.contains(',') ||
-        val.contains('"') ||
-        val.contains('\n') ||
-        val.contains('\r')) {
-      return '"${val.replaceAll('"', '""')}"';
+    if (val.isEmpty) {
+      return val;
     }
-    return val;
+    var safeVal = val;
+    final trimmedLeft = safeVal.trimLeft();
+    if (safeVal.startsWith('\t') ||
+        safeVal.startsWith('\r') ||
+        (trimmedLeft.isNotEmpty &&
+            (trimmedLeft.startsWith('=') ||
+                trimmedLeft.startsWith('+') ||
+                trimmedLeft.startsWith('-') ||
+                trimmedLeft.startsWith('@')))) {
+      safeVal = "'$safeVal";
+    }
+    if (safeVal.contains(',') ||
+        safeVal.contains('"') ||
+        safeVal.contains('\n') ||
+        safeVal.contains('\r') ||
+        safeVal.startsWith("'")) {
+      return '"${safeVal.replaceAll('"', '""')}"';
+    }
+    return safeVal;
   }
 
   static List<List<String>> _parseCsv(String text) {

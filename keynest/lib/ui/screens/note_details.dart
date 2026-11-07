@@ -909,7 +909,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                   : KeyNestPalette.surfaceLight,
               borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
               child: InkWell(
-                onTap: body.isNotEmpty
+                onTap: (body.isNotEmpty && !isNotesMasked)
                     ? () => _copyToClipboard('Note content', body)
                     : null,
                 borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),

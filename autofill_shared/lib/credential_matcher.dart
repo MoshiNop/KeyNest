@@ -44,15 +44,20 @@ enum CredentialMatchQuality {
 class CredentialRequest {
   CredentialRequest.web(String url)
     : webHost = CredentialMatcher.hostOf(url),
+      isInsecureHttp = url.trim().toLowerCase().startsWith('http://'), // NON-NLS
       packageName = null;
 
   CredentialRequest.application(String packageName)
     : webHost = null,
+      isInsecureHttp = false,
       packageName = packageName.trim().toLowerCase().nullIfEmpty;
 
   /// Lower-cased host of the requesting page, without `www.`, or null when the
   /// request did not come from a browser (or the url made no sense).
   final String? webHost;
+
+  /// True when the requesting web page explicitly uses cleartext `http://`.
+  final bool isInsecureHttp;
 
   /// Package name of the requesting native app, or null for web requests.
   final String? packageName;
@@ -133,6 +138,7 @@ class CredentialMatcher {
     'com.chrome.beta',
     'com.chrome.dev',
     'com.chrome.canary',
+    'org.chromium.chrome',
     'com.google.android.apps.chrome',
     'org.mozilla.firefox',
     'org.mozilla.firefox_beta',
@@ -159,19 +165,21 @@ class CredentialMatcher {
     'com.torproject.torbrowser',
     'mark.via.gp',
     'io.github.forkmaintainers.iceraven',
+    'org.cromite.cromite',
+    'com.yandex.browser',
+    'com.ecosia.android',
+    'com.aloha.browser',
+    'net.waterfox.android.release',
+    'us.spotco.mulch',
+    'us.spotco.fennec_dos',
   };
 
-  /// Returns true if [packageName] is a recognized web browser.
+  /// Returns true if [packageName] is a recognized web browser in the explicit allowlist.
   static bool isBrowserPackage(String? packageName) {
     if (packageName == null) return false;
     final clean = packageName.trim().toLowerCase();
     if (clean.isEmpty) return false;
-    if (_browserPackages.contains(clean)) return true;
-    return clean.endsWith('.browser') ||
-        clean.contains('chrome') ||
-        clean.contains('firefox') ||
-        clean.contains('browser') ||
-        clean.contains('fenix');
+    return _browserPackages.contains(clean);
   }
 
   /// Percent escapes and whitespace never appear in a real hostname.
@@ -284,6 +292,11 @@ class CredentialMatcher {
     }
 
     if (requestHost != null) {
+      // Do not auto-downgrade explicit HTTPS vault credentials onto cleartext HTTP pages.
+      final trimmedEntry = entryUrl?.trim().toLowerCase() ?? '';
+      if (request.isInsecureHttp && trimmedEntry.startsWith('https://')) { // NON-NLS
+        return null;
+      }
       if (entryHost == requestHost) {
         return CredentialMatchQuality.host;
       }

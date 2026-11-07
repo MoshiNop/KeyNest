@@ -2932,6 +2932,11 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         }
       }
     } finally {
+      nameController.dispose();
+      passwordController.clear();
+      passwordController.dispose();
+      confirmController.clear();
+      confirmController.dispose();
       keyFileController.dispose();
     }
   }
