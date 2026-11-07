@@ -76,12 +76,14 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "==> importing the Developer ID certificate into a temporary keychain"
-security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-security set-keychain-settings -lut 3600 "$KEYCHAIN"
-security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-security import "$P12" -k "$KEYCHAIN" -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" \
-  -T /usr/bin/codesign -T /usr/bin/security
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+# Feed sensitive passwords over stdin via `security -i` so secrets are not exposed in process argv.
+security -i <<EOF >/dev/null
+create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+set-keychain-settings -lut 3600 "${KEYCHAIN}"
+unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+import "${P12}" -k "${KEYCHAIN}" -P "${APPLE_DEVELOPER_ID_P12_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security
+set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN}"
+EOF
 security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
 
 if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -q "Developer ID Application"; then

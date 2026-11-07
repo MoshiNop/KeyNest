@@ -26,6 +26,7 @@ dependencies:
   # agree on what counts as a match.
   autofill_shared:
     path: ../autofill_shared
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_test:

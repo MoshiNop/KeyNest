@@ -1,5 +1,6 @@
 // ignore_for_file: implementation_imports, invalid_use_of_visible_for_testing_member, invalid_use_of_internal_member, always_put_control_body_on_new_line, prefer_final_locals
 
+import 'package:flutter/foundation.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:kdbx/src/kdbx_deleted_object.dart';
 import 'package:kdbx/src/kdbx_entry.dart';
@@ -82,15 +83,13 @@ class DropboxVaultMergeEngine {
       baseFile: baseFile,
     );
 
-    // Initial counts for validation rule 3
+    // Initial active entry set for validation rule 3
     final initialLocalEntries = _collectAllEntries(localFile.body.rootGroup);
     final initialRemoteEntries = _collectAllEntries(remoteFile.body.rootGroup);
-    final initialLocalOnly = initialLocalEntries.keys
-        .where((k) => !initialRemoteEntries.containsKey(k))
-        .length;
-    final initialRemoteOnly = initialRemoteEntries.keys
-        .where((k) => !initialLocalEntries.containsKey(k))
-        .length;
+    final expectedActiveUuids = <KdbxUuid>{
+      ...initialLocalEntries.keys,
+      ...initialRemoteEntries.keys,
+    }..removeWhere(survivingDeletions.containsKey);
 
     // 4. Merge Groups Hierarchy (Rule f)
     _mergeGroups(
@@ -117,9 +116,7 @@ class DropboxVaultMergeEngine {
     // 7. Validate Merged Database (Rule 3)
     _validateMergedDatabase(
       localFile: localFile,
-      initialLocalOnly: initialLocalOnly,
-      initialRemoteOnly: initialRemoteOnly,
-      legitimatelyDeleted: deletedCount,
+      expectedActiveUuids: expectedActiveUuids,
     );
 
     return DropboxMergeResult(
@@ -168,6 +165,29 @@ class DropboxVaultMergeEngine {
             remoteUserChanged.isAfter(localUserChanged))) {
       localMeta.defaultUserName.set(remoteMeta.defaultUserName.get());
       localMeta.defaultUserNameChanged.set(remoteUserChanged);
+    }
+
+    // Recycle bin: if only the remote side has one, adopt it so the merged
+    // 'Trash' group is recognised as the recycle bin (otherwise deleteEntry
+    // creates a second Trash and entries in the first look "not deleted").
+    final localBinUuid = localMeta.recycleBinUUID.get();
+    final remoteBinUuid = remoteMeta.recycleBinUUID.get();
+    if ((localBinUuid == null || localBinUuid.isNil) &&
+        remoteBinUuid != null &&
+        !remoteBinUuid.isNil) {
+      localMeta.recycleBinUUID.set(remoteBinUuid);
+      localMeta.recycleBinEnabled.set(
+        remoteMeta.recycleBinEnabled.get() ?? true,
+      );
+    }
+
+    // Merge Custom Icons on Database
+    for (final icon in remoteMeta.customIcons.values) {
+      if (!localMeta.customIcons.containsKey(icon.uuid)) {
+        localMeta.addCustomIcon(
+          KdbxCustomIcon(uuid: icon.uuid, data: icon.data),
+        );
+      }
     }
 
     // Merge Custom Data on Database (Rule h)
@@ -258,6 +278,7 @@ class DropboxVaultMergeEngine {
             )
             ..forceSetUuid(remoteGroup.uuid)
             ..icon.set(remoteGroup.icon.get() ?? KdbxIcon.Folder);
+      _applyGroupCustomIcon(localFile, newGroup, remoteGroup.customIcon);
       targetParent.addGroup(newGroup);
       localGroups[remoteGroup.uuid] = newGroup;
     }
@@ -297,6 +318,7 @@ class DropboxVaultMergeEngine {
       if (remoteModTime.isAfter(localModTime)) {
         localGroup.name.set(remoteGroup.name.get());
         localGroup.icon.set(remoteGroup.icon.get() ?? KdbxIcon.Folder);
+        _applyGroupCustomIcon(localFile, localGroup, remoteGroup.customIcon);
         localGroup.notes.set(remoteGroup.notes.get());
       }
 
@@ -379,6 +401,7 @@ class DropboxVaultMergeEngine {
       targetParent ??= localFile.body.rootGroup;
 
       final cloned = remoteEntry.cloneInto(targetParent);
+      _applyEntryCustomIcon(localFile, cloned, remoteEntry.customIcon);
       localEntries[remoteEntry.uuid] = cloned;
       added++;
     }
@@ -393,6 +416,7 @@ class DropboxVaultMergeEngine {
       // Check if entry contents differ
       if (!_areEntriesIdentical(localEntry, remoteEntry)) {
         _mergeSingleEntryContent(
+          localFile: localFile,
           localEntry: localEntry,
           remoteEntry: remoteEntry,
           baseEntry: baseEntry,
@@ -402,18 +426,6 @@ class DropboxVaultMergeEngine {
 
       // Merge Entry History (Rules c & d)
       _mergeEntryHistory(localEntry, remoteEntry);
-
-      // Carry Attachments (Rule g)
-      for (final binEntry in remoteEntry.binaryEntries) {
-        if (localEntry.getBinary(binEntry.key) == null) {
-          localEntry.file.ctx.addBinary(binEntry.value);
-          localEntry.createBinary(
-            isProtected: binEntry.value.isProtected,
-            name: binEntry.key.key,
-            bytes: binEntry.value.value,
-          );
-        }
-      }
 
       // Custom data union (Rule h)
       _mergeCustomData(localEntry.customData, remoteEntry.customData);
@@ -448,6 +460,7 @@ class DropboxVaultMergeEngine {
   }
 
   static void _mergeSingleEntryContent({
+    required KdbxFile localFile,
     required KdbxEntry localEntry,
     required KdbxEntry remoteEntry,
     KdbxEntry? baseEntry,
@@ -461,51 +474,177 @@ class DropboxVaultMergeEngine {
 
     // Rule j: Field-by-field merge when BASE is available
     if (baseEntry != null) {
-      final allKeys = <KdbxKey>{
-        ...localEntry.stringEntries.map((e) => e.key),
-        ...remoteEntry.stringEntries.map((e) => e.key),
-        ...baseEntry.stringEntries.map((e) => e.key),
-      };
-
+      final preMergeLocalSnapshot = localEntry.parent != null
+          ? localEntry.cloneInto(localEntry.parent!, toHistoryEntry: true)
+          : null;
       bool recordedConflictHistory = false;
+
+      void recordConflict({required bool remoteWins}) {
+        if (recordedConflictHistory || localEntry.parent == null) return;
+        if (remoteWins) {
+          if (preMergeLocalSnapshot != null) {
+            localEntry.history.add(preMergeLocalSnapshot);
+          }
+        } else {
+          localEntry.history.add(
+            remoteEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
+          );
+        }
+        recordedConflictHistory = true;
+      }
+
+      // 1. String fields (including custom field additions & deletions)
+      final localKeys = localEntry.stringEntries.map((e) => e.key).toSet();
+      final remoteKeys = remoteEntry.stringEntries.map((e) => e.key).toSet();
+      final baseKeys = baseEntry.stringEntries.map((e) => e.key).toSet();
+      final allKeys = <KdbxKey>{...localKeys, ...remoteKeys, ...baseKeys};
+
       for (final key in allKeys) {
+        final hasBase = baseKeys.contains(key);
+        final hasLocal = localKeys.contains(key);
+        final hasRemote = remoteKeys.contains(key);
         final baseVal = baseEntry.getString(key)?.getText();
         final localVal = localEntry.getString(key)?.getText();
         final remoteVal = remoteEntry.getString(key)?.getText();
 
-        final localChanged = localVal != baseVal;
-        final remoteChanged = remoteVal != baseVal;
+        final localChanged = (hasLocal != hasBase) || (localVal != baseVal);
+        final remoteChanged = (hasRemote != hasBase) || (remoteVal != baseVal);
 
         if (!localChanged && remoteChanged) {
-          // Remote updated this field cleanly
-          localEntry.setString(key, remoteEntry.getString(key));
-        } else if (localChanged && remoteChanged && localVal != remoteVal) {
-          // Clashing change on same field -> Rule c: newer LastModificationTime wins
-          if (remoteModTime.isAfter(localModTime)) {
-            if (!recordedConflictHistory && localEntry.parent != null) {
-              localEntry.history.add(
-                localEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
-              );
-              recordedConflictHistory = true;
-            }
+          if (hasRemote) {
             localEntry.setString(key, remoteEntry.getString(key));
           } else {
-            // Local wins or tie: preserve remote's conflicting version in history
-            if (!recordedConflictHistory && localEntry.parent != null) {
-              localEntry.history.add(
-                remoteEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
-              );
-              recordedConflictHistory = true;
-            }
+            localEntry.removeString(key);
           }
-        } else if (!localChanged && !remoteChanged) {
-          // Plaintext matches, but check if protection status was upgraded
+        } else if (localChanged && remoteChanged) {
+          final sameOutcome = hasLocal == hasRemote && localVal == remoteVal;
+          if (sameOutcome) {
+            if (hasLocal &&
+                hasRemote &&
+                localEntry.getString(key) is! ProtectedValue &&
+                remoteEntry.getString(key) is ProtectedValue) {
+              localEntry.setString(key, remoteEntry.getString(key));
+            }
+          } else if (remoteModTime.isAfter(localModTime)) {
+            recordConflict(remoteWins: true);
+            if (hasRemote) {
+              localEntry.setString(key, remoteEntry.getString(key));
+            } else {
+              localEntry.removeString(key);
+            }
+          } else {
+            recordConflict(remoteWins: false);
+          }
+        } else if (!localChanged && !remoteChanged && hasLocal && hasRemote) {
           final localIsProtected = localEntry.getString(key) is ProtectedValue;
           final remoteIsProtected =
               remoteEntry.getString(key) is ProtectedValue;
           if (!localIsProtected && remoteIsProtected) {
             localEntry.setString(key, remoteEntry.getString(key));
           }
+        }
+      }
+
+      // 2. Binary attachments (including attachment additions, updates, & deletions)
+      final allBinKeys = <KdbxKey>{
+        ...localEntry.binaryEntries.map((e) => e.key),
+        ...remoteEntry.binaryEntries.map((e) => e.key),
+        ...baseEntry.binaryEntries.map((e) => e.key),
+      };
+      for (final binKey in allBinKeys) {
+        final baseBin = baseEntry.getBinary(binKey);
+        final localBin = localEntry.getBinary(binKey);
+        final remoteBin = remoteEntry.getBinary(binKey);
+
+        final localBinChanged = !_binariesEqual(localBin, baseBin);
+        final remoteBinChanged = !_binariesEqual(remoteBin, baseBin);
+
+        if (!localBinChanged && remoteBinChanged) {
+          _setOrRemoveBinary(localEntry, binKey, remoteBin);
+        } else if (localBinChanged &&
+            remoteBinChanged &&
+            !_binariesEqual(localBin, remoteBin)) {
+          if (remoteModTime.isAfter(localModTime)) {
+            recordConflict(remoteWins: true);
+            _setOrRemoveBinary(localEntry, binKey, remoteBin);
+          } else {
+            recordConflict(remoteWins: false);
+          }
+        }
+      }
+
+      // 3. Standard & custom icons
+      final baseIcon = baseEntry.icon.get();
+      final localIcon = localEntry.icon.get();
+      final remoteIcon = remoteEntry.icon.get();
+      final baseCustomUuid = baseEntry.customIcon?.uuid;
+      final localCustomUuid = localEntry.customIcon?.uuid;
+      final remoteCustomUuid = remoteEntry.customIcon?.uuid;
+
+      final localIconChanged =
+          localIcon != baseIcon || localCustomUuid != baseCustomUuid;
+      final remoteIconChanged =
+          remoteIcon != baseIcon || remoteCustomUuid != baseCustomUuid;
+
+      if (!localIconChanged && remoteIconChanged) {
+        localEntry.icon.set(remoteIcon ?? KdbxIcon.Key);
+        _applyEntryCustomIcon(localFile, localEntry, remoteEntry.customIcon);
+      } else if (localIconChanged &&
+          remoteIconChanged &&
+          (localIcon != remoteIcon || localCustomUuid != remoteCustomUuid)) {
+        if (remoteModTime.isAfter(localModTime)) {
+          recordConflict(remoteWins: true);
+          localEntry.icon.set(remoteIcon ?? KdbxIcon.Key);
+          _applyEntryCustomIcon(localFile, localEntry, remoteEntry.customIcon);
+        } else {
+          recordConflict(remoteWins: false);
+        }
+      }
+
+      // 4. Tags
+      final baseTags = baseEntry.tags.get() ?? '';
+      final localTags = localEntry.tags.get() ?? '';
+      final remoteTags = remoteEntry.tags.get() ?? '';
+      final localTagsChanged = localTags != baseTags;
+      final remoteTagsChanged = remoteTags != baseTags;
+      if (!localTagsChanged && remoteTagsChanged) {
+        _applyTags(localEntry, remoteEntry.tags.get());
+      } else if (localTagsChanged &&
+          remoteTagsChanged &&
+          localTags != remoteTags) {
+        if (remoteModTime.isAfter(localModTime)) {
+          recordConflict(remoteWins: true);
+          _applyTags(localEntry, remoteEntry.tags.get());
+        } else {
+          recordConflict(remoteWins: false);
+        }
+      }
+
+      // 5. Expiry metadata
+      final baseExpires = baseEntry.times.expires.get() ?? false;
+      final localExpires = localEntry.times.expires.get() ?? false;
+      final remoteExpires = remoteEntry.times.expires.get() ?? false;
+      final baseExpMs =
+          baseEntry.times.expiryTime.get()?.millisecondsSinceEpoch;
+      final localExpMs =
+          localEntry.times.expiryTime.get()?.millisecondsSinceEpoch;
+      final remoteExpMs =
+          remoteEntry.times.expiryTime.get()?.millisecondsSinceEpoch;
+
+      final localExpChanged =
+          localExpires != baseExpires || localExpMs != baseExpMs;
+      final remoteExpChanged =
+          remoteExpires != baseExpires || remoteExpMs != baseExpMs;
+      if (!localExpChanged && remoteExpChanged) {
+        _applyExpiry(localEntry, remoteEntry);
+      } else if (localExpChanged &&
+          remoteExpChanged &&
+          (localExpires != remoteExpires || localExpMs != remoteExpMs)) {
+        if (remoteModTime.isAfter(localModTime)) {
+          recordConflict(remoteWins: true);
+          _applyExpiry(localEntry, remoteEntry);
+        } else {
+          recordConflict(remoteWins: false);
         }
       }
 
@@ -519,36 +658,45 @@ class DropboxVaultMergeEngine {
 
     // Without BASE: Rules c & d
     if (remoteModTime.isAfter(localModTime)) {
-      // REMOTE is newer: add LOCAL into History, copy REMOTE to LOCAL
-      localEntry.history.add(
-        localEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
-      );
+      // REMOTE is newer: add LOCAL into History, replace LOCAL state with REMOTE
+      if (localEntry.parent != null) {
+        localEntry.history.add(
+          localEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
+        );
+      }
+      final remoteStringKeys =
+          remoteEntry.stringEntries.map((e) => e.key).toSet();
+      for (final existing in localEntry.stringEntries.toList()) {
+        if (!remoteStringKeys.contains(existing.key)) {
+          localEntry.removeString(existing.key);
+        }
+      }
       for (final s in remoteEntry.stringEntries) {
         localEntry.setString(s.key, s.value);
       }
-      localEntry.icon.set(remoteEntry.icon.get() ?? KdbxIcon.Key);
-      localEntry.times.lastModificationTime.set(remoteModTime);
-    } else if (localModTime.isAfter(remoteModTime)) {
-      // LOCAL is newer: push REMOTE into History, keep LOCAL
-      localEntry.history.add(
-        remoteEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
-      );
-      // Preserve non-conflicting custom fields from remote
-      for (final s in remoteEntry.stringEntries) {
-        if (localEntry.getString(s.key) == null) {
-          localEntry.setString(s.key, s.value);
+
+      final remoteBinKeys =
+          remoteEntry.binaryEntries.map((e) => e.key).toSet();
+      for (final existingBin in localEntry.binaryEntries.toList()) {
+        if (!remoteBinKeys.contains(existingBin.key)) {
+          localEntry.removeBinary(existingBin.key);
         }
       }
+      for (final bin in remoteEntry.binaryEntries) {
+        _setOrRemoveBinary(localEntry, bin.key, bin.value);
+      }
+
+      localEntry.icon.set(remoteEntry.icon.get() ?? KdbxIcon.Key);
+      _applyEntryCustomIcon(localFile, localEntry, remoteEntry.customIcon);
+      _applyTags(localEntry, remoteEntry.tags.get());
+      _applyExpiry(localEntry, remoteEntry);
+      localEntry.times.lastModificationTime.set(remoteModTime);
     } else {
-      // Rule d: Identical timestamp, different content: keep LOCAL as current, push REMOTE into History
-      localEntry.history.add(
-        remoteEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
-      );
-      // Preserve non-conflicting custom fields from remote
-      for (final s in remoteEntry.stringEntries) {
-        if (localEntry.getString(s.key) == null) {
-          localEntry.setString(s.key, s.value);
-        }
+      // LOCAL is newer or identical timestamp: push REMOTE into History, keep LOCAL
+      if (localEntry.parent != null) {
+        localEntry.history.add(
+          remoteEntry.cloneInto(localEntry.parent!, toHistoryEntry: true),
+        );
       }
     }
     KeyNestItemTypeHelper.upgradeEntrySensitiveFields(localEntry);
@@ -615,9 +763,7 @@ class DropboxVaultMergeEngine {
   // 6. Validation (KeePass Rule 3)
   static void _validateMergedDatabase({
     required KdbxFile localFile,
-    required int initialLocalOnly,
-    required int initialRemoteOnly,
-    required int legitimatelyDeleted,
+    required Set<KdbxUuid> expectedActiveUuids,
   }) {
     final seenUuids = <KdbxUuid>{};
     final allGroups = _collectAllGroups(localFile.body.rootGroup);
@@ -656,15 +802,96 @@ class DropboxVaultMergeEngine {
       }
     }
 
-    // 3. Entry count >= max(entries only in LOCAL, entries only in REMOTE) minus legitimately deleted ones
-    final minExpected =
-        (initialLocalOnly > initialRemoteOnly
-            ? initialLocalOnly
-            : initialRemoteOnly) -
-        legitimatelyDeleted;
-    if (allEntries.length < minExpected) {
+    // 3. Every active (non-deleted) entry from LOCAL and REMOTE must survive
+    for (final expectedUuid in expectedActiveUuids) {
+      if (!allEntries.containsKey(expectedUuid)) {
+        throw DropboxMergeValidationException(
+          'Active entry lost during merge: $expectedUuid',
+        );
+      }
+    }
+    if (allEntries.length < expectedActiveUuids.length) {
       throw DropboxMergeValidationException(
-        'Entry count dropped below threshold: found ${allEntries.length}, expected at least $minExpected',
+        'Entry count dropped below threshold: found ${allEntries.length}, expected at least ${expectedActiveUuids.length}',
+      );
+    }
+  }
+
+  static void _applyGroupCustomIcon(
+    KdbxFile localFile,
+    KdbxGroup targetGroup,
+    KdbxCustomIcon? customIcon,
+  ) {
+    if (customIcon != null) {
+      if (!localFile.body.meta.customIcons.containsKey(customIcon.uuid)) {
+        localFile.body.meta.addCustomIcon(
+          KdbxCustomIcon(uuid: customIcon.uuid, data: customIcon.data),
+        );
+      }
+      targetGroup.customIcon =
+          localFile.body.meta.customIcons[customIcon.uuid] ?? customIcon;
+    } else {
+      targetGroup.customIcon = null;
+    }
+  }
+
+  static void _applyEntryCustomIcon(
+    KdbxFile localFile,
+    KdbxEntry targetEntry,
+    KdbxCustomIcon? customIcon,
+  ) {
+    if (customIcon != null) {
+      if (!localFile.body.meta.customIcons.containsKey(customIcon.uuid)) {
+        localFile.body.meta.addCustomIcon(
+          KdbxCustomIcon(uuid: customIcon.uuid, data: customIcon.data),
+        );
+      }
+      targetEntry.customIcon =
+          localFile.body.meta.customIcons[customIcon.uuid] ?? customIcon;
+    } else {
+      targetEntry.customIcon = null;
+    }
+  }
+
+  static void _applyTags(KdbxEntry targetEntry, String? tags) {
+    if (tags != null && tags.isNotEmpty) {
+      targetEntry.tags.set(tags);
+    } else {
+      targetEntry.tags.remove();
+    }
+  }
+
+  static void _applyExpiry(KdbxEntry targetEntry, KdbxEntry sourceEntry) {
+    final expires = sourceEntry.times.expires.get();
+    if (expires != null) {
+      targetEntry.times.expires.set(expires);
+    }
+    final expiryTime = sourceEntry.times.expiryTime.get();
+    if (expiryTime != null) {
+      targetEntry.times.expiryTime.set(expiryTime);
+    }
+  }
+
+  static bool _binariesEqual(KdbxBinary? a, KdbxBinary? b) {
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    return a.isProtected == b.isProtected && listEquals(a.value, b.value);
+  }
+
+  static void _setOrRemoveBinary(
+    KdbxEntry target,
+    KdbxKey key,
+    KdbxBinary? bin,
+  ) {
+    if (target.getBinary(key) != null) {
+      target.removeBinary(key);
+    }
+    if (bin != null) {
+      target.file.ctx.addBinary(bin);
+      target.createBinary(
+        isProtected: bin.isProtected,
+        name: key.key,
+        bytes: bin.value,
       );
     }
   }
@@ -694,12 +921,39 @@ class DropboxVaultMergeEngine {
   }
 
   static bool _areEntriesIdentical(KdbxEntry a, KdbxEntry b) {
-    final aStrings = a.stringEntries
-        .map((e) => '${e.key.key}:${e.value?.getText()}')
-        .toSet();
-    final bStrings = b.stringEntries
-        .map((e) => '${e.key.key}:${e.value?.getText()}')
-        .toSet();
-    return aStrings.length == bStrings.length && aStrings.containsAll(bStrings);
+    final aStrings = a.stringEntries.toList();
+    final bStrings = b.stringEntries.toList();
+    if (aStrings.length != bStrings.length) return false;
+
+    final bStringMap = <KdbxKey, StringValue?>{
+      for (final s in bStrings) s.key: s.value,
+    };
+    for (final s in aStrings) {
+      if (!bStringMap.containsKey(s.key)) return false;
+      final bVal = bStringMap[s.key];
+      if ((s.value?.getText() ?? '') != (bVal?.getText() ?? '')) return false;
+      if ((s.value is ProtectedValue) != (bVal is ProtectedValue)) return false;
+    }
+
+    final aBins = a.binaryEntries.toList();
+    final bBins = b.binaryEntries.toList();
+    if (aBins.length != bBins.length) return false;
+    for (final bin in aBins) {
+      final bBin = b.getBinary(bin.key);
+      if (!_binariesEqual(bin.value, bBin)) return false;
+    }
+
+    if (a.icon.get() != b.icon.get()) return false;
+    if (a.customIcon?.uuid != b.customIcon?.uuid) return false;
+    if ((a.tags.get() ?? '') != (b.tags.get() ?? '')) return false;
+    if ((a.times.expires.get() ?? false) != (b.times.expires.get() ?? false)) {
+      return false;
+    }
+    if (a.times.expiryTime.get()?.millisecondsSinceEpoch !=
+        b.times.expiryTime.get()?.millisecondsSinceEpoch) {
+      return false;
+    }
+
+    return true;
   }
 }

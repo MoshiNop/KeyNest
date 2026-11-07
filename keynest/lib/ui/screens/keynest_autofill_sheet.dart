@@ -198,7 +198,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
 
   Future<void> _loadAutofillMetadata() async {
     try {
-      if (widget.kdbxBloc.openedFilesKdbx.isEmpty &&
+      if (widget.kdbxBloc.autofillEnabledFilesKdbx.isEmpty &&
           widget.kdbxBloc.canSilentQuickUnlock() &&
           mounted) {
         final loc = AppLocalizations.of(context);
@@ -211,7 +211,11 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (meta != null) {
         for (final domain in meta.webDomains) {
           if (domain.domain.isNotEmpty) {
-            reqs.add(CredentialRequest.web('https://${domain.domain}'));
+            final scheme =
+                (domain.scheme != null && domain.scheme!.trim().isNotEmpty)
+                ? domain.scheme!.trim().toLowerCase()
+                : 'https';
+            reqs.add(CredentialRequest.web('$scheme://${domain.domain}'));
           }
         }
 
@@ -219,6 +223,33 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           if (pkg.isNotEmpty) {
             reqs.add(CredentialRequest.application(pkg));
           }
+        }
+      }
+
+      if (!reqInfo.forcePicker &&
+          reqInfo.selectedEntryId != null &&
+          widget.kdbxBloc.autofillEnabledFilesKdbx.isNotEmpty) {
+        KdbxEntry? selectedEntry;
+        for (final file in widget.kdbxBloc.autofillEnabledFilesKdbx) {
+          for (final entry in file.body.rootGroup.getAllEntries()) {
+            if (!entry.isInRecycleBin() &&
+                entry.uuid.uuid == reqInfo.selectedEntryId) {
+              selectedEntry = entry;
+              break;
+            }
+          }
+          if (selectedEntry != null) {
+            break;
+          }
+        }
+        if (selectedEntry != null && mounted) {
+          _metadata = meta;
+          _requests = reqs;
+          await widget.kdbxBloc.syncAndroidAutofillStore(immediate: true);
+          if (mounted) {
+            await _fillEntry(selectedEntry);
+          }
+          return;
         }
       }
 
@@ -262,7 +293,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           })
         >[];
 
-    final openFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetContext = _formatTargetTitle();
     final remembered = KeyNestPendingLoginMemory.instance.getRemembered(
       targetContext,
@@ -367,7 +398,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           })
         >[];
 
-    final openFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetContext = _formatTargetTitle();
     final remembered = KeyNestPendingLoginMemory.instance.getRemembered(
       targetContext,
@@ -525,7 +556,8 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       final isMatchingOrigin =
           quality == CredentialMatchQuality.host ||
           quality == CredentialMatchQuality.registrableDomain ||
-          quality == CredentialMatchQuality.application;
+          quality == CredentialMatchQuality.application ||
+          quality == CredentialMatchQuality.associatedApplication;
 
       if (!isMatchingOrigin) {
         final confirmed = await _confirmOriginMismatch(entry);
@@ -575,7 +607,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (mounted) {
         if (!_hasFilled) {
           widget.onClose?.call();
-        } else {
+        } else if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       }
@@ -603,7 +635,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (mounted) {
         if (!_hasFilled) {
           widget.onClose?.call();
-        } else {
+        } else if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       }
@@ -700,19 +732,22 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Color _qualityColor(CredentialMatchQuality? quality, bool isCarryover) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (isCarryover) {
-      return KeyNestPalette.accent;
+      return KeyNestPalette.primaryColorFor(isDark);
     }
     switch (quality) {
       case CredentialMatchQuality.host:
-        return KeyNestPalette.success;
+        return KeyNestPalette.successColorFor(isDark);
       case CredentialMatchQuality.registrableDomain:
-        return KeyNestPalette.primary;
+        return KeyNestPalette.primaryColorFor(isDark);
       case CredentialMatchQuality.application:
       case CredentialMatchQuality.associatedApplication:
-        return KeyNestPalette.accent;
+        return KeyNestPalette.primaryColorFor(isDark);
       case null:
-        return KeyNestPalette.textSecondaryLight;
+        return isDark
+            ? KeyNestPalette.textSecondaryDark
+            : KeyNestPalette.textSecondaryLight;
     }
   }
 
@@ -741,7 +776,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           >[]
         : _getAllVaultEntries();
     final targetTitle = _formatTargetTitle();
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final isUnverified =
         !_isCreatingNewLogin && _isUnverifiedContext(suggestedMatches);
 
@@ -1584,7 +1619,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   void _startNewLoginFlow() {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     if (openedFiles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1651,7 +1686,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       return _cachedAllUsernames!;
     }
     final allUsernames = <String>{};
-    for (final f in widget.kdbxBloc.openedFilesKdbx) {
+    for (final f in widget.kdbxBloc.autofillEnabledFilesKdbx) {
       for (final e in f.body.rootGroup.getAllEntries()) {
         if (e.isInRecycleBin()) {
           continue;
@@ -2661,7 +2696,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
     }
 
     final targetFile =
-        _newSelectedFile ?? widget.kdbxBloc.openedFilesKdbx.firstOrNull;
+        _newSelectedFile ?? widget.kdbxBloc.autofillEnabledFilesKdbx.firstOrNull;
     if (targetFile == null) {
       setState(() {
         _newLoginErrorMessage =
@@ -2742,7 +2777,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Widget _buildNewLoginView(bool isDark, ThemeData theme) {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final usernameSuggestions = _getUsernameSuggestions(
       _newUsernameController.text,
     );
@@ -3356,7 +3391,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Widget _buildNoMatchesView(bool isDark, ThemeData theme) {
-    final openedFiles = widget.kdbxBloc.openedFilesKdbx;
+    final openedFiles = widget.kdbxBloc.autofillEnabledFilesKdbx;
     final targetTitle = _formatTargetTitle();
 
     return Padding(

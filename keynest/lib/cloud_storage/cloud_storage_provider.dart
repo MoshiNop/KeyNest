@@ -69,7 +69,7 @@ abstract class CloudStorageEntity
     return nonNls(
       CloudStorageEntity(
         (b) => b
-          ..id = fileInfo['id']
+          ..id = fileInfo['id'] ?? fileInfo['path'] ?? fileInfo['name'] ?? ''
           ..type = CloudStorageEntityType.file
           ..name = fileInfo['name']
           ..path = fileInfo['path'],

@@ -19,16 +19,19 @@ class AddTwoFactorScreen extends StatefulWidget {
     this.initialFile,
     this.initialGroup,
     this.initialData,
+    this.onSaved,
   });
 
   final KdbxFile? initialFile;
   final KdbxGroup? initialGroup;
   final TotpQrData? initialData;
+  final ValueChanged<KdbxEntry>? onSaved;
 
   static Route<bool> route({
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
     TotpQrData? initialData,
+    ValueChanged<KdbxEntry>? onSaved,
   }) => KeyNestPlatform.isDesktopOrWeb
       ? KeyNestDesktopDialogRoute<bool>(
           settings: const RouteSettings(name: '/add2fa'),
@@ -38,6 +41,7 @@ class AddTwoFactorScreen extends StatefulWidget {
             initialFile: initialFile,
             initialGroup: initialGroup,
             initialData: initialData,
+            onSaved: onSaved,
           ),
         )
       : KeyNestPushPageRoute<bool>(
@@ -46,6 +50,7 @@ class AddTwoFactorScreen extends StatefulWidget {
             initialFile: initialFile,
             initialGroup: initialGroup,
             initialData: initialData,
+            onSaved: onSaved,
           ),
         );
 
@@ -304,6 +309,7 @@ class _AddTwoFactorScreenState extends State<AddTwoFactorScreen> {
               duration: const Duration(milliseconds: 1800),
             ),
           );
+        widget.onSaved?.call(entry);
         Navigator.of(context).pop(true);
       }
     } catch (e) {
@@ -352,12 +358,14 @@ class _AddTwoFactorScreenState extends State<AddTwoFactorScreen> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text(
+                : Text(
                     'Save',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 16,
-                      color: KeyNestPalette.primary,
+                      color: isDark
+                          ? KeyNestPalette.primaryDark
+                          : KeyNestPalette.primary,
                     ),
                   ),
           ),
@@ -384,10 +392,12 @@ class _AddTwoFactorScreenState extends State<AddTwoFactorScreen> {
                   children: [
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.qr_code_scanner_rounded,
                           size: 18,
-                          color: KeyNestPalette.primary,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
                         ),
                         label: const Text('Scan QR Code'),
                         style: OutlinedButton.styleFrom(
@@ -402,10 +412,12 @@ class _AddTwoFactorScreenState extends State<AddTwoFactorScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.content_paste_rounded,
                           size: 18,
-                          color: KeyNestPalette.primary,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
                         ),
                         label: const Text('Paste Key / URI'),
                         style: OutlinedButton.styleFrom(

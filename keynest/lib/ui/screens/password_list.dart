@@ -236,7 +236,7 @@ class PasswordList extends StatelessWidget {
       Provider.of<Analytics>(context).events.trackPasswordListEmpty();
       final loc = AppLocalizations.of(context);
       return Container(
-        color: Colors.white,
+        color: Theme.of(context).scaffoldBackgroundColor,
         alignment: Alignment.center,
         child: PrimaryButton(
           onPressed: () {
@@ -568,12 +568,22 @@ class GroupFilter {
           return groups.expand((g) => g.entries);
         } else if (showActive) {
           return groups
-              .where((g) => g == groupSelected.group || g.file.recycleBin != g)
-              .expand((g) => g.entries);
+              .where(
+                (g) =>
+                    g == groupSelected.group ||
+                    !KeyNestItemTypeHelper.isTrashOrRecycleBin(g),
+              )
+              .expand((g) => g.entries)
+              .where((e) => !KeyNestItemTypeHelper.isEntryInTrash(e));
         } else if (showRecycleBin) {
           return groups
-              .where((g) => g.file.recycleBin == g)
-              .expand((g) => g.entries);
+              .where(
+                (g) =>
+                    g == groupSelected.group ||
+                    KeyNestItemTypeHelper.isTrashOrRecycleBin(g),
+              )
+              .expand((g) => g.entries)
+              .where((e) => KeyNestItemTypeHelper.isEntryInTrash(e));
         } else {
           throw StateError(
             'Impossible. (showRecycleBin: $showRecycleBin,'
@@ -585,16 +595,14 @@ class GroupFilter {
     return files.expand((f) {
       if (showRecycleBin && showActive) {
         return f.body.rootGroup.getAllEntries();
+      } else if (showRecycleBin) {
+        return f.body.rootGroup
+            .getAllEntries()
+            .where((e) => KeyNestItemTypeHelper.isEntryInTrash(e));
       } else {
-        final recycleBin = f.recycleBin;
-        if (showRecycleBin) {
-          return recycleBin?.entries ?? [];
-        } else {
-          final allGroups = f.body.rootGroup.getAllGroups();
-          return allGroups
-              .where((g) => g != recycleBin && !g.isInRecycleBin())
-              .expand((e) => e.entries);
-        }
+        return f.body.rootGroup
+            .getAllEntries()
+            .where((e) => !KeyNestItemTypeHelper.isEntryInTrash(e));
       }
     });
   }
@@ -844,6 +852,8 @@ class _PasswordListContentState extends State<PasswordListContent>
       return;
     }
     final count = _selectedEntries.length;
+    final allInTrash =
+        _selectedEntries.every(KeyNestItemTypeHelper.isEntryInTrash);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -857,8 +867,10 @@ class _PasswordListContentState extends State<PasswordListContent>
                 color: KeyNestPalette.error.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(
-                Icons.delete_outline_rounded,
+              child: Icon(
+                allInTrash
+                    ? Icons.delete_forever_rounded
+                    : Icons.delete_outline_rounded,
                 color: KeyNestPalette.error,
                 size: 22,
               ),
@@ -866,7 +878,9 @@ class _PasswordListContentState extends State<PasswordListContent>
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Delete $count ${count == 1 ? 'Entry' : 'Entries'}?',
+                allInTrash
+                    ? 'Permanently Delete $count ${count == 1 ? 'Entry' : 'Entries'}?'
+                    : 'Delete $count ${count == 1 ? 'Entry' : 'Entries'}?',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
@@ -876,8 +890,10 @@ class _PasswordListContentState extends State<PasswordListContent>
           ],
         ),
         content: Text(
-          'Are you sure you want to delete $count selected ${count == 1 ? 'item' : 'items'}? '
-          'They will be moved to the Recycle Bin (or permanently deleted if recycle bin is disabled).',
+          allInTrash
+              ? 'Are you sure you want to permanently delete $count selected ${count == 1 ? 'item' : 'items'}? This action cannot be undone.'
+              : 'Are you sure you want to delete $count selected ${count == 1 ? 'item' : 'items'}? '
+                  'They will be moved to the Recycle Bin (or permanently deleted if recycle bin is disabled).',
         ),
         actions: [
           TextButton(
@@ -893,9 +909,9 @@ class _PasswordListContentState extends State<PasswordListContent>
               ),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            child: Text(
+              allInTrash ? 'Delete Permanently' : 'Delete',
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -919,7 +935,9 @@ class _PasswordListContentState extends State<PasswordListContent>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '$count ${count == 1 ? 'item' : 'items'} deleted.',
+            allInTrash
+                ? '$count ${count == 1 ? 'item' : 'items'} permanently deleted.'
+                : '$count ${count == 1 ? 'item' : 'items'} deleted.',
             style: TextStyle(
               color: isDarkSnack ? const Color(0xFF00315D) : Colors.white,
             ),
@@ -1827,7 +1845,7 @@ class _PasswordListContentState extends State<PasswordListContent>
     KdbxFile kdbxFile,
     KdbxGroup group,
   ) async {
-    final isInsideTrash = group.isInRecycleBin();
+    final isInsideTrash = KeyNestItemTypeHelper.isTrashOrRecycleBin(group);
     final folderName = group.name.get() ?? 'Folder';
 
     if (isInsideTrash) {
@@ -1861,6 +1879,7 @@ class _PasswordListContentState extends State<PasswordListContent>
           KeyNestVaultScope.instance.setCurrentFolder(parent);
           kdbxFile.deletePermanently(group);
           await kdbxBloc.saveFile(kdbxFile);
+          KeyNestVaultScope.instance.notifyScopeChanged();
           if (mounted) {
             setState(() {});
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1913,6 +1932,7 @@ class _PasswordListContentState extends State<PasswordListContent>
         KeyNestVaultScope.instance.setCurrentFolder(parent);
         kdbxFile.deleteGroup(group);
         await kdbxBloc.saveFile(kdbxFile);
+        KeyNestVaultScope.instance.notifyScopeChanged();
         if (mounted) {
           setState(() {});
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2713,19 +2733,19 @@ class _PasswordListContentState extends State<PasswordListContent>
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: KeyNestPalette.success.withValues(
-                                  alpha: 0.15,
-                                ),
+                                color: KeyNestPalette.successColorFor(
+                                  isDark,
+                                ).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 _autofillMatchedByUrl
                                     ? 'Domain Matched'
                                     : 'Active',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: KeyNestPalette.success,
+                                  color: KeyNestPalette.successColorFor(isDark),
                                 ),
                               ),
                             ),
@@ -2980,7 +3000,7 @@ class _PasswordListContentState extends State<PasswordListContent>
               if (g == g.file.recycleBin) {
                 return true;
               }
-              return !g.isInRecycleBin();
+              return !KeyNestItemTypeHelper.isTrashOrRecycleBin(g);
             }),
           )
         : <KdbxGroup>[];
@@ -3503,9 +3523,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
         resizeDuration: null,
         background: Container(
           alignment: Alignment.centerLeft,
-          color: theme.brightness == Brightness.light
-              ? Colors.lightBlueAccent
-              : Colors.blueAccent,
+          color: theme.brightness == Brightness.dark
+              ? KeyNestPalette.primaryDark.withValues(alpha: 0.25)
+              : KeyNestPalette.primary.withValues(alpha: 0.15),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3518,9 +3538,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
         ),
         secondaryBackground: Container(
           alignment: Alignment.centerRight,
-          color: theme.brightness == Brightness.light
-              ? Colors.limeAccent
-              : Colors.brown,
+          color: theme.brightness == Brightness.dark
+              ? KeyNestPalette.surfaceContainerDark
+              : KeyNestPalette.primaryContainerLight,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3567,7 +3587,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
                 : (selectedEntry == entry.entry
                       ? BoxDecoration(
                           color: KeyNestPlatform.isDesktopOrWeb
-                              ? const Color(0xFF0A85EA)
+                              ? (theme.brightness == Brightness.dark
+                                    ? KeyNestPalette.primaryContainerDark
+                                    : KeyNestPalette.primary)
                               : (theme.listTileTheme.selectedTileColor ??
                                   (theme.brightness == Brightness.dark
                                       ? KeyNestPalette.surfaceContainerDark
@@ -4067,21 +4089,28 @@ class PasswordEntryTile extends StatelessWidget {
             if (!isSelectionMode)
               StatefulBuilder(
                 builder: (context, setFavState) {
-                  final isFav =
-                      vm.entry.getString(KdbxKey('is_favorite'))?.getText() ==
-                      'true';
+                  final isFav = KeyNestItemTypeHelper.isFavorite(vm.entry);
                   return KeyNestPressScale(
-                    onTap: () {
-                      setFavState(() {
-                        if (isFav) {
-                          vm.entry.removeString(KdbxKey('is_favorite'));
-                        } else {
-                          vm.entry.setString(
-                            KdbxKey('is_favorite'),
-                            PlainValue('true'),
-                          );
+                    onTap: () async {
+                      final kdbxBloc = context.read<KdbxBloc>();
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      try {
+                        await KeyNestItemTypeHelper.toggleFavorite(
+                          vm.entry,
+                          kdbxBloc,
+                        );
+                        if (context.mounted) {
+                          setFavState(() {});
                         }
-                      });
+                      } catch (e) {
+                        scaffoldMessenger
+                          ..clearSnackBars()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to save favorite: $e'),
+                            ),
+                          );
+                      }
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
@@ -4110,26 +4139,25 @@ class PasswordEntryTile extends StatelessWidget {
     if (filterQuery == null || filterQuery.trim().isEmpty) {
       return TextSpan(text: text);
     }
-    final lcText = text.toLowerCase();
-    final lcFilterTerms = filterQuery
-        .toLowerCase()
+    final filterTerms = filterQuery
+        .trim()
         .split(RegExp(r'\s+'))
         .where((e) => e.isNotEmpty)
         .toList();
-    if (lcFilterTerms.isEmpty) {
+    if (filterTerms.isEmpty) {
       return TextSpan(text: text);
     }
-    final regexPattern = lcFilterTerms.map((e) => RegExp.escape(e)).join('|');
+    final regexPattern = filterTerms.map(RegExp.escape).join('|');
     if (regexPattern.isEmpty) {
       return TextSpan(text: text);
     }
-    final filterRegexp = RegExp(regexPattern);
+    final filterRegexp = RegExp(regexPattern, caseSensitive: false);
     var previousMatchEnd = 0;
     final spans = <TextSpan>[];
     final highlightColor = isDark
         ? KeyNestPalette.primaryDark
         : KeyNestPalette.primary;
-    for (final match in filterRegexp.allMatches(lcText)) {
+    for (final match in filterRegexp.allMatches(text)) {
       if (match.start > previousMatchEnd) {
         spans.add(
           TextSpan(text: text.substring(previousMatchEnd, match.start)),

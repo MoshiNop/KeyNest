@@ -13,6 +13,7 @@ import 'package:keynest/env/_base.dart';
 import 'package:keynest/utils/dialog_utils.dart';
 import 'package:keynest/utils/platform.dart';
 import 'package:logging/logging.dart';
+import 'package:synchronized/synchronized.dart';
 
 final _logger = Logger('gdrive_auth');
 
@@ -126,6 +127,7 @@ class GisGoogleTokenSource implements GoogleDriveTokenSource {
   DateTime? _tokenExpiresAt;
   String? _cachedEmail;
   String? _cachedDisplayName;
+  final Lock _refreshLock = Lock();
 
   void resetInitialization() {
     _initialized = false;
@@ -200,7 +202,10 @@ class GisGoogleTokenSource implements GoogleDriveTokenSource {
       final serverId = _serverClientId;
       await GoogleSignIn.instance.initialize(
         serverClientId: KeyNestPlatform.isAndroid ? serverId : null,
-        clientId: (KeyNestPlatform.isIOS || KeyNestPlatform.isMacOS)
+        clientId:
+            (KeyNestPlatform.isIOS ||
+                KeyNestPlatform.isMacOS ||
+                KeyNestPlatform.isWeb)
             ? serverId
             : null,
       );
@@ -240,7 +245,8 @@ class GisGoogleTokenSource implements GoogleDriveTokenSource {
 
   @override
   Future<bool> signIn() async {
-    if (KeyNestPlatform.isAndroid && _serverClientId == null) {
+    if ((KeyNestPlatform.isAndroid || KeyNestPlatform.isWeb) &&
+        _serverClientId == null) {
       throw GoogleDriveAuthException(
         'Google Web Client ID is not configured. '
         'Provide KEYNEST_GOOGLE_WEB_CLIENT_ID via cloud_config.json (--dart-define-from-file) '
@@ -348,80 +354,85 @@ class GisGoogleTokenSource implements GoogleDriveTokenSource {
       return _inMemoryAccessToken;
     }
 
-    final signedIn = await isSignedIn();
-    if (!signedIn) {
-      return null;
-    }
-
-    if (!forceRefresh &&
-        _inMemoryAccessToken != null &&
-        (_tokenExpiresAt == null || now.isBefore(_tokenExpiresAt!))) {
-      return _inMemoryAccessToken;
-    }
-
-    final effectiveEmail = _currentUser?.email ?? _cachedEmail;
-    if (effectiveEmail == null || effectiveEmail.isEmpty) {
-      return _inMemoryAccessToken;
-    }
-
-    if (forceRefresh && _inMemoryAccessToken != null) {
-      await clearCachedAccessToken();
-    }
-
-    String? freshToken;
-
-    // 1. If we have _currentUser in memory, try silent non-interactive authorization
-    if (_currentUser != null) {
-      try {
-        final clientAuth = await _currentUser!.authorizationClient
-            .authorizationForScopes(_scopes);
-        freshToken = clientAuth?.accessToken;
-      } catch (e) {
-        _logger.fine('Silent authorization via current user failed: $e');
+    return _refreshLock.synchronized(() async {
+      final refreshedNow = DateTime.now();
+      if (!forceRefresh &&
+          _inMemoryAccessToken != null &&
+          _tokenExpiresAt != null &&
+          refreshedNow.isBefore(_tokenExpiresAt!)) {
+        return _inMemoryAccessToken;
       }
-    }
 
-    // 2. Query platform authorization silently with promptIfUnauthorized: false
-    // This allows Android / platform Google Play Services to silently restore/refresh
-    // tokens using the saved account email WITHOUT summoning Credential Manager bottom sheets,
-    // passkeys, or account-picker dialogs.
-    if (freshToken == null || freshToken.isEmpty) {
-      try {
-        final tokenData = await GoogleSignInPlatform.instance
-            .clientAuthorizationTokensForScopes(
-              ClientAuthorizationTokensForScopesParameters(
-                request: AuthorizationRequestDetails(
-                  scopes: _scopes,
-                  userId: _currentUser?.id,
-                  email: effectiveEmail,
-                  promptIfUnauthorized: false,
+      final signedIn = await isSignedIn();
+      if (!signedIn) {
+        return null;
+      }
+
+      if (!forceRefresh &&
+          _inMemoryAccessToken != null &&
+          (_tokenExpiresAt == null || refreshedNow.isBefore(_tokenExpiresAt!))) {
+        return _inMemoryAccessToken;
+      }
+
+      final effectiveEmail = _currentUser?.email ?? _cachedEmail;
+      if (effectiveEmail == null || effectiveEmail.isEmpty) {
+        return _inMemoryAccessToken;
+      }
+
+      if (forceRefresh && _inMemoryAccessToken != null) {
+        await clearCachedAccessToken();
+      }
+
+      String? freshToken;
+
+      // 1. If we have _currentUser in memory, try silent non-interactive authorization
+      if (_currentUser != null) {
+        try {
+          final clientAuth = await _currentUser!.authorizationClient
+              .authorizationForScopes(_scopes);
+          freshToken = clientAuth?.accessToken;
+        } catch (e) {
+          _logger.fine('Silent authorization via current user failed: $e');
+        }
+      }
+
+      // 2. Query platform authorization silently with promptIfUnauthorized: false
+      if (freshToken == null || freshToken.isEmpty) {
+        try {
+          final tokenData = await GoogleSignInPlatform.instance
+              .clientAuthorizationTokensForScopes(
+                ClientAuthorizationTokensForScopesParameters(
+                  request: AuthorizationRequestDetails(
+                    scopes: _scopes,
+                    userId: _currentUser?.id,
+                    email: effectiveEmail,
+                    promptIfUnauthorized: false,
+                  ),
                 ),
-              ),
-            );
-        freshToken = tokenData?.accessToken;
-      } catch (e) {
-        _logger.fine('Silent token fetch via GoogleSignInPlatform failed: $e');
+              );
+          freshToken = tokenData?.accessToken;
+        } catch (e) {
+          _logger.fine('Silent token fetch via GoogleSignInPlatform failed: $e');
+        }
       }
-    }
 
-    if (freshToken != null && freshToken.isNotEmpty) {
-      _inMemoryAccessToken = freshToken;
-      _tokenExpiresAt = DateTime.now().add(const Duration(minutes: 55));
-      await _saveAccountMetadata(
-        effectiveEmail,
-        _currentUser?.displayName ?? _cachedDisplayName,
-        accessToken: _inMemoryAccessToken,
-        expiresAt: _tokenExpiresAt,
-      );
-      return _inMemoryAccessToken;
-    }
+      if (freshToken != null && freshToken.isNotEmpty) {
+        _inMemoryAccessToken = freshToken;
+        _tokenExpiresAt = DateTime.now().add(const Duration(minutes: 55));
+        await _saveAccountMetadata(
+          effectiveEmail,
+          _currentUser?.displayName ?? _cachedDisplayName,
+          accessToken: _inMemoryAccessToken,
+          expiresAt: _tokenExpiresAt,
+        );
+        return _inMemoryAccessToken;
+      }
 
-    // If silent acquisition did not yield a fresh token, never trigger interactive UI.
-    // Return existing cached token if available as a best effort, otherwise null.
-    if (_inMemoryAccessToken != null) {
-      return _inMemoryAccessToken;
-    }
-    return null;
+      if (_inMemoryAccessToken != null) {
+        return _inMemoryAccessToken;
+      }
+      return null;
+    });
   }
 
   @override
@@ -487,6 +498,7 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
   GoogleTokenResponse? _inMemoryToken;
   String? _currentAccountEmail;
   String? _currentDisplayName;
+  final Lock _refreshLock = Lock();
 
   @override
   String? get currentAccountEmail => _currentAccountEmail;
@@ -499,27 +511,34 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
     if (_inMemoryToken != null && !_inMemoryToken!.isExpired) {
       return true;
     }
-    final storedRefresh = await _loadStoredRefreshToken();
-    if (storedRefresh != null && storedRefresh.isNotEmpty) {
-      try {
-        final token = await _refreshToken(storedRefresh);
-        _inMemoryToken = token;
-        return true;
-      } on GoogleDriveInvalidGrantException {
-        // Refresh token was genuinely revoked or expired
-        _logger.warning('Google Drive refresh token revoked or expired.');
-        await disconnect();
-        return false;
-      } catch (e) {
-        // Temporary network error or offline on startup!
-        // DO NOT mark disconnected. We have a valid stored refresh token.
-        _logger.warning(
-          'Offline or network error during Google Drive token check: $e',
-        );
+    return _refreshLock.synchronized(() async {
+      if (_inMemoryToken != null && !_inMemoryToken!.isExpired) {
         return true;
       }
-    }
-    return false;
+      final storedRefresh = await _loadStoredRefreshToken();
+      if (storedRefresh != null && storedRefresh.isNotEmpty) {
+        try {
+          final token = await _refreshToken(storedRefresh);
+          _inMemoryToken = token;
+          if (token.refreshToken != null &&
+              token.refreshToken!.isNotEmpty &&
+              token.refreshToken != storedRefresh) {
+            await _saveStoredRefreshToken(token.refreshToken!);
+          }
+          return true;
+        } on GoogleDriveInvalidGrantException {
+          _logger.warning('Google Drive refresh token revoked or expired.');
+          await disconnect();
+          return false;
+        } catch (e) {
+          _logger.warning(
+            'Offline or network error during Google Drive token check: $e',
+          );
+          return true;
+        }
+      }
+      return false;
+    });
   }
 
   @override
@@ -543,7 +562,7 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
 
     final completer = Completer<String?>();
 
-    // Listen for incoming redirect once
+    // Listen for incoming redirect once (ignoring /favicon.ico or unrelated probes)
     server.listen((HttpRequest request) async {
       final uri = request.uri;
       final queryParams = uri.queryParameters;
@@ -552,12 +571,18 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
       final code = queryParams['code'];
       final error = queryParams['error'];
 
+      if (uri.path == '/favicon.ico' || (code == null && error == null)) {
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+        return;
+      }
+
       if (incomingState != session.state) {
         request.response
           ..statusCode = HttpStatus.badRequest
           ..headers.contentType = ContentType.html
           ..write(
-            '<html><body><h2>Authentication failed: State parameter mismatch.</h2></body></html>',
+            '<html><head><meta charset="utf-8"></head><body><h2>Authentication failed: State parameter mismatch.</h2></body></html>',
           );
         await request.response.close();
         if (!completer.isCompleted) {
@@ -568,11 +593,30 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
       }
 
       if (error != null) {
+        final safeErrorDesc = const HtmlEscape().convert(
+          queryParams['error_description'] ??
+              'Authorization was cancelled. You may close this window.',
+        );
         request.response
           ..statusCode = HttpStatus.ok
           ..headers.contentType = ContentType.html
           ..write(
-            '<html><body><h2>Authorization was cancelled. You may close this window.</h2></body></html>',
+            '<html><head><meta charset="utf-8"></head><body><h2>Authorization Cancelled</h2><p>$safeErrorDesc</p></body></html>',
+          );
+        await request.response.close();
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+        await server.close(force: true);
+        return;
+      }
+
+      if (code == null || code.trim().isEmpty) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..headers.contentType = ContentType.html
+          ..write(
+            '<html><head><meta charset="utf-8"></head><body><h2>Missing authorization code.</h2></body></html>',
           );
         await request.response.close();
         if (!completer.isCompleted) {
@@ -586,11 +630,11 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
         ..statusCode = HttpStatus.ok
         ..headers.contentType = ContentType.html
         ..write(
-          '<html><body><h2>KeyNest Google Drive connection successful! You can close this window.</h2></body></html>',
+          '<html><head><meta charset="utf-8"></head><body><h2>KeyNest Google Drive connection successful! You can close this window.</h2></body></html>',
         );
       await request.response.close();
       if (!completer.isCompleted) {
-        completer.complete(code);
+        completer.complete(code.trim());
       }
       await server.close(force: true);
     });
@@ -714,14 +758,27 @@ class PkceDesktopGoogleTokenSource implements GoogleDriveTokenSource {
       return _inMemoryToken!.accessToken;
     }
 
-    final storedRefresh = await _loadStoredRefreshToken();
-    if (storedRefresh == null || storedRefresh.isEmpty) {
-      return null;
-    }
+    return _refreshLock.synchronized(() async {
+      if (!forceRefresh &&
+          _inMemoryToken != null &&
+          !_inMemoryToken!.isExpired) {
+        return _inMemoryToken!.accessToken;
+      }
 
-    final token = await _refreshToken(storedRefresh);
-    _inMemoryToken = token;
-    return token.accessToken;
+      final storedRefresh = await _loadStoredRefreshToken();
+      if (storedRefresh == null || storedRefresh.isEmpty) {
+        return null;
+      }
+
+      final token = await _refreshToken(storedRefresh);
+      _inMemoryToken = token;
+      if (token.refreshToken != null &&
+          token.refreshToken!.isNotEmpty &&
+          token.refreshToken != storedRefresh) {
+        await _saveStoredRefreshToken(token.refreshToken!);
+      }
+      return token.accessToken;
+    });
   }
 
   @override

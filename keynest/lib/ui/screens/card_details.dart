@@ -22,7 +22,10 @@ class CardDetailsScreen extends StatefulWidget {
 
   static Route<void> route({required KdbxEntry entry}) => KeyNestPageRoute(
     settings: const RouteSettings(name: '/cardDetails'),
-    builder: (context) => CardDetailsScreen(entry: entry),
+    builder: (context) => CardDetailsScreen(
+      key: ValueKey(entry.uuid),
+      entry: entry,
+    ),
   );
 
   final KdbxEntry entry;
@@ -136,10 +139,14 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
         ? entry.label!
         : 'Card Details';
     final holder = entry.getString(KdbxKey('Cardholder'))?.getText() ?? '';
-    final number = entry.getString(KdbxKeyCommon.PASSWORD)?.getText() ?? '';
+    final pwNumber = entry.getString(KdbxKeyCommon.PASSWORD)?.getText() ?? '';
+    final number = pwNumber.isNotEmpty
+        ? pwNumber
+        : (entry.getString(KdbxKey('CardNumber'))?.getText() ?? '');
     final expiry = entry.getString(KdbxKey('Expiry'))?.getText() ?? '';
     final cvv = entry.getString(KdbxKey('CVV'))?.getText() ?? '';
     final pin = entry.getString(KdbxKey('PIN'))?.getText() ?? '';
+    final notes = entry.getString(KdbxKey('Notes'))?.getText()?.trim() ?? '';
     final network = entry.getString(KdbxKey('Network'))?.getText() ?? 'Auto';
 
     final colorHex = entry.getString(KdbxKey('CardColorHex'))?.getText();
@@ -197,6 +204,28 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         actions: [
+          IconButton(
+            tooltip: KeyNestItemTypeHelper.isFavorite(entry)
+                ? 'Remove from Favorites'
+                : 'Add to Favorites',
+            icon: Icon(
+              KeyNestItemTypeHelper.isFavorite(entry)
+                  ? Icons.star_rounded
+                  : Icons.star_outline_rounded,
+              color: KeyNestItemTypeHelper.isFavorite(entry)
+                  ? Colors.amber
+                  : (isDark
+                        ? KeyNestPalette.textSecondaryDark
+                        : KeyNestPalette.textSecondaryLight),
+            ),
+            onPressed: () async {
+              final kdbxBloc = context.read<KdbxBloc>();
+              await KeyNestItemTypeHelper.toggleFavorite(entry, kdbxBloc);
+              if (mounted) {
+                setState(() {});
+              }
+            },
+          ),
           // Edit Button
           TextButton.icon(
             style: TextButton.styleFrom(
@@ -231,17 +260,21 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                 final kdbxBloc = context.read<KdbxBloc>();
                 final navigator = Navigator.of(context);
                 final scaffoldMessenger = ScaffoldMessenger.of(context);
+                final isTrash =
+                    KeyNestItemTypeHelper.isEntryInTrash(widget.entry);
                 final confirm = await DialogUtils.showConfirmDialog(
                   context: context,
                   params: ConfirmDialogParams(
-                    title: 'Delete Card',
-                    content:
-                        'Are you sure you want to delete this payment card?',
-                    positiveButtonText: 'Delete',
+                    title: isTrash ? 'Delete Permanently' : 'Delete Card',
+                    content: isTrash
+                        ? 'Are you sure you want to permanently delete this card? This action cannot be undone.'
+                        : 'Are you sure you want to delete this payment card?',
+                    positiveButtonText:
+                        isTrash ? 'Delete Permanently' : 'Delete',
                   ),
                 );
                 if (confirm == true && mounted) {
-                  if (KeyNestItemTypeHelper.isEntryInTrash(widget.entry)) {
+                  if (isTrash) {
                     widget.entry.file.deletePermanently(widget.entry);
                   } else {
                     widget.entry.file.deleteEntry(widget.entry);
@@ -253,9 +286,13 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                     navigator.pop();
                     scaffoldMessenger.clearSnackBars();
                     scaffoldMessenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Card deleted successfully'),
-                        duration: Duration(milliseconds: 1800),
+                      SnackBar(
+                        content: Text(
+                          isTrash
+                              ? 'Card permanently deleted'
+                              : 'Card deleted successfully',
+                        ),
+                        duration: const Duration(milliseconds: 1800),
                       ),
                     );
                   }
@@ -572,6 +609,16 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                 value: network,
                 icon: Icons.account_balance_wallet_outlined,
               ),
+
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                _InfoTile(
+                  label: 'Notes',
+                  value: notes,
+                  icon: Icons.notes_rounded,
+                  onCopy: () => _copyToClipboard('Notes', notes),
+                ),
+              ],
 
               if ((entry.getString(KdbxKey('Tags'))?.getText()?.trim().isNotEmpty == true) ||
                   (entry.tags.get()?.trim().isNotEmpty == true)) ...[

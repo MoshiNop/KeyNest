@@ -92,7 +92,6 @@ object AutofillSecurityHelper {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .setRandomizedEncryptionRequired(false) // Allows passing our own fresh 96-bit IV
             .build()
         keyGenerator.init(spec)
         return keyGenerator.generateKey()
@@ -106,23 +105,33 @@ object AutofillSecurityHelper {
      */
     fun encrypt(alias: String, plaintext: String): String? {
         if (plaintext.isEmpty()) return ""
+        return encryptInternal(alias, plaintext, allowKeyResetRetry = true)
+    }
+
+    private fun encryptInternal(alias: String, plaintext: String, allowKeyResetRetry: Boolean): String? {
         return try {
             val secretKey = getOrCreateSecretKey(alias)
-            val iv = ByteArray(IV_LENGTH_BYTES).apply { secureRandom.nextBytes(this) }
             val cipher = Cipher.getInstance(TRANSFORMATION)
-            try {
-                cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
-            } catch (e: java.security.InvalidAlgorithmParameterException) {
-                // In case Keystore provider enforces internal IV generation
+            val fallbackIv: ByteArray?
+            if (isAndroidKeyStoreAvailable()) {
+                fallbackIv = null
                 cipher.init(Cipher.ENCRYPT_MODE, secretKey)
+            } else {
+                fallbackIv = ByteArray(IV_LENGTH_BYTES).apply { secureRandom.nextBytes(this) }
+                cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, fallbackIv))
             }
-            val actualIv = cipher.iv ?: iv
+            val actualIv = cipher.iv ?: fallbackIv ?: ByteArray(IV_LENGTH_BYTES)
             val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
             val combined = ByteArray(actualIv.size + ciphertext.size)
             System.arraycopy(actualIv, 0, combined, 0, actualIv.size)
             System.arraycopy(ciphertext, 0, combined, actualIv.size, ciphertext.size)
             encodeBase64(combined)
         } catch (e: Exception) {
+            if (allowKeyResetRetry && isAndroidKeyStoreAvailable()) {
+                logger.warn { "Encryption failed for alias $alias (${e.message}), resetting key and retrying" }
+                deleteKey(alias)
+                return encryptInternal(alias, plaintext, allowKeyResetRetry = false)
+            }
             logger.warn { "Encryption failed for alias $alias: ${e.message}" }
             null
         }

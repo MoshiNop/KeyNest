@@ -31,7 +31,7 @@ abstract class HttpStatus {
 
 class WebDavClient extends NegotiateAuthClient {
   WebDavClient(this.credentials)
-    : super(credentials.username!, credentials.password!);
+    : super(credentials.username ?? '', credentials.password ?? '');
 
   UserNamePasswordCredentials credentials;
 }
@@ -46,6 +46,37 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
   static const METHOD_HEAD = 'HEAD'; // NON-NLS
   static const METHOD_PUT = 'PUT'; // NON-NLS
   static const METHOD_PROPFIND = 'PROPFIND'; // NON-NLS
+
+  /// Enforces HTTPS for remote WebDAV servers so Basic/Digest credentials and
+  /// vault payloads are never transmitted in cleartext over untrusted networks.
+  /// Loopback addresses (`localhost`, `127.0.0.1`, `::1`) are permitted over
+  /// `http://` for local self-hosted development/testing bridges.
+  static void validateSecureWebDavUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw ArgumentError('Invalid WebDAV URL: $rawUrl');
+    }
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme == 'https') {
+      return;
+    }
+    if (scheme == 'http') {
+      final host = uri.host.toLowerCase();
+      if (host == 'localhost' ||
+          host == '127.0.0.1' ||
+          host == '::1' ||
+          host == '[::1]') {
+        return;
+      }
+      throw ArgumentError(
+        'Insecure WebDAV URL rejected: remote WebDAV servers must use https://.',
+      );
+    }
+    throw ArgumentError(
+      'Unsupported WebDAV URL scheme "${uri.scheme}". Expected https://.',
+    );
+  }
 
   xml.XmlNode _propfindRequest() {
     return nonNls(() {
@@ -97,8 +128,9 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
       _logger.finer('prompt was canceled by user.');
       return null;
     }
+    validateSecureWebDavUrl(result.url);
     final credentials = UserNamePasswordCredentials(
-      baseUrl: result.url,
+      baseUrl: result.url.trim(),
       username: result.username,
       password: result.password,
     );
@@ -117,8 +149,9 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
     required String username,
     required String password,
   }) async {
+    validateSecureWebDavUrl(url);
     final credentials = UserNamePasswordCredentials(
-      baseUrl: url,
+      baseUrl: url.trim(),
       username: username,
       password: password,
     );
@@ -136,6 +169,7 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
     final credentials = UserNamePasswordCredentials.fromJson(
       json.decode(stored) as Map<String, dynamic>,
     );
+    validateSecureWebDavUrl(credentials.baseUrl);
     return WebDavClient(credentials);
   }
 
@@ -227,9 +261,14 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
           .map((entity) {
             final hrefEls = entity.findAllElements('href', namespace: 'DAV:');
             final href = hrefEls.isEmpty ? null : hrefEls.first.innerText;
-            final resourcetype = entity
-                .findAllElements('resourcetype', namespace: 'DAV:')
-                .first;
+            final rtEls = entity.findAllElements(
+              'resourcetype',
+              namespace: 'DAV:',
+            );
+            if (href == null || rtEls.isEmpty) {
+              return null;
+            }
+            final resourcetype = rtEls.first;
             final isFolder = resourcetype
                 .findElements('collection', namespace: 'DAV:')
                 .isNotEmpty;
@@ -243,7 +282,7 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
               return null;
             }
 
-            final cse = _toCloudStorageEntity(client, href!, type);
+            final cse = _toCloudStorageEntity(client, href, type);
             final uri = _uriForEntity(client, cse);
             if (uri == parentUri) {
               return null;
@@ -273,18 +312,21 @@ class WebDavProvider extends CloudStorageProviderClientBase<WebDavClient> {
     _logger.fine(
       'Cloud entity to href: $href (pathSegments: ${hrefUri.pathSegments})',
     );
-    final basePath = path.joinAll(
-      Uri.parse(client.credentials.baseUrl).pathSegments,
-    );
-    final pathSegments = hrefUri.pathSegments.where((val) => val.isNotEmpty);
+    final baseSegments = Uri.parse(
+      client.credentials.baseUrl,
+    ).pathSegments.where((s) => s.isNotEmpty).toList();
+    final hrefSegments = hrefUri.pathSegments
+        .where((val) => val.isNotEmpty)
+        .toList();
+    final basePath = baseSegments.isEmpty ? '.' : path.url.joinAll(baseSegments);
+    final hrefPath = hrefSegments.isEmpty ? '.' : path.url.joinAll(hrefSegments);
+    final relPath = path.url.relative(hrefPath, from: basePath);
     return CloudStorageEntity(
       (b) => b
         ..id = href
         ..type = type
-        ..path =
-            Nls.SLASH +
-            path.relative(path.joinAll(hrefUri.pathSegments), from: basePath)
-        ..name = pathSegments.isEmpty ? Nls.SLASH : pathSegments.last,
+        ..path = Nls.SLASH + (relPath == '.' ? '' : relPath)
+        ..name = hrefSegments.isEmpty ? Nls.SLASH : hrefSegments.last,
     );
   }
 

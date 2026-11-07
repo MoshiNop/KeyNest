@@ -107,7 +107,10 @@ class AutofillResumeHelper {
       if (meta != null) {
         for (final domain in meta.webDomains) {
           if (domain.domain.isNotEmpty) {
-            requests.add(CredentialRequest.web('https://${domain.domain}'));
+            final scheme = (domain.scheme != null && domain.scheme!.trim().isNotEmpty)
+                ? domain.scheme!.trim().toLowerCase()
+                : 'https';
+            requests.add(CredentialRequest.web('$scheme://${domain.domain}'));
           }
         }
         for (final pkg in meta.packageNames) {
@@ -132,7 +135,7 @@ class AutofillResumeHelper {
       KdbxEntry? carryoverMatch;
       KdbxEntry? explicitlySelectedEntry;
 
-      final openFiles = kdbxBloc.openedFilesKdbx;
+      final openFiles = kdbxBloc.autofillEnabledFilesKdbx;
       for (final file in openFiles) {
         for (final entry in file.body.rootGroup.getAllEntries()) {
           if (entry.isInRecycleBin()) {
@@ -164,7 +167,8 @@ class AutofillResumeHelper {
             final quality = matcher.matchBest(requests, allUrls);
             if (quality == CredentialMatchQuality.host ||
                 quality == CredentialMatchQuality.registrableDomain ||
-                quality == CredentialMatchQuality.application) {
+                quality == CredentialMatchQuality.application ||
+                quality == CredentialMatchQuality.associatedApplication) {
               matchingEntries.add(entry);
             }
           }
@@ -211,7 +215,8 @@ class AutofillResumeHelper {
           final isMatchingOrigin =
               quality == CredentialMatchQuality.host ||
               quality == CredentialMatchQuality.registrableDomain ||
-              quality == CredentialMatchQuality.application;
+              quality == CredentialMatchQuality.application ||
+              quality == CredentialMatchQuality.associatedApplication;
           if (!isMatchingOrigin) {
             if (context.mounted) {
               final confirmed = await _confirmOriginMismatch(

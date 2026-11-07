@@ -158,14 +158,14 @@ class FlutterMyAutofillService : AutofillService() {
         parser.packageName.firstOrNull()?.let {
             startIntent.putExtra("autofillPackageName", it)
         }
-        val primaryDomain = parser.getPrimaryWebDomain()
+        val primaryDomain = parser.getPrimaryWebDomain(applicationContext)
         if (!primaryDomain.isNullOrBlank()) {
             startIntent.putExtra("autofillWebDomain", primaryDomain)
         }
 
         startIntent.putExtra(
             AutofillMetadata.EXTRA_NAME,
-            AutofillMetadata(parser.packageName, parser.webDomain).toJsonString()
+            AutofillMetadata(parser.packageName, parser.getVerifiedWebDomains(applicationContext)).toJsonString()
         )
         startIntent.putExtra(AutofillManager.EXTRA_ASSIST_STRUCTURE, context.structure)
 
@@ -194,23 +194,24 @@ class FlutterMyAutofillService : AutofillService() {
         } else {
             PendingIntent.FLAG_UPDATE_CURRENT
         }
+        val reqCodeBase = ((request.id and 0x07FF) * 1000)
         val intentSender: IntentSender = PendingIntent.getActivity(
             this,
-            0,
+            reqCodeBase,
             startIntent,
             piFlags
         ).intentSender
 
         val pickerSender: IntentSender = PendingIntent.getActivity(
             this,
-            1, // request code 1 for dataset picker
+            reqCodeBase + 1, // request code for dataset picker
             pickerIntent,
             piFlags
         ).intentSender
 
         val responsePickerSender: IntentSender = PendingIntent.getActivity(
             this,
-            2, // request code 2 for response picker
+            reqCodeBase + 2, // request code for response picker
             responsePickerIntent,
             piFlags
         ).intentSender
@@ -219,7 +220,7 @@ class FlutterMyAutofillService : AutofillService() {
         val targetPackage = parser.getTargetPackage().ifBlank {
             allContextParsers.firstNotNullOfOrNull { it.getTargetPackage().takeIf { p -> p.isNotBlank() } } ?: ""
         }
-        val rawDomain = (parser.getPrimaryWebDomain() ?: allContextParsers.firstNotNullOfOrNull { it.getPrimaryWebDomain() }) ?: ""
+        val rawDomain = (parser.getPrimaryWebDomain(applicationContext) ?: allContextParsers.firstNotNullOfOrNull { it.getPrimaryWebDomain(applicationContext) }) ?: ""
         val targetDomain = AssistStructureParser.sanitizeWebDomain(rawDomain) ?: ""
 
         val confirmPwFieldsLatest = parser.fieldIds[AutofillInputType.ConfirmPassword] ?: emptyList()
@@ -472,7 +473,7 @@ class FlutterMyAutofillService : AutofillService() {
         if (AutofillCredentialStore.isAutoLockExpired()) {
             AutofillCredentialStore.clear()
         }
-        if (AutofillCredentialStore.isLocked) {
+        if (!AutofillCredentialStore.hasUnlockedEntries()) {
             AutofillRequestStore.saveRequest(
                 authLevel = "dataset",
                 packageName = targetPackage,
@@ -491,7 +492,7 @@ class FlutterMyAutofillService : AutofillService() {
             if (isTotpVerification) {
                 // 2FA Verification page while locked:
                 val pendingLogin = AutofillCredentialStore.getValidPendingLogin(contextKey)
-                val lockedMatches = AutofillCredentialStore.findMatches(targetPackage, targetDomain).toMutableList()
+                val lockedMatches = AutofillCredentialStore.findMatches(targetPackage, targetDomain, applicationContext).toMutableList()
                 val exactEntry = if (pendingLogin != null) {
                     AutofillCredentialStore.getMetadataEntries().firstOrNull { it.id == pendingLogin.entryId }
                         ?: lockedMatches.firstOrNull { it.id == pendingLogin.entryId }
@@ -507,7 +508,7 @@ class FlutterMyAutofillService : AutofillService() {
                     if (totpMatches.isNotEmpty()) totpMatches else lockedMatches
                 }
 
-                var totpIntentCodeCounter = 2000
+                var totpIntentCodeCounter = reqCodeBase + 500
                 for (entry in entriesToSuggest) {
                     val subtitleText = if (entry.username.isNotBlank()) {
                         "${entry.label} (${entry.username}) • Tap to unlock"
@@ -521,9 +522,11 @@ class FlutterMyAutofillService : AutofillService() {
                         iconBytes = entry.iconBytes,
                         isLocked = true
                     )
+                    val fastFillNonce = AutofillRequestStore.issueFastFillToken(request.id, entry.id)
                     val entryIntent = Intent(startIntent).apply {
                         action = "com.moshinop.autofill_service.FILL_ENTRY"
                         putExtra("selectedEntryId", entry.id)
+                        putExtra("fastFillNonce", fastFillNonce)
                         putExtra("isTotp", true)
                         putExtra("forceCredentialPicker", false)
                         putExtra("autofillAuthLevel", "dataset")
@@ -548,7 +551,7 @@ class FlutterMyAutofillService : AutofillService() {
                 }
             } else {
                 // Standard locked credential page:
-                val lockedMatches = AutofillCredentialStore.findMatches(targetPackage, targetDomain).toMutableList()
+                val lockedMatches = AutofillCredentialStore.findMatches(targetPackage, targetDomain, applicationContext).toMutableList()
                 val isPasswordOnlyScreen = passwordFields.isNotEmpty() && usernameFields.isEmpty()
 
                 if (isPasswordOnlyScreen && lockedMatches.isNotEmpty()) {
@@ -604,7 +607,7 @@ class FlutterMyAutofillService : AutofillService() {
                 }
 
                 if (lockedMatches.isNotEmpty()) {
-                    var intentCodeCounter = 1000
+                    var intentCodeCounter = reqCodeBase + 100
                     for (entry in lockedMatches.take(20)) {
                         val hasUser = entry.username.isNotBlank()
                         val hasMail = !entry.email.isNullOrBlank() && !entry.email.equals(entry.username, ignoreCase = true)
@@ -618,9 +621,11 @@ class FlutterMyAutofillService : AutofillService() {
                                     iconBytes = entry.iconBytes,
                                     isLocked = true
                                 )
+                                val fastFillNonce = AutofillRequestStore.issueFastFillToken(request.id, entry.id)
                                 val entryIntent = Intent(startIntent).apply {
                                     action = "com.moshinop.autofill_service.FILL_ENTRY"
                                     putExtra("selectedEntryId", entry.id)
+                                    putExtra("fastFillNonce", fastFillNonce)
                                     putExtra("fillIdentifier", identifierType)
                                     putExtra("selectedIdentifier", identifierVal)
                                     putExtra("forceCredentialPicker", false)
@@ -666,9 +671,11 @@ class FlutterMyAutofillService : AutofillService() {
                                 iconBytes = entry.iconBytes,
                                 isLocked = true
                             )
+                            val fastFillNonce = AutofillRequestStore.issueFastFillToken(request.id, entry.id)
                             val entryIntent = Intent(startIntent).apply {
                                 action = "com.moshinop.autofill_service.FILL_ENTRY"
                                 putExtra("selectedEntryId", entry.id)
+                                putExtra("fastFillNonce", fastFillNonce)
                                 putExtra("fillIdentifier", identifierType)
                                 putExtra("selectedIdentifier", subtitle ?: "")
                                 putExtra("forceCredentialPicker", false)
@@ -719,7 +726,7 @@ class FlutterMyAutofillService : AutofillService() {
         } else {
             // Unlocked: find matching entries from in-memory credential store
             AutofillCredentialStore.touchActive()
-            val matches = AutofillCredentialStore.findMatches(targetPackage, targetDomain).toMutableList()
+            val matches = AutofillCredentialStore.findMatches(targetPackage, targetDomain, applicationContext).toMutableList()
 
             val pendingLogin = AutofillCredentialStore.getValidPendingLogin(contextKey)
 
@@ -1105,6 +1112,28 @@ class FlutterMyAutofillService : AutofillService() {
                                 }
                             }
 
+                            // 4. Fallback anchor: ensure dataset has at least one value set if focused input wasn't categorized
+                            if (filledIds.isEmpty()) {
+                                val fallbackTargetId = focusedAutofillId
+                                    ?: candidateInputIds.firstOrNull()
+                                    ?: autoFillIds.firstOrNull()
+                                if (fallbackTargetId != null && filledIds.add(fallbackTargetId)) {
+                                    val fallbackText = identifierVal.ifBlank { entry.username.ifBlank { entry.email ?: "" } }
+                                    val fallbackPresentation = RemoteViewsHelper.viewsWithCredential(
+                                        packageName = packageName,
+                                        title = entry.label,
+                                        subtitle = fallbackText.ifBlank { null },
+                                        iconBytes = entry.iconBytes,
+                                        isLocked = false
+                                    )
+                                    datasetBuilder.setValue(
+                                        fallbackTargetId,
+                                        AutofillValue.forText(fallbackText),
+                                        fallbackPresentation
+                                    )
+                                }
+                            }
+
                             return datasetBuilder.build()
                         }
 
@@ -1248,10 +1277,10 @@ class FlutterMyAutofillService : AutofillService() {
             for (context in request.fillContexts) {
                 val parser = AssistStructureParser(context.structure)
                 if (targetPackage.isBlank()) {
-                    targetPackage = parser.packageName.firstOrNull() ?: ""
+                    targetPackage = parser.getTargetPackage()
                 }
                 if (targetDomain.isBlank()) {
-                    targetDomain = parser.getPrimaryWebDomain() ?: ""
+                    targetDomain = parser.getPrimaryWebDomain(applicationContext) ?: ""
                 }
 
                 val confirmIds = (parser.fieldIds[AutofillInputType.ConfirmPassword] ?: emptyList()).map { it.autofillId }.toSet()
@@ -1322,7 +1351,7 @@ class FlutterMyAutofillService : AutofillService() {
             // "never treat a mismatched confirmation password as the actual password."
             if (confirmPassword.isNotBlank() && effectivePassword.isNotBlank()) {
                 if (confirmPassword != effectivePassword) {
-                    logger.warn { "Confirmation password mismatch ($confirmPassword vs $effectivePassword). Aborting save." }
+                    logger.warn { "Confirmation password mismatch in onSaveRequest. Aborting save." }
                     callback.onSuccess()
                     return
                 }
@@ -1335,7 +1364,7 @@ class FlutterMyAutofillService : AutofillService() {
             }
 
             // Determine if updating an existing entry
-            val matches = AutofillCredentialStore.findMatches(targetPackage, targetDomain)
+            val matches = AutofillCredentialStore.findMatches(targetPackage, targetDomain, applicationContext)
             val hasExistingMatch = matches.any {
                 it.username.trim().equals(username.trim(), ignoreCase = true)
             } || (matches.size == 1 && isPasswordChange)

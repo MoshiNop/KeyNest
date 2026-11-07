@@ -91,7 +91,12 @@ class _AboutScreenState extends State<AboutScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final bgColor = isDark ? KeyNestTokens.darkBackground : KeyNestTokens.lightBackground;
+    final accentColor = isDark
+        ? KeyNestPalette.primaryDark
+        : KeyNestPalette.primary;
+    final bgColor = isDark
+        ? KeyNestTokens.darkBackground
+        : KeyNestTokens.lightBackground;
     final cardBg = (isDark ? const Color(0xFF161B26) : Colors.white).withValues(
       alpha: isDark ? 0.90 : 0.96,
     );
@@ -112,12 +117,12 @@ class _AboutScreenState extends State<AboutScreen> {
         actions: [
           IconButton(
             icon: _isRefreshing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(_accentColor),
+                      valueColor: AlwaysStoppedAnimation<Color>(accentColor),
                     ),
                   )
                 : const Icon(Icons.refresh_rounded),
@@ -127,7 +132,7 @@ class _AboutScreenState extends State<AboutScreen> {
         ],
       ),
       body: RefreshIndicator(
-        color: _accentColor,
+        color: accentColor,
         onRefresh: _handleRefresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -763,13 +768,16 @@ class _AboutScreenState extends State<AboutScreen> {
   }
 
   Widget _buildLoadingState(bool isDark) {
+    final accentColor = isDark
+        ? KeyNestPalette.primaryDark
+        : KeyNestPalette.primary;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 40),
       child: Center(
         child: Column(
           children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(_accentColor),
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(accentColor),
               strokeWidth: 2.5,
             ),
             const SizedBox(height: 16),

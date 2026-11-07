@@ -206,3 +206,43 @@ class KeyNestDialog extends StatelessWidget {
     );
   }
 }
+
+/// Contract for detail pane screens that hold unsaved edits in split-view layouts.
+abstract class KeyNestDetailPaneGuard {
+  bool get hasUnsavedChanges;
+  Future<bool> confirmDiscardChanges();
+
+  static KeyNestDetailPaneGuard? findActiveInSubtree(
+    BuildContext? rootContext,
+  ) {
+    if (rootContext == null) {
+      return null;
+    }
+    KeyNestDetailPaneGuard? activeGuard;
+    void visit(Element element) {
+      if (activeGuard != null) {
+        return;
+      }
+      if (element is StatefulElement &&
+          element.state is KeyNestDetailPaneGuard) {
+        final guard = element.state as KeyNestDetailPaneGuard;
+        if (guard.hasUnsavedChanges) {
+          activeGuard = guard;
+          return;
+        }
+      }
+      element.visitChildren(visit);
+    }
+
+    rootContext.visitChildElements(visit);
+    return activeGuard;
+  }
+
+  static Future<bool> confirmDiscardInSubtree(BuildContext? rootContext) async {
+    final guard = findActiveInSubtree(rootContext);
+    if (guard == null) {
+      return true;
+    }
+    return guard.confirmDiscardChanges();
+  }
+}

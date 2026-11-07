@@ -359,6 +359,12 @@ object AutofillCredentialStore {
         }
     }
 
+    fun hasUnlockedEntries(): Boolean {
+        synchronized(lock) {
+            return isUnlockedAndActive() && _entries.isNotEmpty()
+        }
+    }
+
     fun clear() {
         synchronized(lock) {
             _entries.clear()
@@ -368,9 +374,8 @@ object AutofillCredentialStore {
             lastUnlockedTimestamp = 0L
             lastActiveTimestamp = 0L
             isLocked = true
-            AutofillRequestStore.clear()
-            // Non-sensitive _metadataEntries are safely retained so suggestions
-            // can still be displayed while locked without exposing secrets
+            // Non-sensitive _metadataEntries and active AutofillRequestStore context are safely
+            // retained so locked suggestions and in-flight suggestion taps can complete unlock.
         }
     }
 
@@ -381,6 +386,7 @@ object AutofillCredentialStore {
     fun clearAll(context: Context? = null) {
         synchronized(lock) {
             clear()
+            AutofillRequestStore.clear()
             _sessionTokens = null
             _metadataEntries.clear()
             if (context != null) {
@@ -404,7 +410,7 @@ object AutofillCredentialStore {
 
     fun getEntries(): List<NativeAutofillEntry> {
         synchronized(lock) {
-            return if (isUnlockedAndActive()) {
+            return if (isUnlockedAndActive() && _entries.isNotEmpty()) {
                 _entries.toList()
             } else {
                 _metadataEntries.map { it.copy(password = "", otp = null, otpSecret = null) }
@@ -518,30 +524,14 @@ object AutofillCredentialStore {
         return associatedAppMap[normalized]?.firstOrNull()
     }
 
-    fun deriveDomainFromPackage(packageName: String): String? {
-        val parts = packageName.trim().lowercase().split(".").filter { it.isNotEmpty() }
-        if (parts.size >= 2) {
-            val tld = parts[0]
-            val brand = parts[1]
-            val knownTlds = setOf(
-                "com", "org", "net", "io", "app", "co", "us", "de", "uk",
-                "ch", "fr", "it", "es", "nl", "ca", "in", "me", "tv"
-            )
-            if (knownTlds.contains(tld) && brand.length >= 2) {
-                return "$brand.$tld"
-            }
-        }
-        return null
-    }
-
     /**
      * Resolves matching credentials against target package and domain.
      * Evaluates package equality, associated app packages, exact host, and eTLD+1 base domains.
-     * Strictly rejects unsafe lookalike substrings.
+     * Strictly rejects unsafe lookalike substrings and unverified web origins.
      */
-    fun findMatches(targetPackage: String, targetDomain: String): List<NativeAutofillEntry> {
+    fun findMatches(targetPackage: String, targetDomain: String, context: Context? = null): List<NativeAutofillEntry> {
         synchronized(lock) {
-            val sourceEntries = if (isUnlockedAndActive()) {
+            val sourceEntries = if (isUnlockedAndActive() && _entries.isNotEmpty()) {
                 touchActive()
                 _entries
             } else {
@@ -552,11 +542,11 @@ object AutofillCredentialStore {
             val normalizedPackage = targetPackage.trim().lowercase()
             val normalizedDomain = AssistStructureParser.sanitizeWebDomain(targetDomain)?.lowercase() ?: ""
             val isBrowser = AssistStructureParser.isBrowserPackage(normalizedPackage)
-            val hasTargetDomain = normalizedDomain.isNotEmpty()
+            val hasVerifiedTargetDomain = normalizedDomain.isNotEmpty()
 
             // If a web browser requests credentials without an identified web domain,
             // never suggest stored logins (prevents leakages on unknown/unrelated pages)
-            if (isBrowser && !hasTargetDomain) {
+            if (isBrowser && !hasVerifiedTargetDomain) {
                 return emptyList()
             }
 
@@ -566,18 +556,13 @@ object AutofillCredentialStore {
                 emptyList()
             }
 
-            val derivedDomain = if (normalizedPackage.isNotEmpty() && !isBrowser) {
-                deriveDomainFromPackage(normalizedPackage)
-            } else null
-
-
             val scoredMatches = mutableListOf<Pair<NativeAutofillEntry, Int>>()
 
             for (entry in sourceEntries) {
                 var score = 0
 
                 // 1. Check direct package name match (strictly for native non-browser apps)
-                if (normalizedPackage.isNotEmpty() && !isBrowser && !hasTargetDomain) {
+                if (normalizedPackage.isNotEmpty() && !isBrowser && !hasVerifiedTargetDomain) {
                     val packageMatch = entry.packageNames.any { pkg ->
                         val cleanPkg = pkg.trim().lowercase()
                         cleanPkg.isNotBlank() &&
@@ -599,19 +584,8 @@ object AutofillCredentialStore {
                     }
                 }
 
-                // 2b. Check derived package domain match (reverse domain notation, e.g. com.todoist -> todoist.com)
-                if (derivedDomain != null && !isBrowser) {
-                    for (entryUrl in entry.urls) {
-                        val host = extractHost(entryUrl)
-                        if (host != null && (host == derivedDomain || host.endsWith(".$derivedDomain") || isRegistrableDomainMatch(host, derivedDomain))) {
-                            score = maxOf(score, 75)
-                        }
-                    }
-                }
-
-
-                // 3. Check web domain match (based strictly on legitimate web origin matching)
-                if (hasTargetDomain) {
+                // 3. Check web domain match (based strictly on verified web origin matching)
+                if (hasVerifiedTargetDomain) {
                     val cleanTargetHost = normalizedDomain.removePrefix("www.").trim('.')
                     val targetRegistrable = getRegistrableDomain(cleanTargetHost)
 
@@ -656,13 +630,13 @@ object AutofillCredentialStore {
                 .toMutableList()
 
             // If a credential was explicitly selected or remembered for this context, prepend it
-            val contextKey = if (hasTargetDomain) normalizedDomain else normalizedPackage
+            val contextKey = if (hasVerifiedTargetDomain) normalizedDomain else normalizedPackage
             val pending = getValidPendingLogin(contextKey)
             if (pending != null) {
                 val pendingEntry = sourceEntries.firstOrNull { it.id == pending.entryId }
                 if (pendingEntry != null) {
                     // For web requests, ensure pending entry genuinely matches this domain before prioritizing
-                    if (!hasTargetDomain || resultList.any { it.id == pendingEntry.id }) {
+                    if (!hasVerifiedTargetDomain || resultList.any { it.id == pendingEntry.id }) {
                         resultList.removeAll { it.id == pendingEntry.id }
                         resultList.add(0, pendingEntry)
                     }
@@ -677,20 +651,36 @@ object AutofillCredentialStore {
         if (trimmed.isEmpty()) return null
         if (trimmed.startsWith("androidapp://", ignoreCase = true)) return null
 
-        return try {
+        val parsedHost = try {
             val uri = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
                 URI("https://$trimmed")
             } else {
                 URI(trimmed)
             }
-            val host = uri.host?.lowercase()?.trim('.')
-            if (host.isNullOrBlank() || host.contains("*") || host.contains("/") || host.contains(" ") || host.contains("%")) {
-                null
-            } else {
-                host
-            }
-        } catch (e: Exception) {
+            uri.host?.lowercase()?.trim('.')
+        } catch (_: Exception) {
             null
+        }
+
+        val candidate = if (!parsedHost.isNullOrBlank()) {
+            parsedHost
+        } else {
+            // Fallback authority extraction when query/path contains unescaped characters that URI rejects
+            val withoutScheme = trimmed
+                .replace(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://"), "")
+            val authority = withoutScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+            authority.substringAfterLast('@').substringBefore(':').lowercase().trim('.')
+        }
+
+        return if (candidate.isBlank() ||
+            candidate.contains("*") ||
+            candidate.contains("/") ||
+            candidate.contains(" ") ||
+            candidate.contains("%")
+        ) {
+            null
+        } else {
+            candidate
         }
     }
 

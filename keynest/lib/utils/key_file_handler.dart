@@ -240,7 +240,12 @@ class KeyNestKeyFile {
           crypto.sha256.convert(keyBytes).bytes.sublist(0, 4),
         );
 
-        if (!listEquals(expectedHash, actualHash)) {
+        final matches = listEquals(expectedHash, actualHash);
+        expectedHash.fillRange(0, expectedHash.length, 0);
+        actualHash.fillRange(0, actualHash.length, 0);
+
+        if (!matches) {
+          keyBytes.fillRange(0, keyBytes.length, 0);
           throw const KeyFileValidationException(
             'Corrupted XML key file: Verification hash does not match key data. The key file may be damaged.',
           );

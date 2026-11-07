@@ -23,12 +23,14 @@ class CardsTab extends StatefulWidget {
   const CardsTab({
     super.key,
     this.onEntrySelected,
+    this.onAddNewItem,
     this.onCountChanged,
     this.onRegisterNavigationHandler,
     this.selectedEntry,
   });
 
   final void Function(KdbxEntry entry)? onEntrySelected;
+  final VoidCallback? onAddNewItem;
   final void Function(int count)? onCountChanged;
   final ValueChanged<KeyNestTabNavigationHandler>? onRegisterNavigationHandler;
   final KdbxEntry? selectedEntry;
@@ -299,6 +301,39 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
             },
           ),
 
+          if (KeyNestPlatform.isDesktopOrWeb &&
+              (allCardEntries.isNotEmpty || _cardTypeFilter != null))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Row(
+                children: [
+                  KeyNestChip(
+                    label: 'Credit',
+                    isSelected: _cardTypeFilter == 'Credit',
+                    onTap: () {
+                      setState(() {
+                        _cardTypeFilter = _cardTypeFilter == 'Credit'
+                            ? null
+                            : 'Credit';
+                      });
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  KeyNestChip(
+                    label: 'Debit',
+                    isSelected: _cardTypeFilter == 'Debit',
+                    onTap: () {
+                      setState(() {
+                        _cardTypeFilter = _cardTypeFilter == 'Debit'
+                            ? null
+                            : 'Debit';
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+
           // List of Cards or Empty State
           Expanded(
             child:
@@ -309,24 +344,24 @@ class _CardsTabState extends State<CardsTab> with WidgetsBindingObserver {
                     type: EmptyStateType.cards,
                     actionLabel: 'Add Card',
                     onAction: () {
-                      if (KeyNestPlatform.isDesktopOrWeb &&
-                          widget.onEntrySelected != null) {
-                        final newEntry = kdbxBloc.createEntry(
-                          file: scope.getSelectedVault(kdbxBloc) ??
-                              kdbxBloc.openedFilesKdbx.firstOrNull,
-                          group: scope.getCurrentFolder(
-                            kdbxBloc,
-                            KeyNestTab.cards,
-                          ),
-                        );
-                        KeyNestItemTypeHelper.setItemType(
-                          newEntry,
-                          KeyNestItemType.card,
-                        );
-                        widget.onEntrySelected!(newEntry);
+                      if (widget.onAddNewItem != null) {
+                        widget.onAddNewItem!();
                         return;
                       }
-                      Navigator.of(context).push(AddPaymentCardScreen.route());
+                      final activeVault =
+                          scope.getSelectedVault(kdbxBloc) ??
+                          kdbxBloc.openedFilesKdbx.firstOrNull;
+                      final activeFolder = scope.getCurrentFolder(
+                        kdbxBloc,
+                        KeyNestTab.cards,
+                      );
+                      Navigator.of(context).push(
+                        AddPaymentCardScreen.route(
+                          initialFile: activeVault,
+                          initialGroup: activeFolder,
+                          onSaved: widget.onEntrySelected,
+                        ),
+                      );
                     },
                   )
                 : displayedCardEntries.isEmpty

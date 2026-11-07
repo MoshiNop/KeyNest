@@ -77,12 +77,18 @@ class FileSourceLocal extends FileSource {
   }
 
   @override
-  Stream<FileContent> content({bool updateCache = true}) async* {
-    if (cached != null) {
+  Stream<FileContent> content({
+    bool updateCache = true,
+    bool forceReload = false,
+  }) async* {
+    if (!forceReload && cached != null) {
       yield cached!;
       return;
     }
-    await for (final c in super.content(updateCache: updateCache)) {
+    await for (final c in super.content(
+      updateCache: updateCache,
+      forceReload: forceReload,
+    )) {
       yield c;
     }
   }
@@ -217,33 +223,87 @@ class FileSourceLocal extends FileSource {
       _logger.finer('Writing into file directly.');
       await _accessFile((f) async {
         final parentDir = f.parent;
-        if (parentDir.existsSync()) {
-          final tempFile = parentDir.childFile(
-            '${f.basename}.tmp_${DateTime.now().millisecondsSinceEpoch}',
-          );
-          try {
-            await tempFile.writeAsBytes(bytes, flush: true);
-            if (KeyNestPlatform.isWindows) {
-              await tempFile.copy(f.path);
-              await tempFile.delete();
-            } else {
-              await tempFile.rename(f.path);
-            }
-            return;
-          } catch (e, stack) {
-            _logger.warning(
-              'Atomic write via temp file failed, falling back to direct write: $e',
-              e,
-              stack,
+        if (!parentDir.existsSync()) {
+          await parentDir.create(recursive: true);
+        }
+        final ts = DateTime.now().microsecondsSinceEpoch;
+        final tempFile = parentDir.childFile('${f.basename}.tmp_$ts');
+        File? bakFile;
+
+        // 1. Write new vault bytes to sibling .tmp file first.
+        // Never fall back to truncating live vault `f` if .tmp fails (e.g. ENOSPC).
+        try {
+          await tempFile.writeAsBytes(bytes, flush: true);
+          final writtenLen = tempFile.lengthSync();
+          if (writtenLen != bytes.length) {
+            throw FileSystemException(
+              'Incomplete write to temporary vault file '
+              '($writtenLen != ${bytes.length} bytes).',
+              tempFile.path,
             );
+          }
+        } catch (e) {
+          try {
+            if (tempFile.existsSync()) {
+              await tempFile.delete();
+            }
+          } catch (_) {}
+          rethrow;
+        }
+
+        // 2. Move existing live vault to .bak, promote .tmp -> live path,
+        // and restore .bak on any promotion error before removing .bak.
+        try {
+          if (f.existsSync()) {
+            bakFile = parentDir.childFile('${f.basename}.bak_$ts');
+            await f.rename(bakFile.path);
+          }
+
+          try {
+            await tempFile.rename(f.path);
+          } on FileSystemException {
+            await tempFile.copy(f.path);
             try {
-              if (tempFile.existsSync()) {
-                await tempFile.delete();
-              }
+              await tempFile.delete();
             } catch (_) {}
           }
+
+          if (!f.existsSync() || f.lengthSync() != bytes.length) {
+            throw FileSystemException(
+              'Vault verification failed after atomic replacement.',
+              f.path,
+            );
+          }
+        } catch (e) {
+          if (bakFile != null && bakFile.existsSync()) {
+            try {
+              if (f.existsSync()) {
+                await f.delete();
+              }
+              await bakFile.rename(f.path);
+            } catch (restoreErr, restoreStack) {
+              _logger.severe(
+                'Failed restoring backup vault ${bakFile.path}',
+                restoreErr,
+                restoreStack,
+              );
+            }
+          }
+          try {
+            if (tempFile.existsSync()) {
+              await tempFile.delete();
+            }
+          } catch (_) {}
+          rethrow;
         }
-        await f.writeAsBytes(bytes, flush: true);
+
+        if (bakFile != null) {
+          try {
+            if (bakFile.existsSync()) {
+              await bakFile.delete();
+            }
+          } catch (_) {}
+        }
       });
     }
     return null;

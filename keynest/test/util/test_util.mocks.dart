@@ -469,6 +469,31 @@ class MockKdbxBloc extends _i1.Mock implements _i6.KdbxBloc {
   );
 
   @override
+  _i11.Future<_i6.KdbxOpenedFile> applySyncedBytes(
+    _i6.KdbxOpenedFile? openedFile,
+    _i15.Uint8List? syncedBytes, {
+    _i10.FileContent? syncedContent,
+  }) =>
+      (super.noSuchMethod(
+            Invocation.method(
+              #applySyncedBytes,
+              [openedFile, syncedBytes],
+              {#syncedContent: syncedContent},
+            ),
+            returnValue: _i11.Future<_i6.KdbxOpenedFile>.value(
+              _FakeKdbxOpenedFile_8(
+                this,
+                Invocation.method(
+                  #applySyncedBytes,
+                  [openedFile, syncedBytes],
+                  {#syncedContent: syncedContent},
+                ),
+              ),
+            ),
+          )
+          as _i11.Future<_i6.KdbxOpenedFile>);
+
+  @override
   _i11.Stream<_i6.ReloadStatus> reload(_i6.KdbxOpenedFile? file) =>
       (super.noSuchMethod(
             Invocation.method(#reload, [file]),

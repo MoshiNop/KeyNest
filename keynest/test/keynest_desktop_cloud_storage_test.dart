@@ -27,9 +27,11 @@ void main() {
     CloudConfigStore.instance.resetForTesting();
     try {
       final appDir = await PathUtils().getAppDataDirectory();
-      final credsFile = File('${appDir.path}/cloud_credentials.json');
-      if (credsFile.existsSync()) {
-        await credsFile.delete();
+      for (final name in ['cloud_credentials.json', 'cloud_credentials.enc']) {
+        final f = File('${appDir.path}/$name');
+        if (f.existsSync()) {
+          await f.delete();
+        }
       }
     } catch (_) {}
   });
@@ -40,9 +42,11 @@ void main() {
         await tempDir.delete(recursive: true);
       }
       final appDir = await PathUtils().getAppDataDirectory();
-      final credsFile = File('${appDir.path}/cloud_credentials.json');
-      if (credsFile.existsSync()) {
-        await credsFile.delete();
+      for (final name in ['cloud_credentials.json', 'cloud_credentials.enc']) {
+        final f = File('${appDir.path}/$name');
+        if (f.existsSync()) {
+          await f.delete();
+        }
       }
     } catch (_) {}
   });
@@ -108,6 +112,43 @@ void main() {
       expect(await helper.loadCredentials('DropboxProvider'), equals('legacy_dropbox_token'));
       expect(await helper.loadCredentials('GoogleDriveDesktop'), equals('legacy_gdrive_token'));
       expect(await helper.loadCredentials('WebDavProvider'), equals('{"password":"secret_pass"}'));
+
+      // Legacy plaintext file is migrated into encrypted store and deleted
+      final encFile = File('${appDir.path}/cloud_credentials.enc');
+      expect(encFile.existsSync(), isTrue);
+      expect(credsFile.existsSync(), isFalse);
+      final rawEncrypted = await encFile.readAsString();
+      final decodedEnvelope =
+          json.decode(rawEncrypted) as Map<String, dynamic>;
+      expect(
+        decodedEnvelope['scheme'],
+        isIn(['win32_dpapi', 'aes256_gcm']),
+      );
+      expect(rawEncrypted.contains('secret_pass'), isFalse);
+      expect(rawEncrypted.contains('legacy_dropbox_token'), isFalse);
+    });
+
+    test('Encrypted credentials survive CloudConfigStore.load() startup cleanup (OAUTH-01)', () async {
+      final env = TestEnv(EnvSecrets.nullSecrets);
+      final pathUtil = TestPathUtil();
+      final analytics = MockAnalytics();
+      final helper = CloudStorageHelper(env, pathUtil, analytics);
+
+      const secretPayload = '{"refresh_token":"ultra_secret_refresh_token_999"}';
+      await helper.saveCredentials('DropboxProvider', secretPayload);
+
+      final appDir = await PathUtils().getAppDataDirectory();
+      final encFile = File('${appDir.path}/cloud_credentials.enc');
+      expect(encFile.existsSync(), isTrue);
+      final rawDisk = await encFile.readAsString();
+      expect(rawDisk.contains('ultra_secret_refresh_token_999'), isFalse);
+
+      // Simulate startup CloudConfigStore.load() (which cleans up legacy plaintext files)
+      CloudConfigStore.instance.resetForTesting();
+      await CloudConfigStore.instance.load(configFileOverride: configFile);
+
+      expect(encFile.existsSync(), isTrue);
+      expect(await helper.loadCredentials('DropboxProvider'), equals(secretPayload));
     });
   });
 

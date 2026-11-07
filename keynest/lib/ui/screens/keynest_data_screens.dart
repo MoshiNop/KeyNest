@@ -1,7 +1,11 @@
 // ignore_for_file: use_build_context_synchronously, always_put_control_body_on_new_line
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
+import 'package:keynest/services/keynest_import_export_service.dart';
+import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/barcodescan_screen.dart';
@@ -12,6 +16,7 @@ import 'package:keynest/ui/widgets/keynest_popup_menu.dart';
 import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:keynest/utils/platform.dart';
+import 'package:keynest/utils/totp_parser.dart';
 import 'package:provider/provider.dart';
 
 // 1. Privacy Score & Password Health Audit Screen
@@ -408,10 +413,9 @@ class KeyNestPrivacyScoreSheet extends StatelessWidget {
                             size: 18,
                           ),
                           onTap: () {
-                            Navigator.of(context).pop();
-                            Navigator.of(
-                              context,
-                            ).push(EntryDetailsScreen.route(entry: e));
+                            final navigator = Navigator.of(context);
+                            navigator.pop();
+                            navigator.push(EntryDetailsScreen.route(entry: e));
                           },
                         );
                       }),
@@ -458,6 +462,7 @@ class _KeyNestManageCategoriesScreenState
   String _searchQuery = '';
   String _selectedFilter = 'All'; // 'All', 'Custom', 'Default', 'With Items'
   bool _sortByCount = false;
+  KdbxFile? _selectedVault;
 
   void _showMessage(String text) {
     if (!mounted) return;
@@ -568,7 +573,11 @@ class _KeyNestManageCategoriesScreenState
     final isDark = theme.brightness == Brightness.dark;
     final kdbxBloc = context.watch<KdbxBloc>();
     final openedFiles = kdbxBloc.openedFilesKdbx;
-    final currentFile = openedFiles.firstOrNull;
+    final scopedVault = KeyNestVaultScope.instance.getSelectedVault(kdbxBloc);
+    final currentFile =
+        (_selectedVault != null && openedFiles.contains(_selectedVault))
+        ? _selectedVault
+        : (scopedVault ?? openedFiles.firstOrNull);
 
     if (currentFile == null) {
       return Scaffold(
@@ -679,6 +688,33 @@ class _KeyNestManageCategoriesScreenState
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         children: [
+          if (openedFiles.length > 1) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: openedFiles.map((vaultFile) {
+                  final isSelected = vaultFile == currentFile;
+                  final vaultName = KeyNestVaultScope.cleanVaultName(
+                    kdbxBloc,
+                    vaultFile,
+                  );
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(vaultName),
+                      selected: isSelected,
+                      onSelected: (_) {
+                        setState(() {
+                          _selectedVault = vaultFile;
+                        });
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           // SUMMARY STATS CARD
           KeyNestCard(
             padding: const EdgeInsets.all(16),
@@ -1401,10 +1437,7 @@ class _KeyNestRecentlyDeletedScreenState
     final trashEntries = <KdbxEntry>[];
     for (final file in openedFiles) {
       for (final e in file.body.rootGroup.getAllEntries()) {
-        final cat = e.getString(KdbxKey('ItemCategory'))?.getText() ?? '';
-        final isDeleted =
-            e.getString(KdbxKey('IsDeleted'))?.getText() == 'true';
-        if (e.isInRecycleBin() || cat == 'Trash' || isDeleted) {
+        if (KeyNestItemTypeHelper.isEntryInTrash(e)) {
           trashEntries.add(e);
         }
       }
@@ -1443,21 +1476,36 @@ class _KeyNestRecentlyDeletedScreenState
                   ),
                 );
                 if (confirm == true && mounted) {
+                  final affectedFiles = <KdbxFile>{};
                   for (final e in trashEntries) {
-                    e.file.deletePermanently(e);
+                    if (e.parent != null) {
+                      affectedFiles.add(e.file);
+                      e.file.deletePermanently(e);
+                      KeyNestItemTypeHelper.invalidateCache(e);
+                    }
                   }
                   for (final file in openedFiles) {
                     final recycleBin = file.recycleBin;
                     if (recycleBin != null) {
+                      affectedFiles.add(file);
                       List<KdbxGroup>.from(
                         recycleBin.groups,
                       ).forEach(file.deletePermanently);
+                      List<KdbxEntry>.from(
+                        recycleBin.entries,
+                      ).forEach((re) {
+                        file.deletePermanently(re);
+                        KeyNestItemTypeHelper.invalidateCache(re);
+                      });
                     }
                   }
                   setState(() {});
-                  for (final file in openedFiles) {
+                  for (final file in affectedFiles) {
                     await kdbxBloc.saveFile(file);
                   }
+                  try {
+                    KeyNestVaultScope.instance.notifyScopeChanged();
+                  } catch (_) {}
                   if (mounted) {
                     setState(() {});
                     ScaffoldMessenger.of(context)
@@ -1586,7 +1634,11 @@ class _KeyNestRecentlyDeletedScreenState
                         // Restore Button
                         TextButton(
                           onPressed: () async {
-                            if (e.isInRecycleBin()) {
+                            if (e.parent == null) return;
+                            if (e.isInRecycleBin() ||
+                                KeyNestItemTypeHelper.isTrashOrRecycleBin(
+                                  e.parent,
+                                )) {
                               e.file.move(e, e.file.body.rootGroup);
                             }
                             e.removeString(KdbxKey('IsDeleted'));
@@ -1599,8 +1651,12 @@ class _KeyNestRecentlyDeletedScreenState
                                 PlainValue('General'),
                               );
                             }
+                            KeyNestItemTypeHelper.invalidateCache(e);
                             setState(() {});
                             await kdbxBloc.saveFile(e.file);
+                            try {
+                              KeyNestVaultScope.instance.notifyScopeChanged();
+                            } catch (_) {}
                             if (mounted) {
                               setState(() {});
                               ScaffoldMessenger.of(context)
@@ -1647,9 +1703,17 @@ class _KeyNestRecentlyDeletedScreenState
                               ),
                             );
                             if (confirm == true && mounted) {
-                              e.file.deletePermanently(e);
-                              setState(() {});
-                              await kdbxBloc.saveFile(e.file);
+                              if (e.parent != null) {
+                                final f = e.file;
+                                f.deletePermanently(e);
+                                KeyNestItemTypeHelper.invalidateCache(e);
+                                setState(() {});
+                                await kdbxBloc.saveFile(f);
+                                try {
+                                  KeyNestVaultScope.instance
+                                      .notifyScopeChanged();
+                                } catch (_) {}
+                              }
                               if (mounted) {
                                 setState(() {});
                                 ScaffoldMessenger.of(context)
@@ -1691,12 +1755,24 @@ class KeyNestArchivedScreen extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final kdbxBloc = context.watch<KdbxBloc>();
     final openedFiles = kdbxBloc.openedFilesKdbx;
+    final scopedVault = KeyNestVaultScope.instance.getSelectedVault(kdbxBloc);
+    final filesToScan = scopedVault != null ? [scopedVault] : openedFiles;
 
     final archivedEntries = <KdbxEntry>[];
-    if (openedFiles.isNotEmpty) {
-      final file = openedFiles.first;
+    final seenEntries = <KdbxEntry>{};
+    for (final file in filesToScan) {
       for (final e in file.body.rootGroup.getAllEntries()) {
-        final cat = e.getString(KdbxKey('ItemCategory'))?.getText() ?? '';
+        if (!seenEntries.add(e)) {
+          continue;
+        }
+        if (KeyNestItemTypeHelper.isEntryInTrash(e)) {
+          continue;
+        }
+        final cat =
+            (e.getString(KdbxKey('ItemCategory'))?.getText() ??
+                    e.getString(KdbxKey('KeyNest_Category'))?.getText() ??
+                    '')
+                .trim();
         if (cat == 'Archived') {
           archivedEntries.add(e);
         }
@@ -1755,42 +1831,71 @@ class KeyNestArchivedScreen extends StatelessWidget {
                 final e = archivedEntries[index];
                 final title =
                     e.getString(KdbxKeyCommon.TITLE)?.getText() ?? 'Untitled';
-                return KeyNestCard(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.archive_rounded,
-                        color: isDark
-                            ? KeyNestPalette.primaryDark
-                            : KeyNestPalette.primary,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                final vaultLabel = openedFiles.length > 1
+                    ? KeyNestVaultScope.cleanVaultName(kdbxBloc, e.file)
+                    : null;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: KeyNestCard(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.archive_rounded,
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
                         ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          e.setString(
-                            KdbxKey('ItemCategory'),
-                            PlainValue('General'),
-                          );
-                          await kdbxBloc.saveFile(e.file);
-                          ScaffoldMessenger.of(context)
-                            ..clearSnackBars()
-                            ..showSnackBar(
-                              const SnackBar(
-                                content: Text('Unarchived credential!'),
-                                duration: Duration(milliseconds: 1800),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
+                              if (vaultLabel != null)
+                                Text(
+                                  vaultLabel,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            e.setString(
+                              KdbxKey('ItemCategory'),
+                              PlainValue('General'),
                             );
-                        },
-                        child: const Text('Unarchive'),
-                      ),
-                    ],
+                            if (e.getString(KdbxKey('KeyNest_Category')) !=
+                                null) {
+                              e.setString(
+                                KdbxKey('KeyNest_Category'),
+                                PlainValue('General'),
+                              );
+                            }
+                            await kdbxBloc.saveFile(e.file);
+                            messenger
+                              ..clearSnackBars()
+                              ..showSnackBar(
+                                const SnackBar(
+                                  content: Text('Unarchived credential!'),
+                                  duration: Duration(milliseconds: 1800),
+                                ),
+                              );
+                          },
+                          child: const Text('Unarchive'),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -1819,6 +1924,188 @@ class KeyNestReceiveItemSheet extends StatefulWidget {
 
 class _KeyNestReceiveItemSheetState extends State<KeyNestReceiveItemSheet> {
   final TextEditingController _codeController = TextEditingController();
+  bool _isImporting = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _importSharedPayload(String rawPayload) async {
+    final trimmed = rawPayload.trim();
+    if (trimmed.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please scan a QR code or paste a share code first.';
+      });
+      return;
+    }
+
+    final kdbxBloc = context.read<KdbxBloc>();
+    final targetFile =
+        KeyNestVaultScope.instance.getSelectedVault(kdbxBloc) ??
+        kdbxBloc.openedFilesKdbx.firstOrNull;
+    if (targetFile == null) {
+      setState(() {
+        _errorMessage =
+            'No unlocked vault is open. Please unlock a vault first.';
+      });
+      return;
+    }
+
+    setState(() {
+      _isImporting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      String importedSummary;
+      final lower = trimmed.toLowerCase();
+
+      if (lower.startsWith('otpauth://')) {
+        final parsedTotp = TotpQrData.parse(trimmed);
+        if (parsedTotp == null) {
+          throw const FormatException(
+            'Invalid or unsupported otpauth:// URI (only time-based TOTP is supported).',
+          );
+        }
+        final entry = kdbxBloc.createEntry(
+          file: targetFile,
+          group: targetFile.body.rootGroup,
+        );
+        final issuer = parsedTotp.issuer?.trim() ?? '';
+        final account = parsedTotp.accountName?.trim() ?? '';
+        final title = issuer.isNotEmpty
+            ? issuer
+            : (parsedTotp.title.trim().isNotEmpty
+                  ? parsedTotp.title.trim()
+                  : (account.isNotEmpty ? account : 'Shared Authenticator'));
+        entry.setString(KdbxKeyCommon.TITLE, PlainValue(title));
+        if (account.isNotEmpty) {
+          entry.setString(
+            KdbxKeyCommon.USER_NAME,
+            PlainValue(account),
+          );
+        }
+        entry.setString(
+          KdbxKey('OTPAuth'),
+          ProtectedValue.fromString(trimmed),
+        );
+        KeyNestItemTypeHelper.setItemType(entry, KeyNestItemType.twoFactor);
+        await kdbxBloc.saveFile(targetFile);
+        importedSummary = 'Imported 2FA item "$title".';
+      } else if (lower.startsWith('keynest://share')) {
+        final uri = Uri.tryParse(trimmed);
+        if (uri == null) {
+          throw const FormatException('Malformed keynest://share link.');
+        }
+
+        String? jsonCandidate =
+            uri.queryParameters['data'] ?? uri.queryParameters['payload'];
+        if ((jsonCandidate == null || jsonCandidate.isEmpty) &&
+            uri.pathSegments.isNotEmpty) {
+          jsonCandidate = uri.pathSegments.last;
+        }
+
+        if (jsonCandidate != null && jsonCandidate.isNotEmpty) {
+          final normalized = base64Url.normalize(jsonCandidate.trim());
+          final decodedJson = utf8.decode(base64Url.decode(normalized));
+          final decodedObj = jsonDecode(decodedJson);
+          final wrappedJson = decodedObj is List
+              ? jsonEncode(decodedObj)
+              : jsonEncode([decodedObj]);
+          final res = await KeyNestImportExportService.importJsonText(
+            kdbxBloc: kdbxBloc,
+            targetFile: targetFile,
+            jsonText: wrappedJson,
+            duplicateStrategy: KeyNestImportDuplicateStrategy.keepBoth,
+          );
+          if (!res.success || res.addedCount + res.updatedCount == 0) {
+            throw FormatException(
+              res.message ?? 'Failed to import shared credential.',
+            );
+          }
+          importedSummary = res.message ?? 'Shared credential imported.';
+        } else if (uri.queryParameters.isNotEmpty) {
+          final itemMap = <String, dynamic>{
+            'title': uri.queryParameters['title'] ?? '',
+            'username': uri.queryParameters['username'] ?? '',
+            'password': uri.queryParameters['password'] ?? '',
+            'url': uri.queryParameters['url'] ?? '',
+            'notes': uri.queryParameters['notes'] ?? '',
+            'totp': uri.queryParameters['totp'] ?? '',
+            'type': uri.queryParameters['type'] ?? '',
+          };
+          final res = await KeyNestImportExportService.importJsonText(
+            kdbxBloc: kdbxBloc,
+            targetFile: targetFile,
+            jsonText: jsonEncode([itemMap]),
+            duplicateStrategy: KeyNestImportDuplicateStrategy.keepBoth,
+          );
+          if (!res.success || res.addedCount + res.updatedCount == 0) {
+            throw FormatException(
+              res.message ?? 'Failed to import shared credential.',
+            );
+          }
+          importedSummary = res.message ?? 'Shared credential imported.';
+        } else {
+          throw const FormatException(
+            'keynest://share link does not contain any credential data.',
+          );
+        }
+      } else if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        final decodedObj = jsonDecode(trimmed);
+        final normalizedJson =
+            (decodedObj is Map<String, dynamic> && !decodedObj.containsKey('items'))
+            ? jsonEncode([decodedObj])
+            : trimmed;
+        final res = await KeyNestImportExportService.importJsonText(
+          kdbxBloc: kdbxBloc,
+          targetFile: targetFile,
+          jsonText: normalizedJson,
+          duplicateStrategy: KeyNestImportDuplicateStrategy.keepBoth,
+        );
+        if (!res.success || res.addedCount + res.updatedCount == 0) {
+          throw FormatException(
+            res.message ?? 'Failed to import shared credential.',
+          );
+        }
+        importedSummary = res.message ?? 'Shared credential imported.';
+      } else {
+        throw const FormatException(
+          'Unrecognized share payload. Supported formats: keynest://share/..., otpauth://totp/..., or JSON.',
+        );
+      }
+
+      if (!mounted) return;
+      final navigator = Navigator.of(context);
+      final messenger = ScaffoldMessenger.of(navigator.context);
+      navigator.pop();
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(importedSummary),
+            duration: const Duration(milliseconds: 2200),
+          ),
+        );
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = e is FormatException
+              ? e.message
+              : 'Failed to import shared item: $e';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isImporting = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1847,15 +2134,36 @@ class _KeyNestReceiveItemSheetState extends State<KeyNestReceiveItemSheet> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded),
-                  onPressed: () => Navigator.of(context).pop(),
+                  onPressed: _isImporting
+                      ? null
+                      : () => Navigator.of(context).pop(),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             const Text(
-              'Scan a QR code from another KeyNest device or paste a shared encrypted token.',
+              'Scan a QR code from another KeyNest device or paste a shared credential payload.',
               style: TextStyle(fontSize: 13, color: Colors.grey),
             ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  _errorMessage!,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: Colors.redAccent,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
@@ -1875,26 +2183,25 @@ class _KeyNestReceiveItemSheetState extends State<KeyNestReceiveItemSheet> {
                 'Scan QR Code',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
               ),
-              onPressed: () async {
-                Navigator.of(context).pop();
-                final scanResult = await BarcodeScanHelper.scanBarcode(context);
-                if (scanResult case ScanResultValid(barcode: final barcode)) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context)
-                      ..clearSnackBars()
-                      ..showSnackBar(
-                        SnackBar(
-                          content: Text('Received payload: ${barcode.text}'),
-                          duration: const Duration(milliseconds: 1800),
-                        ),
+              onPressed: _isImporting
+                  ? null
+                  : () async {
+                      final scanResult = await BarcodeScanHelper.scanBarcode(
+                        context,
                       );
-                  }
-                }
-              },
+                      if (!mounted) return;
+                      if (scanResult case ScanResultValid(
+                        barcode: final barcode,
+                      )) {
+                        _codeController.text = barcode.text;
+                        await _importSharedPayload(barcode.text);
+                      }
+                    },
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _codeController,
+              enabled: !_isImporting,
               decoration: const InputDecoration(
                 labelText: 'Or Paste Share Code',
                 hintText: 'keynest://share/...',
@@ -1903,21 +2210,16 @@ class _KeyNestReceiveItemSheetState extends State<KeyNestReceiveItemSheet> {
             ),
             const SizedBox(height: 16),
             OutlinedButton(
-              onPressed: () {
-                final text = _codeController.text.trim();
-                if (text.isNotEmpty) {
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context)
-                    ..clearSnackBars()
-                    ..showSnackBar(
-                      const SnackBar(
-                        content: Text('Processed shared credential!'),
-                        duration: Duration(milliseconds: 1800),
-                      ),
-                    );
-                }
-              },
-              child: const Text('Import Code'),
+              onPressed: _isImporting
+                  ? null
+                  : () => _importSharedPayload(_codeController.text),
+              child: _isImporting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Import Code'),
             ),
             const SizedBox(height: 12),
           ],

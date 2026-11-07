@@ -40,34 +40,43 @@ class KeyNestFilterChip extends StatelessWidget {
 
     return KeyNestPressScale(
       onTap: onClick,
-      child: AnimatedContainer(
-        duration: KeyNestTokens.durationShort,
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 7.0),
-        decoration: BoxDecoration(
-          color: containerColor,
-          borderRadius: BorderRadius.circular(KeyNestTokens.radiusCompact),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (selected) ...[
-              Icon(selectedIcon, size: 16.0, color: contentColor),
-              const SizedBox(width: 6.0),
-            ] else if (leadingIcon != null) ...[
-              IconTheme(
-                data: IconThemeData(size: 16.0, color: contentColor),
-                child: leadingIcon!,
-              ),
-              const SizedBox(width: 6.0),
-            ],
-            Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: contentColor,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-              ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44.0),
+        child: Center(
+          widthFactor: 1.0,
+          child: AnimatedContainer(
+            duration: KeyNestTokens.durationShort,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 7.0,
             ),
-          ],
+            decoration: BoxDecoration(
+              color: containerColor,
+              borderRadius: BorderRadius.circular(KeyNestTokens.radiusCompact),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (selected) ...[
+                  Icon(selectedIcon, size: 16.0, color: contentColor),
+                  const SizedBox(width: 6.0),
+                ] else if (leadingIcon != null) ...[
+                  IconTheme(
+                    data: IconThemeData(size: 16.0, color: contentColor),
+                    child: leadingIcon!,
+                  ),
+                  const SizedBox(width: 6.0),
+                ],
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: contentColor,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -99,6 +108,7 @@ class KeyNestInputChip extends StatelessWidget {
         : KeyNestTokens.lightOnSurface;
 
     return Container(
+      constraints: const BoxConstraints(minHeight: 40.0),
       padding: const EdgeInsets.only(
         left: 10.0,
         right: 4.0,
@@ -120,16 +130,29 @@ class KeyNestInputChip extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4.0),
-          GestureDetector(
-            onTap: onRemove,
-            child: Padding(
-              padding: const EdgeInsets.all(2.0),
-              child: Icon(
-                Icons.close_rounded,
-                size: 16.0,
-                color: isDark
-                    ? KeyNestTokens.darkOnSurfaceVariant
-                    : KeyNestTokens.lightOnSurfaceVariant,
+          Semantics(
+            button: true,
+            label: 'Remove $label',
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onRemove,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 32.0,
+                    minHeight: 32.0,
+                  ),
+                  child: Center(
+                    child: Icon(
+                      Icons.close_rounded,
+                      size: 16.0,
+                      color: isDark
+                          ? KeyNestTokens.darkOnSurfaceVariant
+                          : KeyNestTokens.lightOnSurfaceVariant,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

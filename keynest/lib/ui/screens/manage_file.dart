@@ -124,18 +124,24 @@ class _ManageFileState extends State<ManageFile> with FutureTaskStateMixin {
   void _init() {
     _logger.fine('Updating widget. _init()');
     _kdbxBloc = Provider.of<KdbxBloc>(context);
-    _file = _kdbxBloc.fileForFileSource(widget.fileSource);
+    _file = _kdbxBloc.openedFiles[widget.fileSource];
   }
 
   @override
   Widget build(BuildContext context) {
-    _logger.finest('Is rebuilding with color ${_file!.openedFile.color}');
-    final databaseName = _file!.fileSource.displayName;
+    _kdbxBloc = Provider.of<KdbxBloc>(context);
+    _file = _kdbxBloc.openedFiles[widget.fileSource];
+    final file = _file;
+    if (file == null) {
+      return const SizedBox.shrink();
+    }
+    _logger.finest('Is rebuilding with color ${file.openedFile.color}');
+    final databaseName = file.fileSource.displayName;
     final loc = AppLocalizations.of(context);
     final env = Provider.of<Env>(context);
     // kdbx3 keeps no transformed key, so the autofill mirror has nothing to
     // cache and the extension could never open the copy. See [AutofillMirror].
-    final canAutofill = _file!.kdbxFile.header.version >= KdbxVersion.V4;
+    final canAutofill = file.kdbxFile.header.version >= KdbxVersion.V4;
     return ProgressOverlay(
       task: task,
       child: Center(
@@ -260,6 +266,20 @@ class _ManageFileState extends State<ManageFile> with FutureTaskStateMixin {
                             KdbxVersion.V4,
                           ),
                           onPressed: asyncTaskCallback((progress) async {
+                            final confirmed =
+                                await DialogUtils.showConfirmDialog(
+                                  context: context,
+                                  params: ConfirmDialogParams(
+                                    title: loc.databaseKdbxUpgradeVersion(
+                                      KdbxVersion.V4,
+                                    ),
+                                    content:
+                                        'Upgrading to KDBX 4 (Argon2) is irreversible and older KDBX 3 clients will not be able to open this database. Continue?',
+                                  ),
+                                );
+                            if (!confirmed || !context.mounted) {
+                              return;
+                            }
                             _file!.kdbxFile.upgrade(KdbxVersion.V4.major);
                             await _kdbxBloc.saveFile(_file!.kdbxFile);
                             if (!context.mounted) {
@@ -322,9 +342,14 @@ class _ManageFileState extends State<ManageFile> with FutureTaskStateMixin {
                     ),
                     TextButton(
                       onPressed: () async {
-                        await _kdbxBloc.close(_file!.kdbxFile);
-                        // ignore: use_build_context_synchronously
-                        Navigator.of(context).pop();
+                        final navigator = Navigator.of(context);
+                        final kdbxFile = _file?.kdbxFile;
+                        if (kdbxFile != null) {
+                          await _kdbxBloc.close(kdbxFile);
+                        }
+                        if (mounted) {
+                          navigator.pop();
+                        }
                       },
                       child: Text(loc.closeAndLockFile),
                     ),

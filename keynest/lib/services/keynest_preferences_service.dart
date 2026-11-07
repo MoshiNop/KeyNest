@@ -11,12 +11,14 @@ import 'package:keynest/utils/item_type_helper.dart';
 import 'package:keynest/utils/path_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
+import 'package:synchronized/synchronized.dart';
 
 final _logger = Logger('KeyNestVaultScope');
 
 class KeyNestPreferencesService {
   static const String _fileName = 'keynest_ui_preferences.json';
   static const String _onboardingCompletedKey = 'hasCompletedOnboarding';
+  static final Lock _prefsLock = Lock();
 
   static Future<bool> hasCompletedOnboarding() async {
     final prefs = await loadRawPreferences();
@@ -24,9 +26,9 @@ class KeyNestPreferencesService {
   }
 
   static Future<void> setCompletedOnboarding(bool completed) async {
-    final prefs = await loadRawPreferences();
-    prefs[_onboardingCompletedKey] = completed;
-    await saveRawPreferences(prefs);
+    await updatePreferences((prefs) {
+      prefs[_onboardingCompletedKey] = completed;
+    });
   }
 
   static Future<io.File> _getPrefsFile() async {
@@ -34,36 +36,94 @@ class KeyNestPreferencesService {
     return io.File(p.join(appDataDir.path, _fileName));
   }
 
-  static Future<Map<String, dynamic>> loadRawPreferences() async {
-    try {
-      final file = await _getPrefsFile();
-      if (file.existsSync()) {
-        final content = await file.readAsString();
-        if (content.trim().isNotEmpty) {
-          final decoded = jsonDecode(content);
-          if (decoded is Map<String, dynamic>) {
-            return decoded;
-          }
+  static Map<String, dynamic> _readPrefsUnlocked(io.File file) {
+    if (file.existsSync()) {
+      final content = file.readAsStringSync();
+      if (content.trim().isNotEmpty) {
+        final decoded = jsonDecode(content);
+        if (decoded is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded);
         }
       }
-    } catch (e, stack) {
-      _logger.warning(
-        'Failed to load UI preferences, returning defaults',
-        e,
-        stack,
-      );
     }
-    return {};
+    return <String, dynamic>{};
+  }
+
+  static Future<void> _writePrefsUnlocked(
+    io.File file,
+    Map<String, dynamic> data,
+  ) async {
+    await file.parent.create(recursive: true);
+    final ts = DateTime.now().microsecondsSinceEpoch;
+    final tmpFile = io.File('${file.path}.tmp_$ts');
+    try {
+      await tmpFile.writeAsString(jsonEncode(data), flush: true);
+      try {
+        await tmpFile.rename(file.path);
+      } on io.FileSystemException {
+        await tmpFile.copy(file.path);
+        try {
+          await tmpFile.delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      try {
+        if (tmpFile.existsSync()) {
+          await tmpFile.delete();
+        }
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  /// Atomically reads, mutates, and persists preferences under [_prefsLock]
+  /// so concurrent writers (e.g. [KeyNestVaultScope] and onboarding) never
+  /// clobber unrelated keys.
+  static Future<void> updatePreferences(
+    void Function(Map<String, dynamic> prefs) mutator,
+  ) async {
+    await _prefsLock.synchronized(() async {
+      try {
+        final file = await _getPrefsFile();
+        Map<String, dynamic> current;
+        try {
+          current = _readPrefsUnlocked(file);
+        } catch (e, stack) {
+          _logger.warning(
+            'Failed reading existing UI preferences before merge, starting fresh',
+            e,
+            stack,
+          );
+          current = <String, dynamic>{};
+        }
+        mutator(current);
+        await _writePrefsUnlocked(file, current);
+      } catch (e, stack) {
+        _logger.severe('Failed to update UI preferences', e, stack);
+      }
+    });
+  }
+
+  static Future<Map<String, dynamic>> loadRawPreferences() async {
+    return _prefsLock.synchronized(() async {
+      try {
+        final file = await _getPrefsFile();
+        return _readPrefsUnlocked(file);
+      } catch (e, stack) {
+        _logger.warning(
+          'Failed to load UI preferences, returning defaults',
+          e,
+          stack,
+        );
+        return <String, dynamic>{};
+      }
+    });
   }
 
   static Future<void> saveRawPreferences(Map<String, dynamic> data) async {
-    try {
-      final file = await _getPrefsFile();
-      await file.parent.create(recursive: true);
-      await file.writeAsString(jsonEncode(data), flush: true);
-    } catch (e, stack) {
-      _logger.severe('Failed to save UI preferences', e, stack);
-    }
+    await updatePreferences((prefs) {
+      prefs.addAll(data);
+    });
   }
 }
 
@@ -234,13 +294,15 @@ class KeyNestVaultScope with ChangeNotifier {
         },
     };
 
-    await KeyNestPreferencesService.saveRawPreferences({
-      'tabStates': tabMap,
-      'selectedVaultSourcePath': getSelectedVaultSourcePath(KeyNestTab.secrets),
-      'selectedFolderUuid': getSelectedFolderUuid(KeyNestTab.secrets),
-      'sortModeIndex': getSortMode(KeyNestTab.secrets).index,
-      'selectedCategory': _selectedCategory,
-      'favoritesOnly': _favoritesOnly,
+    await KeyNestPreferencesService.updatePreferences((prefs) {
+      prefs['tabStates'] = tabMap;
+      prefs['selectedVaultSourcePath'] = getSelectedVaultSourcePath(
+        KeyNestTab.secrets,
+      );
+      prefs['selectedFolderUuid'] = getSelectedFolderUuid(KeyNestTab.secrets);
+      prefs['sortModeIndex'] = getSortMode(KeyNestTab.secrets).index;
+      prefs['selectedCategory'] = _selectedCategory;
+      prefs['favoritesOnly'] = _favoritesOnly;
     });
   }
 

@@ -52,11 +52,59 @@ class CloudConfigStore {
   CloudConfigStore._();
   static final CloudConfigStore instance = CloudConfigStore._();
 
+  static const String _desktopSecretCredentialKey =
+      'GoogleDesktopClientSecret';
+
   String? _dropboxAppKey;
   String? _googleWebClientId;
   String? _googleDesktopClientId;
   String? _googleDesktopClientSecret;
   bool _loaded = false;
+
+  Future<void> _persistDesktopClientSecret() async {
+    if (Env.value == null) {
+      return;
+    }
+    try {
+      final helper = CloudStorageHelper(
+        Env.value!,
+        PathUtils(),
+        Analytics(env: Env.value!),
+      );
+      final secret = _googleDesktopClientSecret?.trim();
+      await helper.saveCredentials(_desktopSecretCredentialKey, secret ?? '');
+    } catch (e, stack) {
+      _logger.warning(
+        'Failed to persist desktop client secret in secure storage: $e',
+        e,
+        stack,
+      );
+    }
+  }
+
+  Future<String?> _loadDesktopClientSecretFromSecureStorage() async {
+    if (Env.value == null) {
+      return null;
+    }
+    try {
+      final helper = CloudStorageHelper(
+        Env.value!,
+        PathUtils(),
+        Analytics(env: Env.value!),
+      );
+      final stored = await helper.loadCredentials(_desktopSecretCredentialKey);
+      if (stored != null && stored.trim().isNotEmpty) {
+        return stored.trim();
+      }
+    } catch (e, stack) {
+      _logger.warning(
+        'Failed to load desktop client secret from secure storage: $e',
+        e,
+        stack,
+      );
+    }
+    return null;
+  }
 
   Future<void> load({
     File? legacyFileOverride,
@@ -121,6 +169,7 @@ class CloudConfigStore {
       }
 
       // 2. Load non-sensitive configuration from cloud_config.json
+      bool migratedLegacySecretFromConfig = false;
       if (configFile.existsSync()) {
         final content = configFile.readAsStringSync();
         final map = json.decode(content) as Map<String, dynamic>;
@@ -133,11 +182,26 @@ class CloudConfigStore {
             (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_ID'] ??
                     map['googleDesktopClientId'])
                 as String?;
-        _googleDesktopClientSecret =
+        final legacyConfigSecret =
             (map['KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET'] ??
                     map['googleDesktopClientSecret'])
                 as String?;
+        if (legacyConfigSecret != null &&
+            legacyConfigSecret.trim().isNotEmpty) {
+          _googleDesktopClientSecret = legacyConfigSecret.trim();
+          migratedLegacySecretFromConfig = true;
+        }
         _logger.info('Loaded custom cloud configuration from storage.');
+      }
+
+      final secureSecret = await _loadDesktopClientSecretFromSecureStorage();
+      if (secureSecret != null && secureSecret.isNotEmpty) {
+        _googleDesktopClientSecret = secureSecret;
+      } else if (migratedLegacySecretFromConfig && Env.value != null) {
+        await _persistDesktopClientSecret();
+      }
+      if (migratedLegacySecretFromConfig) {
+        await _writeConfigFile(configFileOverride);
       }
     } catch (e, stack) {
       _logger.warning('Failed to load cloud config: $e', e, stack);
@@ -171,6 +235,7 @@ class CloudConfigStore {
       _googleDesktopClientSecret = googleDesktopClientSecret.trim().isEmpty
           ? null
           : googleDesktopClientSecret.trim();
+      await _persistDesktopClientSecret();
     }
 
     await _writeConfigFile(configFileOverride);
@@ -200,12 +265,7 @@ class CloudConfigStore {
         data['KEYNEST_GOOGLE_DESKTOP_CLIENT_ID'] = _googleDesktopClientId;
         data['googleDesktopClientId'] = _googleDesktopClientId;
       }
-      if (_googleDesktopClientSecret != null &&
-          _googleDesktopClientSecret!.isNotEmpty) {
-        data['KEYNEST_GOOGLE_DESKTOP_CLIENT_SECRET'] =
-            _googleDesktopClientSecret;
-        data['googleDesktopClientSecret'] = _googleDesktopClientSecret;
-      }
+      // Never write _googleDesktopClientSecret to plaintext cloud_config.json.
       if (!file.parent.existsSync()) {
         file.parent.createSync(recursive: true);
       }
@@ -225,9 +285,11 @@ class CloudConfigStore {
     await _writeConfigFile(configFileOverride);
   }
 
-  /// Clears user runtime override for Google Desktop Client ID and persists.
+  /// Clears user runtime override for Google Desktop Client ID and secret, and persists.
   Future<void> clearGoogleDesktopClientId({File? configFileOverride}) async {
     _googleDesktopClientId = null;
+    _googleDesktopClientSecret = null;
+    await _persistDesktopClientSecret();
     await _writeConfigFile(configFileOverride);
   }
 
@@ -243,6 +305,7 @@ class CloudConfigStore {
     _googleDesktopClientId = null;
     _googleDesktopClientSecret = null;
     _dropboxAppKey = null;
+    await _persistDesktopClientSecret();
     await _writeConfigFile(configFileOverride);
   }
 

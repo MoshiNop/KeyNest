@@ -316,6 +316,9 @@ class _GroupEditState extends State<GroupEdit> {
                     placeholder: loc.editGroupGroupNameLabel,
                     prefixIcon: Icons.folder_rounded,
                     autofocus: true,
+                    validator: (val) => (val == null || val.trim().isEmpty)
+                        ? 'Folder name is required'
+                        : null,
                     onChanged: (value) {
                       widget.onChanged();
                     },

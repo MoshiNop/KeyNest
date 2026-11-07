@@ -549,6 +549,12 @@ class KeyNestVaultMergeEngine {
         break;
 
       case KeyNestItemType.note:
+        final srcNotes = _normalizeString(
+          srcEntry.getString(KdbxKey('Notes'))?.getText(),
+        );
+        if (srcNotes.isEmpty) {
+          return null;
+        }
         for (final cand in candidates) {
           if (KeyNestItemTypeHelper.getItemType(cand) != KeyNestItemType.note) {
             continue;
@@ -556,7 +562,13 @@ class KeyNestVaultMergeEngine {
           final candTitle = _normalizeString(
             cand.getString(KdbxKeyCommon.TITLE)?.getText(),
           );
-          if (candTitle == srcTitle) {
+          if (candTitle != srcTitle) {
+            continue;
+          }
+          final candNotes = _normalizeString(
+            cand.getString(KdbxKey('Notes'))?.getText(),
+          );
+          if (candNotes == srcNotes) {
             matchingCandidates.add(cand);
           }
         }
@@ -760,11 +772,23 @@ class KeyNestVaultMergeEngine {
       }
     }
 
-    // Copy icon
+    // Copy icon, registering custom icon in target vault metadata if needed
     if (sourceEntry.customIcon != null) {
-      newEntry.customIcon = sourceEntry.customIcon;
+      final custom = sourceEntry.customIcon!;
+      if (!targetFile.body.meta.customIcons.containsKey(custom.uuid)) {
+        targetFile.body.meta.addCustomIcon(
+          KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+        );
+      }
+      newEntry.customIcon =
+          targetFile.body.meta.customIcons[custom.uuid] ?? custom;
     } else {
       newEntry.icon.set(sourceEntry.icon.get());
+    }
+
+    final srcTags = sourceEntry.tags.get();
+    if (srcTags != null && srcTags.isNotEmpty) {
+      newEntry.tags.set(srcTags);
     }
 
     // Copy binaries / attachments
@@ -817,9 +841,25 @@ class KeyNestVaultMergeEngine {
     }
 
     if (source.customIcon != null) {
-      destination.customIcon = source.customIcon;
+      final custom = source.customIcon!;
+      final targetMeta = destination.file.body.meta;
+      if (!targetMeta.customIcons.containsKey(custom.uuid)) {
+        targetMeta.addCustomIcon(
+          KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+        );
+      }
+      destination.customIcon =
+          targetMeta.customIcons[custom.uuid] ?? custom;
     } else {
+      destination.customIcon = null;
       destination.icon.set(source.icon.get());
+    }
+
+    final srcTags = source.tags.get();
+    if (srcTags != null && srcTags.isNotEmpty) {
+      destination.tags.set(srcTags);
+    } else {
+      destination.tags.remove();
     }
 
     for (final bin in source.binaryEntries) {

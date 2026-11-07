@@ -11,6 +11,7 @@ import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
 import 'package:keynest/ui/screens/add_payment_card.dart';
 import 'package:keynest/ui/screens/add_record_catalog.dart';
+import 'package:keynest/ui/screens/authenticator_tab.dart';
 import 'package:keynest/ui/screens/card_details.dart';
 import 'package:keynest/ui/screens/entry_details.dart';
 import 'package:keynest/ui/screens/keynest_home_shell.dart';
@@ -114,6 +115,8 @@ class FocusWorkaroundPageRoute<T> extends MaterialPageRoute<T> {
 
 class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey();
+  final GlobalKey _masterPaneKey = GlobalKey();
+  final GlobalKey _detailPaneKey = GlobalKey();
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   final List<KdbxEntry> _history = [];
@@ -123,6 +126,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   bool _isDraggingSplitter = false;
   int _activeRailIndex = 0;
   bool _isNarrowLayout = false;
+
+  Future<bool> _confirmDiscardActiveDetailIfNeeded() async {
+    return KeyNestDetailPaneGuard.confirmDiscardInSubtree(
+      _navigatorKey.currentContext,
+    );
+  }
 
   @override
   void initState() {
@@ -174,7 +183,17 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
-  void _navigateToEntry(KdbxEntry? entry, {bool isNew = false}) {
+  Future<void> _navigateToEntry(
+    KdbxEntry? entry, {
+    bool isNew = false,
+    bool checkUnsaved = true,
+  }) async {
+    if (checkUnsaved && entry != _selectedEntry) {
+      final canDiscard = await _confirmDiscardActiveDetailIfNeeded();
+      if (!canDiscard || !mounted) {
+        return;
+      }
+    }
     if (entry != null &&
         (_historyIndex < 0 ||
             _historyIndex >= _history.length ||
@@ -219,7 +238,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     return _historyIndex >= 0 && _historyIndex < _history.length - 1;
   }
 
-  void _navigateBack() {
+  Future<void> _navigateBack() async {
     if (_isNarrowLayout) {
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
@@ -232,6 +251,10 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       }
     }
     if (_historyIndex > 0) {
+      final canDiscard = await _confirmDiscardActiveDetailIfNeeded();
+      if (!canDiscard || !mounted) {
+        return;
+      }
       setState(() {
         _historyIndex--;
         _selectedEntry = _history[_historyIndex];
@@ -241,6 +264,10 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
         (route) => route.isFirst,
       );
     } else if (_historyIndex == 0 && _selectedEntry != null) {
+      final canDiscard = await _confirmDiscardActiveDetailIfNeeded();
+      if (!canDiscard || !mounted) {
+        return;
+      }
       setState(() {
         _historyIndex = -1;
         _selectedEntry = null;
@@ -256,8 +283,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
   }
 
-  void _navigateForward() {
+  Future<void> _navigateForward() async {
     if (_historyIndex < _history.length - 1) {
+      final canDiscard = await _confirmDiscardActiveDetailIfNeeded();
+      if (!canDiscard || !mounted) {
+        return;
+      }
       setState(() {
         _historyIndex++;
         _selectedEntry = _history[_historyIndex];
@@ -313,13 +344,10 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           }
           break;
         case 4: // Authenticator tab
-          final newEntry = kdbxBloc.createEntry(
-            file: activeVault,
-            group: activeFolder,
-          );
-          KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
-          Navigator.of(context).push(
-            EntryDetailsScreen.route(entry: newEntry, isNew: true),
+          await AuthenticatorTab.showAddOptions(
+            context,
+            initialFile: activeVault,
+            initialGroup: activeFolder,
           );
           break;
         case 0: // Secrets tab
@@ -336,12 +364,20 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
       return;
     }
 
+    final canDiscard = await _confirmDiscardActiveDetailIfNeeded();
+    if (!canDiscard || !mounted) {
+      return;
+    }
+
     switch (currentTab) {
       case 2: // Cards tab
         _navigatorKey.currentState?.pushAndRemoveUntil(
           AddPaymentCardScreen.route(
             initialFile: activeVault,
             initialGroup: activeFolder,
+            onSaved: (savedEntry) {
+              _navigateToEntry(savedEntry, isNew: false, checkUnsaved: false);
+            },
           ),
           (route) => route.isFirst,
         );
@@ -355,6 +391,9 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
             isEditing: true,
             initialFile: activeVault,
             initialGroup: activeFolder,
+            onSaved: (savedEntry) {
+              _navigateToEntry(savedEntry, isNew: false, checkUnsaved: false);
+            },
           ),
           (route) => route.isFirst,
         );
@@ -370,16 +409,18 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           ),
         );
         if (result is KdbxEntry) {
-          _navigateToEntry(result, isNew: true);
+          await _navigateToEntry(result, isNew: true, checkUnsaved: false);
         }
         break;
       case 4: // Authenticator tab
-        final newEntry = kdbxBloc.createEntry(
-          file: activeVault,
-          group: activeFolder,
+        await AuthenticatorTab.showAddOptions(
+          context,
+          initialFile: activeVault,
+          initialGroup: activeFolder,
+          onSaved: (savedEntry) {
+            _navigateToEntry(savedEntry, isNew: false, checkUnsaved: false);
+          },
         );
-        KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
-        _navigateToEntry(newEntry, isNew: true);
         break;
       case 0: // Secrets tab
       default:
@@ -387,7 +428,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           file: activeVault,
           group: activeFolder,
         );
-        _navigateToEntry(newEntry, isNew: true);
+        await _navigateToEntry(newEntry, isNew: true, checkUnsaved: false);
         break;
     }
   }
@@ -453,44 +494,29 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
   }
 
   void _onEntrySelected(KdbxEntry entry, EntrySelectionType type) {
-    if (KeyNestPlatform.isDesktopOrWeb) {
-      if (_isNarrowLayout) {
-        if (_historyIndex >= 0 && _historyIndex < _history.length - 1) {
-          _history.removeRange(_historyIndex + 1, _history.length);
-        }
-        _history.add(entry);
-        _historyIndex = _history.length - 1;
+    if (KeyNestPlatform.isDesktopOrWeb && _isNarrowLayout) {
+      if (type == EntrySelectionType.passiveHighlight) {
         setState(() => _selectedEntry = entry);
-        Navigator.of(context).push(
-          _routeForEntry(entry, type == EntrySelectionType.newEntry),
-        ).then((_) {
-          if (mounted) {
-            setState(() => _selectedEntry = null);
-          }
-        });
         return;
       }
-      _navigateToEntry(entry, isNew: type == EntrySelectionType.newEntry);
-      return;
-    }
-
-    if (_selectedEntry != entry) {
-      final push = _navigatorKey.currentState!.pushAndRemoveUntil(
-        _routeForEntry(
-          entry,
-          type == EntrySelectionType.newEntry,
-        ),
-        (route) => route.isFirst,
-      );
-      push.then((dynamic value) {
-        _logger.finer('entry route was popped.');
-        if (entry == _selectedEntry && mounted) {
+      if (_historyIndex >= 0 && _historyIndex < _history.length - 1) {
+        _history.removeRange(_historyIndex + 1, _history.length);
+      }
+      _history.add(entry);
+      _historyIndex = _history.length - 1;
+      setState(() => _selectedEntry = entry);
+      Navigator.of(context).push(
+        _routeForEntry(entry, type == EntrySelectionType.newEntry),
+      ).then((_) {
+        if (mounted) {
           setState(() => _selectedEntry = null);
         }
       });
-      setState(() {
-        _selectedEntry = entry;
-      });
+      return;
+    }
+
+    if (_selectedEntry != entry || type == EntrySelectionType.newEntry) {
+      _navigateToEntry(entry, isNew: type == EntrySelectionType.newEntry);
     }
   }
 
@@ -632,8 +658,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                   icon: const Icon(Icons.add_rounded, size: 18),
                   tooltip: 'New Item',
                   style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A85EA),
-                    foregroundColor: Colors.white,
+                    backgroundColor: isDark
+                        ? KeyNestPalette.primaryDark
+                        : KeyNestPalette.primary,
+                    foregroundColor: isDark
+                        ? const Color(0xFF00315D)
+                        : Colors.white,
                     visualDensity: VisualDensity.compact,
                   ),
                 )
@@ -645,8 +675,12 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
                   ),
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A85EA),
-                    foregroundColor: Colors.white,
+                    backgroundColor: isDark
+                        ? KeyNestPalette.primaryDark
+                        : KeyNestPalette.primary,
+                    foregroundColor: isDark
+                        ? const Color(0xFF00315D)
+                        : Colors.white,
                     padding:
                         const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     shape: RoundedRectangleBorder(
@@ -681,82 +715,86 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           bottom: BorderSide(color: borderColor, width: 1),
         ),
       ),
-      child: Row(
-        children: [
-          // 1. Vault Chip
-          Builder(
-            builder: (chipCtx) => KeyNestChip(
-              label: selectedVault == null
-                  ? 'All Vault Items'
-                  : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
-              icon: Icons.keyboard_arrow_down_rounded,
-              isSelected: selectedVault != null,
-              onTap: () => KeyNestTopChipsBar.showVaultSelectionSheet(
-                chipCtx,
-                kdbxBloc,
-                tab: scope.currentActiveTab,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // 2. Sort Chip
-          Builder(
-            builder: (chipCtx) => KeyNestChip(
-              label: KeyNestTopChipsBar.sortLabel(scope.sortMode),
-              icon: Icons.sort_rounded,
-              isSelected: scope.sortMode != VaultSortMode.alphabeticalAsc,
-              onTap: () => _showDesktopSortDialog(chipCtx, scope),
-            ),
-          ),
-          const SizedBox(width: 8),
-
-          // 3. Category Chip (for secrets/passwords tab)
-          if (currentTab == 0) ...[
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // 1. Vault Chip
             Builder(
               builder: (chipCtx) => KeyNestChip(
-                label: scope.selectedCategory ?? 'Category',
+                label: selectedVault == null
+                    ? 'All Vault Items'
+                    : KeyNestVaultScope.cleanVaultName(kdbxBloc, selectedVault),
                 icon: Icons.keyboard_arrow_down_rounded,
-                isSelected: scope.selectedCategory != null,
-                onTap: () async {
-                  final cat = await KeyNestCategoryPicker.show(
-                    chipCtx,
-                    selectedCategory: scope.selectedCategory,
-                  );
-                  if (cat == null || cat == 'All') {
-                    scope.setSelectedCategory(null);
-                  } else {
-                    scope.setSelectedCategory(cat);
-                  }
-                },
+                isSelected: selectedVault != null,
+                onTap: () => KeyNestTopChipsBar.showVaultSelectionSheet(
+                  chipCtx,
+                  kdbxBloc,
+                  tab: scope.currentActiveTab,
+                ),
               ),
             ),
             const SizedBox(width: 8),
-          ],
 
-          // 4. Favorites Chip
-          KeyNestChip(
-            label: 'Favorites',
-            icon: Icons.star_rounded,
-            isSelected: scope.favoritesOnly,
-            onTap: () {
-              scope.setFavoritesOnly(!scope.favoritesOnly);
-            },
-          ),
-
-          // 5. Clear Filter Chip if active
-          if (scope.selectedCategory != null || scope.favoritesOnly) ...[
+            // 2. Sort Chip
+            Builder(
+              builder: (chipCtx) => KeyNestChip(
+                label: KeyNestTopChipsBar.sortLabel(scope.sortMode),
+                icon: Icons.sort_rounded,
+                isSelected: scope.sortMode != VaultSortMode.alphabeticalAsc,
+                onTap: () => _showDesktopSortDialog(chipCtx, scope),
+              ),
+            ),
             const SizedBox(width: 8),
+
+            // 3. Category Chip (for secrets/passwords tab)
+            if (currentTab == 0) ...[
+              Builder(
+                builder: (chipCtx) => KeyNestChip(
+                  label: scope.selectedCategory ?? 'Category',
+                  icon: Icons.keyboard_arrow_down_rounded,
+                  isSelected: scope.selectedCategory != null,
+                  onTap: () async {
+                    final cat = await KeyNestCategoryPicker.show(
+                      chipCtx,
+                      selectedCategory: scope.selectedCategory,
+                    );
+                    if (cat == null || cat == 'All') {
+                      scope.setSelectedCategory(null);
+                    } else {
+                      scope.setSelectedCategory(cat);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+
+            // 4. Favorites Chip
             KeyNestChip(
-              label: 'Clear filter',
-              icon: Icons.close_rounded,
+              label: 'Favorites',
+              icon: Icons.star_rounded,
+              isSelected: scope.favoritesOnly,
               onTap: () {
-                scope.setSelectedCategory(null);
-                scope.setFavoritesOnly(false);
+                scope.setFavoritesOnly(!scope.favoritesOnly);
               },
             ),
+
+            // 5. Clear Filter Chip if active
+            if (scope.selectedCategory != null || scope.favoritesOnly) ...[
+              const SizedBox(width: 8),
+              KeyNestChip(
+                label: 'Clear filter',
+                icon: Icons.close_rounded,
+                onTap: () {
+                  scope.setSelectedCategory(null);
+                  scope.setFavoritesOnly(false);
+                },
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   },
@@ -810,7 +848,9 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                         Icon(
                           isSelected ? Icons.check_rounded : null,
                           size: 16,
-                          color: const Color(0xFF0A85EA),
+                          color: isDark
+                              ? KeyNestPalette.primaryDark
+                              : KeyNestPalette.primary,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -822,7 +862,9 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                                   ? FontWeight.w600
                                   : FontWeight.normal,
                               color: isSelected
-                                  ? const Color(0xFF0A85EA)
+                                  ? (isDark
+                                        ? KeyNestPalette.primaryDark
+                                        : KeyNestPalette.primary)
                                   : (isDark ? Colors.white : Colors.black87),
                             ),
                           ),
@@ -855,32 +897,70 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
           final effectiveListWidth =
               _listPaneWidth.clamp(280.0, maxAllowedListWidth);
 
+          void switchToTab(int index) {
+            setState(() => _activeRailIndex = index);
+            KeyNestVaultScope.instance.setActiveTab(index);
+          }
+
+          final masterPane = ScaffoldMessenger(
+            key: _masterPaneKey,
+            child: KeyNestHomeShell(
+              selectedEntry: _selectedEntry,
+              isDesktopMaster: true,
+              onEntrySelected: _onEntrySelected,
+              onAddNewItem: _handleAddNewItem,
+            ),
+          );
+
+          final detailPane = ScaffoldMessenger(
+            key: _detailPaneKey,
+            child: Navigator(
+              key: _navigatorKey,
+              requestFocus: false,
+              onGenerateRoute: (settings) {
+                assert(settings.name == Navigator.defaultRouteName);
+                return MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (context) => EmptyStateInitialRoute(
+                    onAddNewItem: _handleAddNewItem,
+                  ),
+                );
+              },
+            ),
+          );
+
           return CallbackShortcuts(
             bindings: <ShortcutActivator, VoidCallback>{
-              const SingleActivator(LogicalKeyboardKey.digit1, control: true): () {
-                setState(() => _activeRailIndex = 0);
-                KeyNestVaultScope.instance.setActiveTab(0);
-              },
-              const SingleActivator(LogicalKeyboardKey.digit2, control: true): () {
-                setState(() => _activeRailIndex = 1);
-                KeyNestVaultScope.instance.setActiveTab(1);
-              },
-              const SingleActivator(LogicalKeyboardKey.digit3, control: true): () {
-                setState(() => _activeRailIndex = 2);
-                KeyNestVaultScope.instance.setActiveTab(2);
-              },
-              const SingleActivator(LogicalKeyboardKey.digit4, control: true): () {
-                setState(() => _activeRailIndex = 3);
-                KeyNestVaultScope.instance.setActiveTab(3);
-              },
-              const SingleActivator(LogicalKeyboardKey.digit5, control: true): () {
-                setState(() => _activeRailIndex = 4);
-                KeyNestVaultScope.instance.setActiveTab(4);
-              },
+              const SingleActivator(LogicalKeyboardKey.digit1, control: true):
+                  () => switchToTab(0),
+              const SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+                  () => switchToTab(0),
+              const SingleActivator(LogicalKeyboardKey.digit2, control: true):
+                  () => switchToTab(1),
+              const SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+                  () => switchToTab(1),
+              const SingleActivator(LogicalKeyboardKey.digit3, control: true):
+                  () => switchToTab(2),
+              const SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+                  () => switchToTab(2),
+              const SingleActivator(LogicalKeyboardKey.digit4, control: true):
+                  () => switchToTab(3),
+              const SingleActivator(LogicalKeyboardKey.digit4, meta: true):
+                  () => switchToTab(3),
+              const SingleActivator(LogicalKeyboardKey.digit5, control: true):
+                  () => switchToTab(4),
+              const SingleActivator(LogicalKeyboardKey.digit5, meta: true):
+                  () => switchToTab(4),
               const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
                 _searchFocusNode.requestFocus();
               },
+              const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
+                _searchFocusNode.requestFocus();
+              },
               const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+                _handleAddNewItem();
+              },
+              const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () {
                 _handleAddNewItem();
               },
             },
@@ -893,12 +973,7 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                   if (!isNarrow)
                     KeyNestDesktopNavRail(
                       currentIndex: _activeRailIndex,
-                      onTap: (index) {
-                        setState(() {
-                          _activeRailIndex = index;
-                        });
-                        KeyNestVaultScope.instance.setActiveTab(index);
-                      },
+                      onTap: switchToTab,
                     ),
                   // 2. Right of Rail: Top Bar + Chips Bar + List & Detail Panes
                   Expanded(
@@ -911,55 +986,28 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
                         ),
                         _buildDesktopChipsBar(context, isDark),
                         Expanded(
-                          child: isNarrow
-                              ? ScaffoldMessenger(
-                                  child: KeyNestHomeShell(
-                                    selectedEntry: _selectedEntry,
-                                    isDesktopMaster: false,
-                                    onEntrySelected: _onEntrySelected,
-                                    onAddNewItem: _handleAddNewItem,
+                          child: Row(
+                            children: [
+                              if (isNarrow)
+                                Expanded(child: masterPane)
+                              else
+                                SizedBox(
+                                  width: effectiveListWidth,
+                                  child: masterPane,
+                                ),
+                              if (!isNarrow) _buildSplitterHandle(context, isDark),
+                              if (isNarrow)
+                                Offstage(
+                                  offstage: true,
+                                  child: SizedBox(
+                                    width: 340,
+                                    child: detailPane,
                                   ),
                                 )
-                              : Row(
-                                  children: [
-                                    // Middle Pane: List
-                                    SizedBox(
-                                      width: effectiveListWidth,
-                                      child: ScaffoldMessenger(
-                                        child: KeyNestHomeShell(
-                                          selectedEntry: _selectedEntry,
-                                          isDesktopMaster: true,
-                                          onEntrySelected: _onEntrySelected,
-                                          onAddNewItem: _handleAddNewItem,
-                                        ),
-                                      ),
-                                    ),
-                                    // Splitter
-                                    _buildSplitterHandle(context, isDark),
-                                    // Right Pane: Detail (Full-featured screens via Navigator)
-                                    Expanded(
-                                      child: ScaffoldMessenger(
-                                        child: Navigator(
-                                          key: _navigatorKey,
-                                        requestFocus: false,
-                                        onGenerateRoute: (settings) {
-                                          assert(
-                                            settings.name ==
-                                                Navigator.defaultRouteName,
-                                          );
-                                          return MaterialPageRoute<void>(
-                                            settings: settings,
-                                            builder: (context) =>
-                                                EmptyStateInitialRoute(
-                                              onAddNewItem: _handleAddNewItem,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                ),
+                              else
+                                Expanded(child: detailPane),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -973,38 +1021,44 @@ class _MainAppTabletScaffoldState extends State<MainAppTabletScaffold> {
     }
 
     // Touch Tablet Layout (iPad, Android Tablet)
-    return Row(
-      children: <Widget>[
-        SizedBox(
-          width: 384,
-          child: Navigator(
-            onGenerateRoute: (settings) {
-              assert(settings.name == Navigator.defaultRouteName);
-              return MaterialPageRoute<void>(
-                settings: settings,
-                builder: (context) => KeyNestHomeShell(
-                  selectedEntry: _selectedEntry,
-                  isDesktopMaster: false,
-                  onEntrySelected: _onEntrySelected,
-                ),
-              );
-            },
+    return Scaffold(
+      backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
+      body: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 384,
+            child: Navigator(
+              onGenerateRoute: (settings) {
+                assert(settings.name == Navigator.defaultRouteName);
+                return MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (context) => KeyNestHomeShell(
+                    selectedEntry: _selectedEntry,
+                    isDesktopMaster: false,
+                    onEntrySelected: _onEntrySelected,
+                    onAddNewItem: _handleAddNewItem,
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-        Expanded(
-          child: Navigator(
-            key: _navigatorKey,
-            requestFocus: false,
-            onGenerateRoute: (settings) {
-              assert(settings.name == Navigator.defaultRouteName);
-              return MaterialPageRoute<void>(
-                settings: settings,
-                builder: (context) => EmptyStateInitialRoute(),
-              );
-            },
+          Expanded(
+            child: Navigator(
+              key: _navigatorKey,
+              requestFocus: false,
+              onGenerateRoute: (settings) {
+                assert(settings.name == Navigator.defaultRouteName);
+                return MaterialPageRoute<void>(
+                  settings: settings,
+                  builder: (context) => EmptyStateInitialRoute(
+                    onAddNewItem: _handleAddNewItem,
+                  ),
+                );
+              },
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

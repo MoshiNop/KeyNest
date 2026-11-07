@@ -45,7 +45,9 @@ class OtpFieldEntryEditor extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color:
-                (remaining <= 5 ? KeyNestPalette.error : KeyNestPalette.primary)
+                (remaining <= 5
+                        ? KeyNestPalette.errorColorFor(isDark)
+                        : KeyNestPalette.primaryColorFor(isDark))
                     .withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -55,8 +57,8 @@ class OtpFieldEntryEditor extends StatelessWidget {
               fontSize: 11,
               fontWeight: FontWeight.bold,
               color: remaining <= 5
-                  ? KeyNestPalette.error
-                  : KeyNestPalette.primary,
+                  ? KeyNestPalette.errorColorFor(isDark)
+                  : KeyNestPalette.primaryColorFor(isDark),
             ),
           ),
         ),

@@ -28,7 +28,17 @@ class FlutterArgon2 extends Argon2 {
 
   static Uint8List _runArgon2(Argon2Arguments args) {
     LoggingUtils().setupLogging(fromMainIsolate: false);
-    return singleton!.argon2(args);
+    try {
+      return singleton!.argon2(args);
+    } finally {
+      // Scrub worker-isolate copies of key material and salt after KDF completes.
+      try {
+        args.key.fillRange(0, args.key.length, 0);
+      } catch (_) {}
+      try {
+        args.salt.fillRange(0, args.salt.length, 0);
+      } catch (_) {}
+    }
   }
 
   @override

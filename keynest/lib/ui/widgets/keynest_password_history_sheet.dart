@@ -5,9 +5,11 @@ import 'package:intl/intl.dart';
 import 'package:kdbx/kdbx.dart';
 import 'package:kdbx/src/kdbx_entry.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
+import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/widgets/keynest_card.dart';
+import 'package:keynest/utils/item_type_helper.dart';
 import 'package:provider/provider.dart';
 
 class KeyNestPasswordHistorySheet extends StatefulWidget {
@@ -399,6 +401,10 @@ class _KeyNestPasswordHistorySheetState
 
       try {
         await kdbxBloc.saveFile(entry.file);
+        KeyNestItemTypeHelper.invalidateCache(entry);
+        try {
+          KeyNestVaultScope.instance.notifyScopeChanged();
+        } catch (_) {}
         if (mounted) {
           widget.onRestore?.call(historicalPassword);
           Navigator.of(context).pop();

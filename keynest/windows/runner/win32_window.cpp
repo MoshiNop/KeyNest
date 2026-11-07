@@ -126,6 +126,11 @@ bool Win32Window::CreateAndShow(const std::wstring& title,
     return false;
   }
 
+  // Exclude vault window from screen capture / Windows Recall (WDA_EXCLUDEFROMCAPTURE = 0x11).
+  if (!SetWindowDisplayAffinity(window, 0x00000011)) {
+    SetWindowDisplayAffinity(window, WDA_MONITOR);
+  }
+
   HINSTANCE instance = GetModuleHandle(nullptr);
   HICON hIconSmall = static_cast<HICON>(LoadImage(
       instance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON,
@@ -189,6 +194,15 @@ Win32Window::MessageHandler(HWND hwnd,
 
       return 0;
     }
+    case WM_GETMINMAXINFO: {
+      auto* mmi = reinterpret_cast<MINMAXINFO*>(lparam);
+      UINT const dpi = FlutterDesktopGetDpiForHWND(hwnd);
+      double const scale_factor = dpi > 0 ? (static_cast<double>(dpi) / 96.0) : 1.0;
+      mmi->ptMinTrackSize.x = Scale(800, scale_factor);
+      mmi->ptMinTrackSize.y = Scale(600, scale_factor);
+      return 0;
+    }
+
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {

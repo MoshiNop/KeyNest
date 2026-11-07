@@ -272,43 +272,56 @@ class GoogleDriveClient {
     return null;
   }
 
+  static String escapeDriveQueryLiteral(String raw) =>
+      raw.replaceAll(r'\', r'\\').replaceAll("'", r"\'");
+
   // API Methods
   /// Finds files matching [vaultFilename] in the appDataFolder.
   /// If multiple matches exist, returns them sorted newest first.
   Future<List<GoogleDriveFileMetadata>> findFilesInAppDataFolder(
     String vaultFilename,
   ) async {
-    final query = "name = '$vaultFilename' and trashed = false";
-    final url = Uri.parse('$_apiBase/files').replace(
-      queryParameters: {
-        'spaces': 'appDataFolder',
-        'q': query,
-        'fields': 'files(id,name,version,md5Checksum,modifiedTime,size)',
-      },
-    );
+    final safeName = escapeDriveQueryLiteral(vaultFilename);
+    final query = "name = '$safeName' and trashed = false";
+    final list = <GoogleDriveFileMetadata>[];
+    String? pageToken;
 
-    final response = await _sendWithRetry((token) {
-      return _httpClient.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $token',
+    do {
+      final url = Uri.parse('$_apiBase/files').replace(
+        queryParameters: {
+          'spaces': 'appDataFolder',
+          'q': query,
+          'fields':
+              'nextPageToken,files(id,name,version,md5Checksum,modifiedTime,size)',
+          'pageToken': ?pageToken,
         },
       );
-    });
 
-    if (response.statusCode != 200) {
-      throw GoogleDriveClientException(
-        'Failed to search appDataFolder: HTTP ${response.statusCode}',
-        statusCode: response.statusCode,
+      final response = await _sendWithRetry((token) {
+        return _httpClient.get(
+          url,
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        );
+      });
+
+      if (response.statusCode != 200) {
+        throw GoogleDriveClientException(
+          'Failed to search appDataFolder: HTTP ${response.statusCode}',
+          statusCode: response.statusCode,
+        );
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final rawFiles = data['files'] as List<dynamic>? ?? [];
+      list.addAll(
+        rawFiles.map(
+          (f) => GoogleDriveFileMetadata.fromJson(f as Map<String, dynamic>),
+        ),
       );
-    }
-
-    final data = json.decode(response.body) as Map<String, dynamic>;
-    final rawFiles = data['files'] as List<dynamic>? ?? [];
-
-    final list = rawFiles
-        .map((f) => GoogleDriveFileMetadata.fromJson(f as Map<String, dynamic>))
-        .toList();
+      pageToken = data['nextPageToken'] as String?;
+    } while (pageToken != null && pageToken.isNotEmpty);
 
     // Sort newest modifiedTime first
     list.sort((a, b) {
@@ -444,38 +457,47 @@ class GoogleDriveClient {
     String folderId, [
     String? vaultFilename,
   ]) async {
+    final safeFolderId = escapeDriveQueryLiteral(folderId);
     final query = vaultFilename != null
-        ? "name = '$vaultFilename' and '$folderId' in parents and trashed = false"
-        : "'$folderId' in parents and trashed = false";
+        ? "name = '${escapeDriveQueryLiteral(vaultFilename)}' and '$safeFolderId' in parents and trashed = false"
+        : "'$safeFolderId' in parents and trashed = false";
 
-    final url = Uri.parse('$_apiBase/files').replace(
-      queryParameters: {
-        'q': query,
-        'fields':
-            'files(id,name,version,md5Checksum,modifiedTime,size,trashed,parents)',
-      },
-    );
+    final list = <GoogleDriveFileMetadata>[];
+    String? pageToken;
 
-    final response = await _sendWithRetry((token) {
-      return _httpClient.get(
-        url,
-        headers: {'Authorization': 'Bearer $token'},
+    do {
+      final url = Uri.parse('$_apiBase/files').replace(
+        queryParameters: {
+          'q': query,
+          'fields':
+              'nextPageToken,files(id,name,version,md5Checksum,modifiedTime,size,trashed,parents)',
+          'pageToken': ?pageToken,
+        },
       );
-    });
 
-    if (response.statusCode != 200) {
-      throw GoogleDriveClientException(
-        'Failed to search files in folder $folderId: HTTP ${response.statusCode}',
-        statusCode: response.statusCode,
+      final response = await _sendWithRetry((token) {
+        return _httpClient.get(
+          url,
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      });
+
+      if (response.statusCode != 200) {
+        throw GoogleDriveClientException(
+          'Failed to search files in folder $folderId: HTTP ${response.statusCode}',
+          statusCode: response.statusCode,
+        );
+      }
+
+      final data = json.decode(response.body) as Map<String, dynamic>;
+      final rawFiles = data['files'] as List<dynamic>? ?? [];
+      list.addAll(
+        rawFiles.map(
+          (f) => GoogleDriveFileMetadata.fromJson(f as Map<String, dynamic>),
+        ),
       );
-    }
-
-    final data = json.decode(response.body) as Map<String, dynamic>;
-    final rawFiles = data['files'] as List<dynamic>? ?? [];
-
-    final list = rawFiles
-        .map((f) => GoogleDriveFileMetadata.fromJson(f as Map<String, dynamic>))
-        .toList();
+      pageToken = data['nextPageToken'] as String?;
+    } while (pageToken != null && pageToken.isNotEmpty);
 
     list.sort((a, b) {
       final tA = a.modifiedTime ?? DateTime.fromMillisecondsSinceEpoch(0);

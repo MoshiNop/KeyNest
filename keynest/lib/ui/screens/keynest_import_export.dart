@@ -264,10 +264,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
         return;
       }
       if (result.success) {
-        KeyNestVaultScope.instance.setSelectedVault(
-          kdbxBloc,
-          destination.file,
-        );
+        KeyNestVaultScope.instance.setSelectedVault(kdbxBloc, destination.file);
         KeyNestVaultScope.instance.notifyScopeChanged();
         _showSnack('Successfully merged ${result.count} entries from KDBX!');
       } else {
@@ -381,10 +378,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
     try {
       final xFile = await openFile(
         acceptedTypeGroups: [
-          const XTypeGroup(
-            label: 'JSON Document',
-            extensions: ['json'],
-          ),
+          const XTypeGroup(label: 'JSON Document', extensions: ['json']),
         ],
       );
       if (xFile == null) {
@@ -426,240 +420,252 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
   }
 
   Future<({String password, Uint8List? keyFileBytes})?>
-  _promptImportCredentialsDialog({
-    required String title,
-  }) async {
+  _promptImportCredentialsDialog({required String title}) async {
     final controller = TextEditingController();
     Uint8List? selectedKeyBytes;
     String? selectedKeyName;
 
-    return await showDialog<({String password, Uint8List? keyFileBytes})>(
-      context: context,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+    try {
+      return await showDialog<({String password, Uint8List? keyFileBytes})>(
+        context: context,
+        builder: (dialogCtx) {
+          return StatefulBuilder(
+            builder: (dialogCtx, setDialogState) {
+              final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+              return AlertDialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
                 ),
-              ),
-              content: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: KeyNestPlatform.isDesktopOrWeb
-                      ? 460
-                      : double.infinity,
+                title: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                  const Text(
-                    'Enter master password and/or select key file:',
-                    style: TextStyle(fontSize: 13),
+                content: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: KeyNestPlatform.isDesktopOrWeb
+                        ? 460
+                        : double.infinity,
                   ),
-                  const SizedBox(height: 16),
-                  PasswordInputField(
-                    controller: controller,
-                    autofocus: true,
-                    labelText: 'Master Password',
-                  ),
-                  const SizedBox(height: 12),
-                  // Key file row
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? KeyNestPalette.surfaceDark
-                          : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isDark ? Colors.white12 : Colors.grey.shade300,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Enter master password and/or select key file:',
+                        style: TextStyle(fontSize: 13),
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.vpn_key_rounded,
-                          size: 18,
-                          color: isDark
-                              ? KeyNestPalette.primaryDark
-                              : KeyNestPalette.primary,
+                      const SizedBox(height: 16),
+                      PasswordInputField(
+                        controller: controller,
+                        autofocus: true,
+                        labelText: 'Master Password',
+                      ),
+                      const SizedBox(height: 12),
+                      // Key file row
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            selectedKeyBytes == null
-                                ? 'No Key File Selected'
-                                : (selectedKeyName ?? 'Key File Selected'),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? KeyNestPalette.surfaceDark
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white12
+                                : Colors.grey.shade300,
                           ),
                         ),
-                        if (selectedKeyBytes != null)
-                          IconButton(
-                            icon: const Icon(Icons.close, size: 16),
-                            onPressed: () => setDialogState(() {
-                              selectedKeyBytes = null;
-                              selectedKeyName = null;
-                            }),
-                          )
-                        else
-                          Builder(
-                            builder: (btnCtx) => TextButton(
-                              onPressed: () async {
-                                if (KeyNestPlatform.isDesktopOrWeb) {
-                                  final res =
-                                      await showDesktopKeyFileSelectionPopover(
-                                    anchorContext: btnCtx,
-                                    currentFileName: selectedKeyName,
-                                  );
-                                  if (res != null) {
-                                    setDialogState(() {
-                                      if (res.cleared) {
-                                        selectedKeyBytes = null;
-                                        selectedKeyName = null;
-                                      } else {
-                                        selectedKeyBytes = res.bytes;
-                                        selectedKeyName = res.name;
-                                      }
-                                    });
-                                  }
-                                  return;
-                                }
-
-                                try {
-                                  if (KeyNestPlatform.isIOS ||
-                                      KeyNestPlatform.isAndroid) {
-                                    await FilePickerWritable().openFile((
-                                      fileInfo,
-                                      file,
-                                    ) async {
-                                      final bytes = await file.readAsBytes();
-                                      try {
-                                        KeyNestKeyFile.parse(
-                                          bytes,
-                                          fileName: fileInfo.fileName,
-                                        );
-                                        setDialogState(() {
-                                          selectedKeyBytes = bytes;
-                                          selectedKeyName = fileInfo.fileName;
-                                        });
-                                      } on KeyFileValidationException catch (e) {
-                                        if (dialogCtx.mounted) {
-                                          await DialogUtils.showSimpleAlertDialog(
-                                            dialogCtx,
-                                            'Invalid Key File',
-                                            e.message,
-                                            routeAppend: 'invalidKeyFile',
-                                          );
-                                        }
-                                      }
-                                      return fileInfo;
-                                    });
-                                  } else {
-                                    const typeGroup = XTypeGroup(
-                                      label: 'Key Files (*.key, *.keyx, *.xml)',
-                                      extensions: [
-                                        'key',
-                                        'keyx',
-                                        'xml',
-                                        'bin',
-                                        'txt',
-                                      ],
-                                    );
-                                    final file = await openFile(
-                                      acceptedTypeGroups: [typeGroup],
-                                    );
-                                    if (file != null) {
-                                      final bytes = await file.readAsBytes();
-                                      try {
-                                        KeyNestKeyFile.parse(
-                                          bytes,
-                                          fileName: file.name,
-                                        );
-                                        setDialogState(() {
-                                          selectedKeyBytes = bytes;
-                                          selectedKeyName = file.name;
-                                        });
-                                      } on KeyFileValidationException catch (e) {
-                                        if (dialogCtx.mounted) {
-                                          await DialogUtils.showSimpleAlertDialog(
-                                            dialogCtx,
-                                            'Invalid Key File',
-                                            e.message,
-                                            routeAppend: 'invalidKeyFile',
-                                          );
-                                        }
-                                      }
-                                    }
-                                  }
-                                } catch (_) {}
-                              },
-                              child: const Text(
-                                'Browse',
-                                style: TextStyle(fontSize: 12),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.vpn_key_rounded,
+                              size: 18,
+                              color: isDark
+                                  ? KeyNestPalette.primaryDark
+                                  : KeyNestPalette.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                selectedKeyBytes == null
+                                    ? 'No Key File Selected'
+                                    : (selectedKeyName ?? 'Key File Selected'),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ),
-                      ],
+                            if (selectedKeyBytes != null)
+                              IconButton(
+                                icon: const Icon(Icons.close, size: 16),
+                                onPressed: () => setDialogState(() {
+                                  selectedKeyBytes = null;
+                                  selectedKeyName = null;
+                                }),
+                              )
+                            else
+                              Builder(
+                                builder: (btnCtx) => TextButton(
+                                  onPressed: () async {
+                                    if (KeyNestPlatform.isDesktopOrWeb) {
+                                      final res =
+                                          await showDesktopKeyFileSelectionPopover(
+                                            anchorContext: btnCtx,
+                                            currentFileName: selectedKeyName,
+                                          );
+                                      if (res != null) {
+                                        setDialogState(() {
+                                          if (res.cleared) {
+                                            selectedKeyBytes = null;
+                                            selectedKeyName = null;
+                                          } else {
+                                            selectedKeyBytes = res.bytes;
+                                            selectedKeyName = res.name;
+                                          }
+                                        });
+                                      }
+                                      return;
+                                    }
+
+                                    try {
+                                      if (KeyNestPlatform.isIOS ||
+                                          KeyNestPlatform.isAndroid) {
+                                        await FilePickerWritable().openFile((
+                                          fileInfo,
+                                          file,
+                                        ) async {
+                                          final bytes = await file
+                                              .readAsBytes();
+                                          try {
+                                            KeyNestKeyFile.parse(
+                                              bytes,
+                                              fileName: fileInfo.fileName,
+                                            );
+                                            setDialogState(() {
+                                              selectedKeyBytes = bytes;
+                                              selectedKeyName =
+                                                  fileInfo.fileName;
+                                            });
+                                          } on KeyFileValidationException catch (
+                                            e
+                                          ) {
+                                            if (dialogCtx.mounted) {
+                                              await DialogUtils.showSimpleAlertDialog(
+                                                dialogCtx,
+                                                'Invalid Key File',
+                                                e.message,
+                                                routeAppend: 'invalidKeyFile',
+                                              );
+                                            }
+                                          }
+                                          return fileInfo;
+                                        });
+                                      } else {
+                                        const typeGroup = XTypeGroup(
+                                          label: 'Key Files (*.key, *.keyx, *.xml)',
+                                          extensions: [
+                                            'key',
+                                            'keyx',
+                                            'xml',
+                                            'bin',
+                                            'txt',
+                                          ],
+                                        );
+                                        final file = await openFile(
+                                          acceptedTypeGroups: [typeGroup],
+                                        );
+                                        if (file != null) {
+                                          final bytes = await file
+                                              .readAsBytes();
+                                          try {
+                                            KeyNestKeyFile.parse(
+                                              bytes,
+                                              fileName: file.name,
+                                            );
+                                            setDialogState(() {
+                                              selectedKeyBytes = bytes;
+                                              selectedKeyName = file.name;
+                                            });
+                                          } on KeyFileValidationException catch (
+                                            e
+                                          ) {
+                                            if (dialogCtx.mounted) {
+                                              await DialogUtils.showSimpleAlertDialog(
+                                                dialogCtx,
+                                                'Invalid Key File',
+                                                e.message,
+                                                routeAppend: 'invalidKeyFile',
+                                              );
+                                            }
+                                          }
+                                        }
+                                      }
+                                    } catch (_) {}
+                                  },
+                                  child: const Text(
+                                    'Browse',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogCtx).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isDark
+                          ? KeyNestPalette.primaryDark
+                          : KeyNestPalette.primary,
+                      foregroundColor: isDark
+                          ? const Color(0xFF00315D)
+                          : Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () {
+                      if (controller.text.isEmpty && selectedKeyBytes == null) {
+                        return;
+                      }
+                      Navigator.of(dialogCtx).pop((
+                        password: controller.text,
+                        keyFileBytes: selectedKeyBytes,
+                      ));
+                    },
+                    child: Text(
+                      'Unlock & Merge',
+                      style: TextStyle(
+                        color: isDark ? const Color(0xFF00315D) : Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isDark
-                        ? KeyNestPalette.primaryDark
-                        : KeyNestPalette.primary,
-                    foregroundColor: isDark
-                        ? const Color(0xFF00315D)
-                        : Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  onPressed: () {
-                    if (controller.text.isEmpty && selectedKeyBytes == null) {
-                      return;
-                    }
-                    Navigator.of(context).pop((
-                      password: controller.text,
-                      keyFileBytes: selectedKeyBytes,
-                    ));
-                  },
-                  child: Text(
-                    'Unlock & Merge',
-                    style: TextStyle(
-                      color: isDark ? const Color(0xFF00315D) : Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      controller.clear();
+      controller.dispose();
+    }
   }
 
   void _showSnack(String text, {bool isError = false}) {
@@ -668,10 +674,13 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          content: Text(text),
+          content: Text(
+            text,
+            style: const TextStyle(color: Colors.white),
+          ),
           duration: const Duration(milliseconds: 1800),
           backgroundColor: isError
-              ? KeyNestPalette.error
+              ? (isDark ? KeyNestPalette.errorContainerDark : KeyNestPalette.error)
               : (isDark
                     ? KeyNestPalette.successContainerDark
                     : KeyNestPalette.success),
@@ -721,8 +730,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 title: 'Export KeePass (.kdbx)',
                 badge: 'ENCRYPTED • RECOMMENDED',
                 badgeColor: accentColor,
-                subtitle:
-                    'KDBX 4.0 database protected with your master password. Safe for cloud and offsite backup.',
+                subtitle: 'KDBX 4.0 database protected with your master password. Safe for cloud and offsite backup.',
                 actionLabel: 'Export KDBX',
                 onAction: _exportKdbx,
               ),
@@ -734,8 +742,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 title: 'Export CSV Spreadsheet',
                 badge: 'UNENCRYPTED',
                 badgeColor: KeyNestPalette.warningColorFor(isDark),
-                subtitle:
-                    'Plain text CSV table containing titles, logins, passwords, URLs, and TOTP secrets.',
+                subtitle: 'Plain text CSV table containing titles, logins, passwords, URLs, and TOTP secrets.',
                 actionLabel: 'Export CSV',
                 onAction: _exportCsv,
               ),
@@ -747,8 +754,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 title: 'Export JSON Document',
                 badge: 'UNENCRYPTED',
                 badgeColor: KeyNestPalette.warningColorFor(isDark),
-                subtitle:
-                    'Structured JSON format with all entry fields, custom attributes, and metadata.',
+                subtitle: 'Structured JSON format with all entry fields, custom attributes, and metadata.',
                 actionLabel: 'Export JSON',
                 onAction: _exportJson,
               ),
@@ -763,8 +769,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 icon: Icons.folder_zip_rounded,
                 iconColor: accentColor,
                 title: 'KeePass Database (.kdbx)',
-                subtitle:
-                    'Merge entries from another KeePass 3.x / 4.x vault into your current database.',
+                subtitle: 'Merge entries from another KeePass 3.x / 4.x vault into your current database.',
                 actionLabel: 'Select .kdbx',
                 onAction: _importKdbx,
               ),
@@ -776,8 +781,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 title: 'CSV Spreadsheet (.csv)',
                 badge: 'UNIFIED IMPORT',
                 badgeColor: KeyNestPalette.successColorFor(isDark),
-                subtitle:
-                    'Import credentials from Bitwarden, LastPass, or any CSV with Quick Import or Custom Field Mapping.',
+                subtitle: 'Import credentials from Bitwarden, LastPass, or any CSV with Quick Import or Custom Field Mapping.',
                 actionLabel: 'Import CSV',
                 onAction: _startUnifiedCsvImport,
               ),
@@ -787,8 +791,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 icon: Icons.code_rounded,
                 iconColor: accentColor,
                 title: 'JSON Document',
-                subtitle:
-                    'Import credentials from KeyNest or Bitwarden JSON export files.',
+                subtitle: 'Import credentials from KeyNest or Bitwarden JSON export files.',
                 actionLabel: 'Import JSON',
                 onAction: _importJson,
               ),
@@ -809,9 +812,7 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(
-                      color: accentColor,
-                    ),
+                    CircularProgressIndicator(color: accentColor),
                     const SizedBox(height: 16),
                     Text(
                       _statusMessage ?? 'Processing...',

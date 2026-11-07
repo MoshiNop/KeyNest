@@ -114,8 +114,12 @@ class _LockedScreenState extends State<LockedScreen> {
 
     var navigatedAway = false;
     try {
+      final hasPendingAutofill =
+          widget.isAutofill ||
+          (KeyNestPlatform.isAndroid &&
+              await AutofillService().hasPendingAutofillRequest());
       var isSilentValid = kdbxBloc.canSilentQuickUnlock();
-      if (!isSilentValid && KeyNestPlatform.isAndroid && widget.isAutofill) {
+      if (!isSilentValid && KeyNestPlatform.isAndroid && hasPendingAutofill) {
         await kdbxBloc.trySilentRestoreAndUnlock(loc);
         isSilentValid =
             kdbxBloc.canSilentQuickUnlock() ||
@@ -133,16 +137,9 @@ class _LockedScreenState extends State<LockedScreen> {
           'post_auth_entry',
           'navigation_start',
         );
-        if (widget.isAutofill && mounted) {
+        if (hasPendingAutofill && mounted) {
           _hasFilled = true;
           await AutofillResumeHelper.resumeAutofill(context, kdbxBloc);
-          if (mounted) {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              Navigator.of(context).pushReplacement(MainAppScaffold.route());
-            }
-          }
           return;
         }
         if (mounted) {

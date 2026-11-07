@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:autofill_service/autofill_service.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_async_utils/flutter_async_utils.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -496,6 +497,17 @@ class _PreferencesBodyState extends State<PreferencesBody>
               subtitle: loc.clearQuickUnlockSubtitle,
               icon: Icons.fingerprint_rounded,
               onTap: () async {
+                final confirmed = await DialogUtils.showConfirmDialog(
+                  context: context,
+                  params: ConfirmDialogParams(
+                    title: loc.clearQuickUnlock,
+                    content:
+                        'Are you sure you want to clear Quick Unlock credentials and close all open vaults?',
+                  ),
+                );
+                if (!confirmed || !context.mounted) {
+                  return;
+                }
                 final kdbxBloc = _kdbxBloc ?? context.read<KdbxBloc>();
                 await kdbxBloc.closeAllFiles(clearQuickUnlock: true);
                 if (context.mounted) {
@@ -519,8 +531,13 @@ class _PreferencesBodyState extends State<PreferencesBody>
                 trailing: Switch(
                   value: !appData.secureWindowOrDefault,
                   onChanged: (value) {
+                    final secureEnabled = !value;
                     _appDataBloc.update(
-                      (builder, data) => builder.secureWindow = !value,
+                      (builder, data) => builder.secureWindow = secureEnabled,
+                    );
+                    const MethodChannel('app.keynest/misc').invokeMethod<void>(
+                      'setSecureWindow',
+                      {'enabled': secureEnabled},
                     );
                     _analytics.events.trackPreferences(
                       setting: 'allowScreenshots',
@@ -1589,6 +1606,17 @@ class _PreferencesBodyState extends State<PreferencesBody>
                   tooltip: 'Disconnect $name',
                   icon: const Icon(Icons.link_off_rounded, size: 20),
                   onPressed: () async {
+                    final confirmed = await DialogUtils.showConfirmDialog(
+                      context: context,
+                      params: ConfirmDialogParams(
+                        title: 'Disconnect $name',
+                        content:
+                            'Are you sure you want to disconnect $name? Your local vault files will not be deleted.',
+                      ),
+                    );
+                    if (!confirmed || !mounted) {
+                      return;
+                    }
                     await provider.logout();
                     if (mounted) {
                       context.read<CloudStorageBloc>().notifyAuthChanged();

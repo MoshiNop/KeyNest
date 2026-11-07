@@ -134,7 +134,21 @@ class EntryTotpHelper {
     return false;
   }
 
-  static final Expando<bool> _hasTotpCache = Expando<bool>('hasTotpCache');
+  static final Expando<_CachedTotpStatus> _hasTotpCache =
+      Expando<_CachedTotpStatus>('hasTotpCache');
+
+  static int _computeEntryTotpSignature(KdbxEntry entry) {
+    var hash = 17;
+    for (final s in entry.stringEntries) {
+      hash = 31 * hash + s.key.key.hashCode;
+      hash = 31 * hash + identityHashCode(s.value);
+    }
+    for (final cd in entry.customData.entries) {
+      hash = 31 * hash + cd.key.hashCode;
+      hash = 31 * hash + cd.value.hashCode;
+    }
+    return hash;
+  }
 
   /// Invalidates the cached TOTP status for [entry].
   static void invalidateCache([KdbxEntry? entry]) {
@@ -145,10 +159,19 @@ class EntryTotpHelper {
 
   /// Checks whether this entry has a TOTP secret configured.
   static bool hasTotp(KdbxEntry entry) {
-    if (!hasPotentialTotp(entry)) {
-      return false;
+    final modTime = entry.times.lastModificationTime.get();
+    final sig = _computeEntryTotpSignature(entry);
+    final cached = _hasTotpCache[entry];
+    if (cached != null && cached.modTime == modTime && cached.signature == sig) {
+      return cached.hasTotp;
     }
-    return getOtpAuth(entry) != null;
+    final result = hasPotentialTotp(entry) && getOtpAuth(entry) != null;
+    _hasTotpCache[entry] = _CachedTotpStatus(
+      hasTotp: result,
+      modTime: modTime,
+      signature: sig,
+    );
+    return result;
   }
 
   /// Determines if the field providing the TOTP secret is stored as a [ProtectedValue].
@@ -281,6 +304,14 @@ class EntryTotpHelper {
       if (trimmed.toLowerCase().startsWith('otpauth://')) {
         final uri = Uri.tryParse(trimmed);
         if (uri != null) {
+          // Reject counter-based HOTP (`otpauth://hotp/...`) or unknown schemes
+          // so they are never silently evaluated as time-based TOTP.
+          if (uri.host.toLowerCase() != 'totp') {
+            _logger.fine(
+              'Unsupported non-TOTP otpauth scheme "${uri.host}" ignored.',
+            );
+            return null;
+          }
           final p = uri.queryParameters;
           var rawSecret = p['secret'] ?? '';
           if (rawSecret.isEmpty) {
@@ -395,4 +426,16 @@ class EntryTotpHelper {
     }
     return null;
   }
+}
+
+class _CachedTotpStatus {
+  const _CachedTotpStatus({
+    required this.hasTotp,
+    required this.modTime,
+    required this.signature,
+  });
+
+  final bool hasTotp;
+  final DateTime? modTime;
+  final int signature;
 }

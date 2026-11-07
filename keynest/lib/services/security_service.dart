@@ -102,13 +102,18 @@ class KeyNestClipboard {
 
     _clearTimer?.cancel();
     final currentGen = ++_copyGeneration;
+    final clearSec =
+        customSeconds ?? SecuritySettingsStore.instance.clipboardClearSeconds;
 
     bool nativeDone = false;
-    if (KeyNestPlatform.isAndroid) {
+    if (KeyNestPlatform.isAndroid ||
+        KeyNestPlatform.isIOS ||
+        KeyNestPlatform.isMacOS ||
+        KeyNestPlatform.isWindows) {
       try {
         final res = await _miscChannel.invokeMethod<bool>(
           'setSensitiveClipboard',
-          {'text': text, 'label': label},
+          {'text': text, 'label': label, 'clearSeconds': clearSec},
         );
         nativeDone = res == true;
       } catch (e) {
@@ -120,9 +125,6 @@ class KeyNestClipboard {
     if (!nativeDone) {
       await Clipboard.setData(ClipboardData(text: text));
     }
-
-    final clearSec =
-        customSeconds ?? SecuritySettingsStore.instance.clipboardClearSeconds;
 
     if (context != null && showToast && context.mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -266,6 +268,13 @@ class KeyNestClipboard {
   static void clearNow() {
     _clearTimer?.cancel();
     _copyGeneration++;
+    if (KeyNestPlatform.isAndroid) {
+      unawaited(
+        _miscChannel
+            .invokeMethod<void>('clearClipboardIfMatches', {'text': null})
+            .catchError((Object _) {}),
+      );
+    }
     Clipboard.setData(const ClipboardData(text: ''));
   }
 }
@@ -315,6 +324,7 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   DateTime? pausedAt;
   DateTime? lastInteractionAt;
   Timer? inactivityCheckTimer;
+  Timer? _backgroundLockTimer;
   KdbxBloc? _kdbxBloc;
   GlobalKey<NavigatorState>? _navigatorKey;
   bool _initialized = false;
@@ -322,6 +332,8 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
   void dispose() {
     inactivityCheckTimer?.cancel();
     inactivityCheckTimer = null;
+    _backgroundLockTimer?.cancel();
+    _backgroundLockTimer = null;
   }
 
   void init({
@@ -371,6 +383,31 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
     return false;
   }
 
+  /// Asynchronous version of [checkAutoLock] that awaits vault closure and lock navigation
+  /// so callers (such as incoming autofill requests) do not race against [_lockVaultNow].
+  Future<bool> checkAutoLockAsync({DateTime? nativeActiveTime}) async {
+    final paused = pausedAt;
+    if (paused != null) {
+      DateTime effectivePaused = paused;
+      if (nativeActiveTime != null && nativeActiveTime.isAfter(effectivePaused)) {
+        effectivePaused = nativeActiveTime;
+      }
+      final timeout = SecuritySettingsStore.instance.autoLockSeconds;
+      if (timeout >= 0) {
+        final diff = DateTime.now().difference(effectivePaused).inSeconds;
+        if (timeout == 0 || diff >= timeout) {
+          _logger.info(
+            'Vault auto-lock timeout triggered ($diff s >= $timeout s)',
+          );
+          pausedAt = null;
+          await _lockVaultNow();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   void lockVault() => _lockVaultNow();
 
   @override
@@ -386,16 +423,26 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
         if (_kdbxBloc != null) {
           unawaited(KeyNestCloudSyncManager.instance.flushPendingSync(_kdbxBloc!));
         }
+        final timeout = SecuritySettingsStore.instance.autoLockSeconds;
+        _backgroundLockTimer?.cancel();
+        if (timeout > 0) {
+          _backgroundLockTimer = Timer(Duration(seconds: timeout), () {
+            if (pausedAt != null) {
+              _logger.info(
+                'Background auto-lock timer elapsed (${timeout}s); locking vaults in RAM.',
+              );
+              pausedAt = null;
+              _lockVaultNow();
+            }
+          });
+        }
       }
     } else if (state == AppLifecycleState.resumed) {
+      _backgroundLockTimer?.cancel();
+      _backgroundLockTimer = null;
       final paused = pausedAt;
       pausedAt = null;
       lastInteractionAt = DateTime.now();
-      if (_kdbxBloc != null) {
-        unawaited(
-          KeyNestCloudSyncManager.instance.recoverPendingSync(_kdbxBloc!),
-        );
-      }
       if (paused != null) {
         final timeout = SecuritySettingsStore.instance.autoLockSeconds;
         if (timeout >= 0) {
@@ -409,6 +456,11 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
           }
         }
       }
+      if (_kdbxBloc != null) {
+        unawaited(
+          KeyNestCloudSyncManager.instance.recoverPendingSync(_kdbxBloc!),
+        );
+      }
       QuickUnlockStorage.touchSession();
       if (KeyNestPlatform.isAndroid) {
         unawaited(AutofillService().touchActive());
@@ -420,13 +472,6 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
     final kdbxBloc = _kdbxBloc;
     final navKey = _navigatorKey;
 
-    if (kdbxBloc != null && kdbxBloc.isSaving) {
-      _logger.info(
-        'Auto-lock deferred because a vault save is actively in progress.',
-      );
-      return;
-    }
-
     _logger.info('Auto-locking vault due to security policy.');
     KeyNestClipboard.clearNow();
     QuickUnlockStorage.clearSession();
@@ -436,10 +481,24 @@ class SecurityLifecycleManager with WidgetsBindingObserver {
       unawaited(AutofillService().clearPendingSaveRequest());
     }
     if (kdbxBloc != null) {
+      if (kdbxBloc.isSaving) {
+        _logger.info(
+          'Waiting for active vault save to complete before closing vault files.',
+        );
+        try {
+          await kdbxBloc.waitForPendingSaves();
+        } catch (_) {}
+      }
       await kdbxBloc.closeAllFiles(clearQuickUnlock: false);
     }
+    var isAutofill = false;
+    if (KeyNestPlatform.isAndroid) {
+      try {
+        isAutofill = await AutofillService().hasPendingAutofillRequest();
+      } catch (_) {}
+    }
     navKey?.currentState?.pushAndRemoveUntil(
-      LockedScreen.route(),
+      LockedScreen.route(isAutofill: isAutofill),
       (_) => false,
     );
   }

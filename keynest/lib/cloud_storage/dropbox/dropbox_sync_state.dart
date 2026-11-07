@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:keynest/utils/path_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
+import 'package:synchronized/synchronized.dart';
 
 final _logger = Logger('dropbox_sync_state');
 
@@ -47,6 +48,20 @@ class DropboxSyncStateStore {
   final PathUtils _pathUtils;
   final Directory? _overrideSyncDir;
 
+  static final Map<String, Lock> _dirLocks = {};
+
+  static Lock _lockForDir(Directory dir) {
+    final key = p.normalize(dir.absolute.path).toLowerCase();
+    return _dirLocks.putIfAbsent(key, Lock.new);
+  }
+
+  Future<T> _withMetadataLock<T>(
+    Future<T> Function(Directory dir) action,
+  ) async {
+    final dir = await _getSyncDir();
+    return _lockForDir(dir).synchronized(() => action(dir));
+  }
+
   Future<Directory> _getSyncDir() async {
     final overrideDir = _overrideSyncDir;
     if (overrideDir != null) {
@@ -75,8 +90,7 @@ class DropboxSyncStateStore {
   File _getMetadataFile(Directory dir) =>
       File(p.join(dir.path, 'metadata.json'));
 
-  Future<Map<String, dynamic>> _readMetadata() async {
-    final dir = await _getSyncDir();
+  Future<Map<String, dynamic>> _readMetadataLocked(Directory dir) async {
     final file = _getMetadataFile(dir);
     if (!await file.exists()) {
       return {};
@@ -90,68 +104,166 @@ class DropboxSyncStateStore {
     }
   }
 
-  Future<void> _writeMetadata(Map<String, dynamic> data) async {
-    final dir = await _getSyncDir();
+  Future<void> _writeMetadataLocked(
+    Directory dir,
+    Map<String, dynamic> data,
+  ) async {
     final file = _getMetadataFile(dir);
-    await file.writeAsString(json.encode(data), flush: true);
+    final tmpFile = File('${file.path}.tmp');
+    await tmpFile.writeAsString(json.encode(data), flush: true);
+    await tmpFile.rename(file.path);
   }
 
   String _sanitizeVaultId(String vaultId) =>
       vaultId.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
 
+  String sanitizeVaultId(String vaultId) => _sanitizeVaultId(vaultId);
+
+  // Remote Path & Dropbox File ID Tracking
+  Future<String?> getRemotePath(String vaultId) => _withMetadataLock((dir) async {
+    final data = await _readMetadataLocked(dir);
+    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+    final vaultData =
+        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+    return vaultData?['remote_path'] as String?;
+  });
+
+  Future<void> setRemotePath(String vaultId, String? remotePath) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        if (remotePath != null && remotePath.isNotEmpty) {
+          vaultData['remote_path'] = remotePath;
+        } else {
+          vaultData.remove('remote_path');
+        }
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
+
+  Future<String?> getDropboxFileId(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['dropbox_file_id'] as String?;
+      });
+
+  Future<void> setDropboxFileId(String vaultId, String? fileId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        if (fileId != null && fileId.isNotEmpty) {
+          vaultData['dropbox_file_id'] = fileId;
+        } else {
+          vaultData.remove('dropbox_file_id');
+        }
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
+
+  /// Resolves the sanitized vault ID that currently owns [remotePath], or null if unclaimed.
+  Future<String?> findVaultIdByRemotePath(String remotePath) =>
+      _withMetadataLock((dir) async {
+        final normalized = remotePath.trim().toLowerCase();
+        if (normalized.isEmpty) {
+          return null;
+        }
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        for (final entry in vaults.entries) {
+          final vData = entry.value as Map<String, dynamic>?;
+          final storedPath = (vData?['remote_path'] as String?)
+              ?.trim()
+              .toLowerCase();
+          if (storedPath == normalized) {
+            return entry.key;
+          }
+        }
+        return null;
+      });
+
+  /// Resolves the sanitized vault ID that currently owns [fileId], or null if unclaimed.
+  Future<String?> findVaultIdByDropboxFileId(String fileId) =>
+      _withMetadataLock((dir) async {
+        if (fileId.trim().isEmpty) {
+          return null;
+        }
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        for (final entry in vaults.entries) {
+          final vData = entry.value as Map<String, dynamic>?;
+          if (vData?['dropbox_file_id'] == fileId) {
+            return entry.key;
+          }
+        }
+        return null;
+      });
+
   // Revision Management
-  Future<String?> getLastSyncedRev(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    return vaultData?['last_synced_rev'] as String?;
-  }
+  Future<String?> getLastSyncedRev(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['last_synced_rev'] as String?;
+      });
 
-  Future<void> setLastSyncedRev(String vaultId, String? rev) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    if (rev != null) {
-      vaultData['last_synced_rev'] = rev;
-      vaultData['last_synced_time'] = DateTime.now().toIso8601String();
-    } else {
-      vaultData.remove('last_synced_rev');
-    }
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setLastSyncedRev(String vaultId, String? rev) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        if (rev != null) {
+          vaultData['last_synced_rev'] = rev;
+          vaultData['last_synced_time'] = DateTime.now().toIso8601String();
+        } else {
+          vaultData.remove('last_synced_rev');
+        }
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
-  Future<DateTime?> getLastSyncedTime(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    final timeStr = vaultData?['last_synced_time'] as String?;
-    return timeStr != null ? DateTime.tryParse(timeStr) : null;
-  }
+  Future<DateTime?> getLastSyncedTime(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        final timeStr = vaultData?['last_synced_time'] as String?;
+        return timeStr != null ? DateTime.tryParse(timeStr) : null;
+      });
 
   // Local Dirty Flag
-  Future<bool> isLocalDirty(String vaultId) async {
-    final data = await _readMetadata();
+  Future<bool> isLocalDirty(String vaultId) => _withMetadataLock((dir) async {
+    final data = await _readMetadataLocked(dir);
     final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
     final vaultData =
         vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
     return vaultData?['local_dirty'] as bool? ?? false;
-  }
+  });
 
-  Future<void> setLocalDirty(String vaultId, bool dirty) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    vaultData['local_dirty'] = dirty;
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setLocalDirty(String vaultId, bool dirty) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        vaultData['local_dirty'] = dirty;
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
   Future<void> markLocalDirty(String vaultId) => setLocalDirty(vaultId, true);
 
@@ -269,35 +381,38 @@ class DropboxSyncStateStore {
   /// Deletes all sync state (stored revs, base copies, dirty flags)
   /// while keeping the user's actual local vault and local backups intact.
   Future<void> clearAllSyncState() async {
-    final dir = await _getSyncDir();
-    final metadataFile = _getMetadataFile(dir);
-    if (await metadataFile.exists()) {
-      await metadataFile.delete();
-    }
+    await _withMetadataLock((dir) async {
+      final metadataFile = _getMetadataFile(dir);
+      if (await metadataFile.exists()) {
+        await metadataFile.delete();
+      }
 
-    final entities = await dir.list().toList();
-    for (final entity in entities) {
-      if (entity is File && p.basename(entity.path).startsWith('base_')) {
-        try {
-          await entity.delete();
-        } catch (e) {
-          _logger.warning('Failed to delete base copy file: $e');
+      final entities = await dir.list().toList();
+      for (final entity in entities) {
+        if (entity is File && p.basename(entity.path).startsWith('base_')) {
+          try {
+            await entity.delete();
+          } catch (e) {
+            _logger.warning('Failed to delete base copy file: $e');
+          }
         }
       }
-    }
+    });
     _logger.info('Cleared Dropbox sync state (rev, base copies, flags).');
   }
 
   /// Clears sync state, base copies, and backups for a single vault when it is disconnected or deleted.
   Future<void> clearVaultSyncState(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>?;
-    final sanitized = _sanitizeVaultId(vaultId);
-    if (vaults != null && vaults.containsKey(sanitized)) {
-      vaults.remove(sanitized);
-      data['vaults'] = vaults;
-      await _writeMetadata(data);
-    }
+    await _withMetadataLock((dir) async {
+      final data = await _readMetadataLocked(dir);
+      final vaults = data['vaults'] as Map<String, dynamic>?;
+      final sanitized = _sanitizeVaultId(vaultId);
+      if (vaults != null && vaults.containsKey(sanitized)) {
+        vaults.remove(sanitized);
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      }
+    });
 
     final baseFile = await _getBaseCopyFile(vaultId);
     if (await baseFile.exists()) {

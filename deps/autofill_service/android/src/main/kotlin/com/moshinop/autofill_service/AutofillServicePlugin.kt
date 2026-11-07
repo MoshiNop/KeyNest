@@ -426,22 +426,9 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 resultWithDatasets(list, result)
             }
             "getPendingSaveRequest" -> {
-                val data = loadPendingSaveData(context) ?: run {
-                    val intent = lastIntent ?: activity?.intent
-                    val route = intent?.getStringExtra("route")
-                    if (route == "/autofill_save") {
-                        mapOf(
-                            "username" to (intent.getStringExtra("saveUsername") ?: ""),
-                            "password" to (intent.getStringExtra("savePassword") ?: ""),
-                            "packageName" to (intent.getStringExtra("savePackageName") ?: ""),
-                            "webDomain" to (intent.getStringExtra("saveWebDomain") ?: ""),
-                            "isPasswordChange" to (intent.getStringExtra("isPasswordChange") ?: "false"),
-                            "isUpdate" to (intent.getStringExtra("isUpdate") ?: "false"),
-                        )
-                    } else {
-                        null
-                    }
-                }
+                // Security: Only accept Keystore-encrypted pending save data written by FlutterMyAutofillService.
+                // Never read unauthenticated /autofill_save extras directly from exported MainActivity intents.
+                val data = loadPendingSaveData(context)
                 result.success(data)
             }
             "clearPendingSaveRequest" -> {
@@ -521,9 +508,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             }
             "clearCredentials" -> {
                 AutofillCredentialStore.clear()
-                clearPendingSaveData(context)
-                AutofillRequestStore.clear()
-                logger.info { "Cleared AutofillCredentialStore, request store, and pending save data" }
+                logger.info { "Cleared AutofillCredentialStore unlocked session" }
                 result.success(true)
             }
             "clearAllCredentials" -> {
@@ -599,11 +584,11 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 val route = intent?.getStringExtra("route")
                 val isOpenKeyNestAction = intent?.action == "com.moshinop.autofill_service.OPEN_KEYNEST"
                 val isFillEntryAction = intent?.action == "com.moshinop.autofill_service.FILL_ENTRY"
-                val selectedId = intent?.getStringExtra("selectedEntryId") ?: AutofillRequestStore.selectedEntryId
+                val selectedId = extractVerifiedSelectedEntryId(intent, consume = false) ?: AutofillRequestStore.selectedEntryId
                 val forcePicker = intent?.getBooleanExtra("forceCredentialPicker", false) == true ||
                         isOpenKeyNestAction ||
                         (AutofillRequestStore.pendingAuthLevel == "dataset" && selectedId == null)
-                val hasRequest = hasStructure || route == "/autofill" || isOpenKeyNestAction || isFillEntryAction || forcePicker || AutofillRequestStore.hasActiveRequest
+                val hasRequest = hasStructure || route == "/autofill" || isOpenKeyNestAction || (isFillEntryAction && selectedId != null) || forcePicker || AutofillRequestStore.hasActiveRequest
                 result.success(mapOf(
                     "hasRequest" to hasRequest,
                     "forcePicker" to forcePicker,
@@ -611,7 +596,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 ))
             }
             "getSelectedEntryId" -> {
-                val id = (lastIntent ?: activity?.intent)?.getStringExtra("selectedEntryId")
+                val id = extractVerifiedSelectedEntryId(lastIntent ?: activity?.intent, consume = false)
                     ?: AutofillRequestStore.selectedEntryId
                 result.success(id)
             }
@@ -699,15 +684,14 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         } ?: emptyList()
         val allOtpFieldIds = (parsedOtpFields + AutofillRequestStore.otpFieldIds).distinct()
 
-        val targetPackage = structure?.packageName?.firstOrNull() ?: AutofillRequestStore.targetPackageName ?: ""
-        val primaryDomain = structure?.getPrimaryWebDomain() ?: AutofillRequestStore.targetWebDomain ?: ""
-        if (pwDatasets.isNotEmpty() && AutofillCredentialStore.isLocked) {
-            AutofillCredentialStore.isLocked = false
-        }
-        val isStoreLocked = AutofillCredentialStore.isLocked
+        val targetPackage = structure?.getTargetPackage()?.takeIf { it.isNotBlank() } ?: AutofillRequestStore.targetPackageName ?: ""
+        val primaryDomain = structure?.getPrimaryWebDomain(context) ?: AutofillRequestStore.targetWebDomain ?: ""
+        val isStoreLocked = if (pwDatasets.isNotEmpty()) false else !AutofillCredentialStore.hasUnlockedEntries()
+        val sourceIntent = lastIntent ?: act.intent
+        val requestedFillIdentifier = sourceIntent?.getStringExtra("fillIdentifier")
 
         val storeMatches = if (targetPackage.isNotBlank() || primaryDomain.isNotBlank()) {
-            AutofillCredentialStore.findMatches(targetPackage, primaryDomain)
+            AutofillCredentialStore.findMatches(targetPackage, primaryDomain, context)
         } else {
             emptyList()
         }
@@ -808,6 +792,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             // 2. Fill username and email fields (from parser + preserved in AutofillRequestStore)
             val emailVal = pw.email?.takeIf { it.isNotBlank() } ?: pw.username
             val userVal = pw.username.ifBlank { pw.email ?: "" }
+            val sharedVal = if (requestedFillIdentifier == "email") emailVal else userVal
 
             val dedicatedEmailIds = allEmailFieldIds.filter { it !in allUserFieldIds }
             val dedicatedUserIds = allUserFieldIds.filter { it !in allEmailFieldIds }
@@ -837,7 +822,26 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 if (filledAutofillIds.add(fieldId)) {
                     datasetBuilder.setValue(
                         fieldId,
-                        AutofillValue.forText(userVal),
+                        AutofillValue.forText(sharedVal),
+                        userPresentation
+                    )
+                }
+            }
+
+            // 2b. If no login field was categorized by heuristics but the user focused a non-password/non-OTP input field,
+            // fill that focused input field with the selected login identifier.
+            if (allUserFieldIds.isEmpty() && allEmailFieldIds.isEmpty() && sharedVal.isNotBlank()) {
+                val focusedId = AutofillRequestStore.focusedAutofillId
+                    ?: structure?.allNodes?.firstOrNull { it.isFocused && it.autofillId != null }?.autofillId
+                if (focusedId != null &&
+                    focusedId !in allPwFieldIds &&
+                    focusedId !in allConfirmPwFieldIds &&
+                    focusedId !in allOtpFieldIds &&
+                    filledAutofillIds.add(focusedId)
+                ) {
+                    datasetBuilder.setValue(
+                        focusedId,
+                        AutofillValue.forText(sharedVal),
                         userPresentation
                     )
                 }
@@ -881,25 +885,34 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 }
             }
 
-            // 4. Fallback if no categorized field was found: fill focused or first text field
+            // 4. Fallback if no categorized field was found: fill focused or first text field with OTP or username ONLY.
+            // Security: Never fill plaintext passwords into uncategorized generic text inputs.
             if (filledAutofillIds.isEmpty()) {
                 val targetAutofillId = AutofillRequestStore.focusedAutofillId
                     ?: structure?.allNodes?.firstOrNull { it.isFocused && it.autofillId != null }?.autofillId
                     ?: structure?.allNodes?.firstOrNull { it.autofillId != null && it.autofillType == View.AUTOFILL_TYPE_TEXT }?.autofillId
 
                 if (targetAutofillId != null) {
-                    val fallbackValue = if (!otpCode.isNullOrBlank() && allOtpFieldIds.isNotEmpty()) {
-                        otpCode
-                    } else if (pw.username.isNotBlank()) pw.username else pw.password
-                    val fallbackPresentation = if (!otpCode.isNullOrBlank() && allOtpFieldIds.isNotEmpty()) {
-                        otpPresentation
-                    } else if (pw.username.isNotBlank()) userPresentation else pwPresentation
-                    datasetBuilder.setValue(
-                        targetAutofillId,
-                        AutofillValue.forText(fallbackValue),
-                        fallbackPresentation
-                    )
-                    filledAutofillIds.add(targetAutofillId)
+                    val fallbackValue: String?
+                    val fallbackPresentation: RemoteViews?
+                    if (!otpCode.isNullOrBlank() && allOtpFieldIds.isNotEmpty()) {
+                        fallbackValue = otpCode
+                        fallbackPresentation = otpPresentation
+                    } else if (pw.username.isNotBlank()) {
+                        fallbackValue = pw.username
+                        fallbackPresentation = userPresentation
+                    } else {
+                        fallbackValue = null
+                        fallbackPresentation = null
+                    }
+                    if (!fallbackValue.isNullOrBlank() && fallbackPresentation != null) {
+                        datasetBuilder.setValue(
+                            targetAutofillId,
+                            AutofillValue.forText(fallbackValue),
+                            fallbackPresentation
+                        )
+                        filledAutofillIds.add(targetAutofillId)
+                    }
                 }
             }
 
@@ -910,7 +923,6 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             datasetResponseBuilder.addDataset(builtDataset)
         }
 
-        val sourceIntent = lastIntent ?: act.intent
         val authLevel = sourceIntent?.getStringExtra("autofillAuthLevel")
             ?: AutofillRequestStore.pendingAuthLevel
             ?: "response"
@@ -932,7 +944,8 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             } else {
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
-            val pickerSender = PendingIntent.getActivity(context, 1, pickerIntent, piFlags).intentSender
+            val reqCodeBase = ((AutofillRequestStore.activeRequestId ?: 0) and 0x07FF) * 1000
+            val pickerSender = PendingIntent.getActivity(context, reqCodeBase + 1, pickerIntent, piFlags).intentSender
             val searchDatasetBuilder = Dataset.Builder(searchPresentation).setAuthentication(pickerSender)
             val parsedAutoFillIds: List<AutofillId> = structure?.autoFillIds ?: emptyList()
             val allTargetIds: List<AutofillId> = (allPwFieldIds + allConfirmPwFieldIds + allUserFieldIds + allOtpFieldIds + 
@@ -982,6 +995,8 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         }
 
         AutofillCredentialStore.touchActive()
+        extractVerifiedSelectedEntryId(sourceIntent, consume = true)
+        AutofillRequestStore.selectedEntryId = null
         hasCompletedAutofill = true
         logger.info { "Returning authentication result intent: $replyIntent (authLevel=$authLevel, hasDataset=${firstDataset != null})" }
 
@@ -1002,14 +1017,32 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         return route == "/autofill" || initialRoute == "/autofill" || action == "com.moshinop.autofill_service.OPEN_KEYNEST" || action == "com.moshinop.autofill_service.FILL_ENTRY" || forcePicker || hasStructure
     }
 
+    private fun extractVerifiedSelectedEntryId(intent: Intent?, consume: Boolean): String? {
+        if (intent == null) return null
+        val entryId = intent.getStringExtra("selectedEntryId")?.takeIf { it.isNotBlank() } ?: return null
+        val nonce = intent.getStringExtra("fastFillNonce")
+        val reqId = intent.getIntExtra("autofillRequestId", -1)
+        val ok = if (consume) {
+            AutofillRequestStore.consumeFastFillToken(nonce, reqId, entryId)
+        } else {
+            AutofillRequestStore.verifyFastFillToken(nonce, reqId, entryId)
+        }
+        if (!ok) {
+            logger.warn { "Rejected unauthenticated selectedEntryId on FILL_ENTRY intent." }
+            return null
+        }
+        return entryId
+    }
+
     private fun tryFastFillEntry(intent: Intent?, act: Activity): Boolean {
         if (intent == null) return false
         val action = intent.action
-        val entryId = intent.getStringExtra("selectedEntryId")
-        if (action != "com.moshinop.autofill_service.FILL_ENTRY" || entryId.isNullOrBlank()) {
+        if (action != "com.moshinop.autofill_service.FILL_ENTRY") {
             return false
         }
-        if (!AutofillCredentialStore.isUnlockedAndActive()) {
+        val entryId = extractVerifiedSelectedEntryId(intent, consume = false) ?: return false
+        AutofillRequestStore.selectedEntryId = entryId
+        if (!AutofillCredentialStore.hasUnlockedEntries()) {
             return false
         }
         val entry = AutofillCredentialStore.getEntryById(entryId) ?: return false
@@ -1045,8 +1078,10 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         var filledSuccessfully = false
         resultWithDatasets(listOf(pwDataset), object : Result {
             override fun success(result: Any?) {
-                filledSuccessfully = true
-                logger.info { "Fast-fill succeeded for entry $entryId without re-prompting." }
+                filledSuccessfully = result == true
+                if (filledSuccessfully) {
+                    logger.info { "Fast-fill succeeded for entry $entryId without re-prompting." }
+                }
             }
             override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
                 filledSuccessfully = false
@@ -1062,7 +1097,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
     override fun onNewIntent(intent: Intent): Boolean {
         hasCompletedAutofill = false
         lastIntent = intent
-        logger.info { "Received new intent: $intent" }
+        logger.info { "Received new intent action=${intent.action}" }
         val act = activityBinding?.activity ?: this.activity
         if (act != null && tryFastFillEntry(intent, act)) {
             return true
@@ -1077,13 +1112,13 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             channel?.invokeMethod("onAutofillDismissed", null)
             return false
         }
-        val entryId = intent.getStringExtra("selectedEntryId")
+        val entryId = extractVerifiedSelectedEntryId(intent, consume = false)
         if (entryId != null) {
             AutofillRequestStore.selectedEntryId = entryId
         }
         val route = intent.getStringExtra("route")
         val forcePicker = intent.getBooleanExtra("forceCredentialPicker", false)
-        if (route == "/autofill" || intent.hasExtra(AutofillManager.EXTRA_ASSIST_STRUCTURE) || forcePicker || action == "com.moshinop.autofill_service.OPEN_KEYNEST" || action == "com.moshinop.autofill_service.FILL_ENTRY") {
+        if (route == "/autofill" || intent.hasExtra(AutofillManager.EXTRA_ASSIST_STRUCTURE) || forcePicker || action == "com.moshinop.autofill_service.OPEN_KEYNEST" || (action == "com.moshinop.autofill_service.FILL_ENTRY" && entryId != null)) {
             channel?.invokeMethod("onAutofillRequest", mapOf(
                 "requestId" to intent.getIntExtra("autofillRequestId", 0),
                 "forcePicker" to forcePicker,
@@ -1113,7 +1148,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
 
         val initIntent = binding.activity.intent
         lastIntent = initIntent
-        val entryId = initIntent?.getStringExtra("selectedEntryId")
+        val entryId = extractVerifiedSelectedEntryId(initIntent, consume = false)
         if (entryId != null) {
             AutofillRequestStore.selectedEntryId = entryId
         }

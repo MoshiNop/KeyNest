@@ -111,10 +111,25 @@ enum AutofillVaultStore {
       guard let transformedKey = Data(base64Encoded: key.transformedKey) else {
         return nil
       }
+      let rawFileName = entry.fileName
+      guard !rawFileName.isEmpty,
+        !rawFileName.contains("/"),
+        !rawFileName.contains("\\"),
+        !rawFileName.contains(".."),
+        (rawFileName as NSString).lastPathComponent == rawFileName
+      else {
+        logger.error("rejected invalid manifest fileName for \(entry.fileUuid, privacy: .public)")
+        return nil
+      }
+      let resolvedUrl = container.appendingPathComponent(rawFileName).standardizedFileURL
+      guard resolvedUrl.deletingLastPathComponent() == container.standardizedFileURL else {
+        logger.error("rejected path traversal in manifest for \(entry.fileUuid, privacy: .public)")
+        return nil
+      }
       return Vault(
         fileUuid: entry.fileUuid,
         name: entry.name,
-        path: container.appendingPathComponent(entry.fileName).path,
+        path: resolvedUrl.path,
         transformedKey: transformedKey,
         kdfFingerprint: key.kdfFingerprint
       )

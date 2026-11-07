@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_async_utils/flutter_async_utils.dart';
 import 'package:kdbx/kdbx.dart';
+import 'package:kdbx/src/utils/sequence.dart'; // ignore: implementation_imports
 import 'package:keynest/autofill/autofill_identities.dart';
 import 'package:keynest/autofill/autofill_mirror.dart';
 import 'package:keynest/bloc/analytics.dart';
@@ -204,6 +205,7 @@ class QuickUnlockStorage {
   static void clearSession() {
     _inMemorySessionCredentials = null;
     _lastActiveSessionTimestamp = null;
+    _knownVaultHashes.clear();
     if (KeyNestPlatform.isAndroid) {
       unawaited(AutofillService().clearSessionTokens());
       unawaited(AutofillService().clearCredentials());
@@ -591,6 +593,10 @@ class KdbxBloc {
   OpenedKdbxFiles get openedFiles => _openedFiles.value;
   List<KdbxFile> get openedFilesKdbx =>
       _openedFiles.value.values.map((value) => value.kdbxFile).toList();
+  List<KdbxFile> get autofillEnabledFilesKdbx => _openedFiles.value.values
+      .where((value) => value.openedFile.autofillEnabledOrDefault)
+      .map((value) => value.kdbxFile)
+      .toList();
   ValueStream<OpenedKdbxFiles> get openedFilesChanged => _openedFiles.stream;
 
   int _activeSaveCount = 0;
@@ -674,6 +680,9 @@ class KdbxBloc {
       // autofill on published nothing, and switching it off published
       // everything.
       await _publishAutofillIdentities();
+      if (KeyNestPlatform.isAndroid) {
+        await _syncAndroidAutofillStore(immediate: true);
+      }
     }
     _logger.info('new values: ${_openedFiles.value}');
     return newFile;
@@ -693,14 +702,33 @@ class KdbxBloc {
         if (ByteUtils.eq(previous, fileContent.content)) {
           _logger.finer('$file: No changes detected. Nothing to do.');
           continue;
-        } else {
-          if (openedFile.kdbxFile.isDirty) {
-            throw StateError(
-              'File was changed locally while '
-              'loading new file from remote storage.',
-            );
-          }
         }
+        if (_openedFiles.value.containsKey(file)) {
+          // Vault is already open and screens hold its KdbxFile/entries.
+          // Merge the newer content in place instead of replacing the
+          // instance (replacing it orphaned every open screen).
+          final base = previous;
+          previous = fileContent.content;
+          final unlockStopwatch = Stopwatch()..start();
+          openedFile = await applySyncedBytesWithBase(
+            openedFile,
+            fileContent.content,
+            syncedContent: fileContent,
+            baseBytes: base,
+          );
+          loadStopwatch.stop();
+          yield OpenFileResult(
+            kdbxOpenedFile: openedFile,
+            fileContent: fileContent,
+            unlockStopwatch: unlockStopwatch..stop(),
+            loadStopwatch: loadStopwatch,
+          );
+          continue;
+        }
+        // The vault was closed/locked while newer content was loading:
+        // never silently re-open it.
+        _logger.fine('$file was closed while loading; ignoring newer content.');
+        continue;
       }
       previous = fileContent.content;
       loadStopwatch.stop();
@@ -1015,7 +1043,7 @@ class KdbxBloc {
     }
     await _mirrorFile(file.openedFile, file.kdbxFile, bytes);
     await _publishAutofillIdentities();
-    await _syncAndroidAutofillStore(immediate: false);
+    await _syncAndroidAutofillStore(immediate: true);
   }
 
   /// Advertises every entry of every enabled vault to iOS.
@@ -1100,7 +1128,7 @@ class KdbxBloc {
   }
 
   Future<void> _executeAndroidAutofillSync() async {
-    final openFiles = openedFilesKdbx;
+    final openFiles = autofillEnabledFilesKdbx;
     if (openFiles.isEmpty) {
       await AutofillService().clearCredentials();
       return;
@@ -1909,12 +1937,15 @@ class KdbxBloc {
     }
 
     try {
+      Uint8List? initialAttemptBytes;
       try {
         Uint8List? writtenBytes;
         final ret = await _saveFileToBytes(file, (bytes) async {
+          initialAttemptBytes = bytes;
           writtenBytes = bytes;
           return await fileSource.contentWrite(bytes, metadata: null);
         });
+        _lastSavedBytes[file] = ret.content;
         analytics.events.trackSave(
           type: fileSource.typeDebug,
           value: ret.content.length,
@@ -1935,7 +1966,12 @@ class KdbxBloc {
           KeyNestVaultScope.instance.notifyScopeChanged();
         } catch (_) {}
         try {
-          unawaited(KeyNestCloudSyncManager.instance.markVaultDirty(fileSource.uuid));
+          unawaited(
+            KeyNestCloudSyncManager.instance.markVaultDirty(
+              fileSource.uuid,
+              kdbxBloc: this,
+            ),
+          );
           KeyNestCloudSyncManager.instance.schedulePostSaveSync(
             kdbxFile: file,
             kdbxBloc: this,
@@ -1948,20 +1984,42 @@ class KdbxBloc {
           e,
           stackTrace,
         );
-        final content = await fileSource.content(updateCache: false).last;
+        final content = await fileSource
+            .content(updateCache: false, forceReload: true)
+            .last;
         final remoteFile = await kdbxFormat.read(
           content.content,
           oldCredentials,
         );
+        KdbxFile? baseFile;
+        final openedForBase = _openedFilesByKdbxFile[file];
+        if (openedForBase != null &&
+            openedForBase.kdbxFileContent.content.isNotEmpty) {
+          try {
+            baseFile = await kdbxFormat.read(
+              openedForBase.kdbxFileContent.content,
+              oldCredentials,
+            );
+          } catch (_) {}
+        }
+
+        // Run merge on an isolated working copy first so [file] is not left
+        // half-mutated if contentWrite fails again.
+        final snapshotBytes = initialAttemptBytes ?? await file.save();
+        final workingLocal = await kdbxFormat.read(
+          snapshotBytes,
+          file.credentials,
+        );
         final mergeResult = DropboxVaultMergeEngine.merge(
-          localFile: file,
+          localFile: workingLocal,
           remoteFile: remoteFile,
+          baseFile: baseFile,
         );
         final mergeContext = MergeContext(
           objectIndex: {},
           deletedObjects: {
             // ignore: invalid_use_of_visible_for_testing_member
-            for (final d in file.body.deletedObjects) d.uuid: d,
+            for (final d in workingLocal.body.deletedObjects) d.uuid: d,
           },
         );
         for (
@@ -1974,13 +2032,20 @@ class KdbxBloc {
         try {
           _logger.fine('mergeResult: $mergeResult');
           Uint8List? writtenBytes;
-          final ret = await _saveFileToBytes(file, (bytes) async {
+          final ret = await _saveFileToBytes(workingLocal, (bytes) async {
             writtenBytes = bytes;
             return await fileSource.contentWrite(
               bytes,
               metadata: content.metadata,
             );
           });
+          // Only commit merged changes to the live in-memory [file] after write succeeds
+          DropboxVaultMergeEngine.merge(
+            localFile: file,
+            remoteFile: remoteFile,
+            baseFile: baseFile,
+          );
+          _lastSavedBytes[file] = ret.content;
           await _syncAutofillMirrorAfterSave(file, writtenBytes, ret);
           delegate?.conflictMerged(fileSource, file, mergeContext);
           analytics.events.trackSaveConflict(
@@ -2003,7 +2068,12 @@ class KdbxBloc {
           );
           await updateQuickUnlock();
           try {
-            unawaited(KeyNestCloudSyncManager.instance.markVaultDirty(fileSource.uuid));
+            unawaited(
+              KeyNestCloudSyncManager.instance.markVaultDirty(
+                fileSource.uuid,
+                kdbxBloc: this,
+              ),
+            );
             KeyNestCloudSyncManager.instance.schedulePostSaveSync(
               kdbxFile: file,
               kdbxBloc: this,
@@ -2037,6 +2107,19 @@ class KdbxBloc {
         _openedFilesByKdbxFile[file] = of;
         return of;
       }
+    }
+    // Fallback 1: match by rootGroup UUID in case caller holds an earlier instance
+    for (final of in _openedFiles.value.values) {
+      if (of.kdbxFile.body.rootGroup.uuid == file.body.rootGroup.uuid) {
+        _openedFilesByKdbxFile[file] = of;
+        return of;
+      }
+    }
+    // Fallback 2: if only a single vault is currently open, resolve to it
+    if (_openedFiles.value.values.length == 1) {
+      final only = _openedFiles.value.values.single;
+      _openedFilesByKdbxFile[file] = only;
+      return only;
     }
     throw StateError('Missing file source for kdbxFile.');
   }
@@ -2159,17 +2242,158 @@ class KdbxBloc {
 
   void clearEntryByUuidLookup() => _entryUuidLookup = null;
 
+  /// Atomically applies already-synced vault [syncedBytes] to an open vault
+  /// without running an unanchored 2-way merge that could resurrect deletions.
+  Future<KdbxOpenedFile> applySyncedBytes(
+    KdbxOpenedFile openedFile,
+    Uint8List syncedBytes, {
+    FileContent? syncedContent,
+  }) => applySyncedBytesWithBase(
+    openedFile,
+    syncedBytes,
+    syncedContent: syncedContent,
+  );
+
+  /// Bytes most recently written by [saveFile] for a given live [KdbxFile].
+  final Expando<Uint8List> _lastSavedBytes = Expando<Uint8List>(
+    'kdbxLastSavedBytes',
+  );
+
+  /// Applies [syncedBytes] to the open vault **in place**.
+  ///
+  /// The live [KdbxFile] instance is never replaced nor disposed: every open
+  /// screen holds references to it and its entries, and disposing it closed
+  /// its dirty-object stream, which surfaced as
+  /// "Bad state: Cannot add new events after calling close" and
+  /// "Missing file source for kdbxFile" on the next edit/delete/restore.
+  ///
+  /// [baseBytes] are the local bytes the sync engine started from. Changes in
+  /// [syncedBytes] relative to [baseBytes] are merged into the live file while
+  /// local edits made after [baseBytes] are preserved (so a deletion done
+  /// while a sync was in flight is not resurrected).
+  Future<KdbxOpenedFile> applySyncedBytesWithBase(
+    KdbxOpenedFile openedFile,
+    Uint8List syncedBytes, {
+    FileContent? syncedContent,
+    Uint8List? baseBytes,
+  }) async {
+    final currentOpened =
+        _openedFilesByKdbxFile[openedFile.kdbxFile] ??
+        _openedFiles.value[openedFile.fileSource] ??
+        openedFile;
+    final liveKdbxFile = currentOpened.kdbxFile;
+    final lastSaved = _lastSavedBytes[liveKdbxFile];
+    final effectiveBase =
+        baseBytes ?? lastSaved ?? currentOpened.kdbxFileContent.content;
+
+    var needsResave = false;
+    if (!ByteUtils.eq(syncedBytes, effectiveBase)) {
+      final credentials = liveKdbxFile.credentials;
+      final syncedRead = await compute(
+        KdbxBloc.staticReadKdbxFile,
+        KdbxReadArgs(syncedBytes, credentials),
+      );
+      final syncedKdbxFile = syncedRead.file;
+      if (syncedKdbxFile == null) {
+        throw StateError(
+          'Failed to decrypt synced vault bytes: ${syncedRead.exception}',
+        );
+      }
+      KdbxFile? baseFile;
+      if (effectiveBase.isNotEmpty) {
+        try {
+          baseFile = (await compute(
+            KdbxBloc.staticReadKdbxFile,
+            KdbxReadArgs(effectiveBase, credentials),
+          )).file;
+        } catch (_) {}
+      }
+      final preDirty = liveKdbxFile.dirtyObjects.toSet();
+      DropboxVaultMergeEngine.merge(
+        localFile: liveKdbxFile,
+        remoteFile: syncedKdbxFile,
+        baseFile: baseFile,
+      );
+      // Objects only touched by applying already-persisted synced content
+      // are not local edits; don't leave them flagged as unsaved.
+      final savedAt = TimeSequence.now();
+      final mergeDirty = liveKdbxFile.dirtyObjects
+          .where((o) => !preDirty.contains(o))
+          .toList();
+      for (final o in mergeDirty) {
+        if (o.clean(savedAt)) {
+          liveKdbxFile.dirtyObjects.remove(o);
+        }
+      }
+      syncedKdbxFile.dispose();
+      baseFile?.dispose();
+      // A local save happened after the sync engine read its local bytes:
+      // the persisted copy now lacks that edit, so write the live union back.
+      final latestSaved = _lastSavedBytes[liveKdbxFile];
+      needsResave =
+          latestSaved != null && !ByteUtils.eq(latestSaved, effectiveBase);
+    }
+    final savedNow = _lastSavedBytes[liveKdbxFile];
+    if (!needsResave &&
+        (savedNow == null || ByteUtils.eq(savedNow, effectiveBase))) {
+      // The persisted copy now equals [syncedBytes].
+      _lastSavedBytes[liveKdbxFile] = syncedBytes;
+    }
+
+    final effectiveContent =
+        syncedContent ??
+        FileContent(
+          syncedBytes,
+          currentOpened.kdbxFileContent.metadata,
+          FileContentSource.memoryCache,
+        );
+    currentOpened.fileSource.setCachedContent(effectiveContent);
+
+    final updatedOpened = KdbxOpenedFile(
+      fileSource: currentOpened.fileSource,
+      openedFile: currentOpened.openedFile,
+      kdbxFile: liveKdbxFile,
+      kdbxFileContent: effectiveContent,
+    );
+    _entryUuidLookup = null;
+    if (_openedFiles.value.containsKey(currentOpened.fileSource)) {
+      _openedFilesByKdbxFile[liveKdbxFile] = updatedOpened;
+      _openedFiles.add(
+        OpenedKdbxFiles({
+          ..._openedFiles.value._files,
+          currentOpened.fileSource: updatedOpened,
+        }),
+      );
+    }
+    unawaited(_syncAutofillMirror(updatedOpened, syncedBytes));
+    try {
+      KeyNestVaultScope.instance.notifyScopeChanged();
+    } catch (_) {}
+    if (needsResave && _openedFiles.value.containsKey(currentOpened.fileSource)) {
+      unawaited(
+        saveFile(liveKdbxFile).then<void>(
+          (_) {},
+          onError: (Object e, StackTrace st) =>
+              _logger.warning('Re-save after sync failed', e, st),
+        ),
+      );
+    }
+    return updatedOpened;
+  }
+
   Stream<ReloadStatus> reload(KdbxOpenedFile file) async* {
     Uint8List? bytes;
     final currentOpened = _openedFilesByKdbxFile[file.kdbxFile] ?? file;
-    final dirtyObjects = currentOpened.kdbxFile.dirtyObjects;
+    final targetKdbx = currentOpened.kdbxFile;
+    final dirtyObjects = targetKdbx.dirtyObjects.toSet();
     try {
-      if (currentOpened.kdbxFile.isDirty) {
-        bytes = await currentOpened.kdbxFile.save();
+      if (targetKdbx.isDirty) {
+        bytes = await targetKdbx.save();
       }
       yield ReloadStatus.downloading;
-      final reloadedContent = await currentOpened.fileSource.content().last;
-      assert(reloadedContent.source == FileContentSource.origin);
+      final reloadedContent = await currentOpened.fileSource
+          .content(forceReload: true)
+          .last;
       if (ByteUtils.eq(
         reloadedContent.content,
         currentOpened.kdbxFileContent.content,
@@ -2182,26 +2406,64 @@ class KdbxBloc {
       yield ReloadStatus.decrypting;
       final readArgs = KdbxReadArgs(
         reloadedContent.content,
-        file.kdbxFile.credentials,
+        targetKdbx.credentials,
       );
       final kdbxReadFile = await compute(
         KdbxBloc.staticReadKdbxFile,
         readArgs,
       );
+      if (kdbxReadFile.file == null) {
+        throw StateError(
+          'Failed to decrypt reloaded vault: ${kdbxReadFile.exception}',
+        );
+      }
 
-      _logger.info('\n\n\n===========\n\n\n');
+      KdbxFile? baseFile;
+      if (currentOpened.kdbxFileContent.content.isNotEmpty) {
+        try {
+          final baseRead = await compute(
+            KdbxBloc.staticReadKdbxFile,
+            KdbxReadArgs(
+              currentOpened.kdbxFileContent.content,
+              targetKdbx.credentials,
+            ),
+          );
+          baseFile = baseRead.file;
+        } catch (_) {}
+      }
+
       _logger.info('starting merge.');
       DropboxVaultMergeEngine.merge(
-        localFile: file.kdbxFile,
+        localFile: targetKdbx,
         remoteFile: kdbxReadFile.file!,
+        baseFile: baseFile,
       );
+      _entryUuidLookup = null;
 
-      _logger.info('\n\nDONE MERGE\n\n\n\n');
+      if (bytes == null && _openedFiles.value.containsKey(currentOpened.fileSource)) {
+        final updatedOpened = KdbxOpenedFile(
+          fileSource: currentOpened.fileSource,
+          openedFile: currentOpened.openedFile,
+          kdbxFile: targetKdbx,
+          kdbxFileContent: reloadedContent,
+        );
+        _openedFiles.add(
+          OpenedKdbxFiles({
+            ..._openedFiles.value._files,
+            currentOpened.fileSource: updatedOpened,
+          }),
+        );
+      }
+      try {
+        KeyNestVaultScope.instance.notifyScopeChanged();
+      } catch (_) {}
+
+      _logger.info('DONE MERGE');
 
       yield ReloadStatus.merged;
     } finally {
-      if (bytes != null && !file.kdbxFile.isDirty) {
-        dirtyObjects.forEach(file.kdbxFile.dirtyObject);
+      if (bytes != null && !targetKdbx.isDirty) {
+        dirtyObjects.forEach(targetKdbx.dirtyObject);
       }
     }
   }

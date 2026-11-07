@@ -7,6 +7,7 @@ import 'package:keynest/bloc/kdbx/file_source_ui.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/services/keynest_support_service.dart';
+import 'package:keynest/theme.dart';
 import 'package:keynest/ui/screens/keynest_duplicates_screen.dart';
 import 'package:keynest/ui/screens/keynest_import_export.dart';
 import 'package:keynest/ui/screens/keynest_vault_health_screen.dart';
@@ -53,7 +54,10 @@ class AppBarMenu {
                 leading: const Icon(Icons.brightness_auto_rounded),
                 title: const Text('System Default'),
                 trailing: currentTheme == null
-                    ? const Icon(Icons.check_circle_rounded, color: Colors.blue)
+                    ? Icon(
+                        Icons.check_circle_rounded,
+                        color: KeyNestPalette.primaryColor(ctx),
+                      )
                     : null,
                 onTap: () async {
                   Navigator.of(ctx).pop();
@@ -67,7 +71,10 @@ class AppBarMenu {
                 leading: const Icon(Icons.light_mode_rounded),
                 title: const Text('Light Theme'),
                 trailing: currentTheme == AppDataTheme.light
-                    ? const Icon(Icons.check_circle_rounded, color: Colors.blue)
+                    ? Icon(
+                        Icons.check_circle_rounded,
+                        color: KeyNestPalette.primaryColor(ctx),
+                      )
                     : null,
                 onTap: () async {
                   Navigator.of(ctx).pop();
@@ -83,7 +90,10 @@ class AppBarMenu {
                 leading: const Icon(Icons.dark_mode_rounded),
                 title: const Text('Dark Theme'),
                 trailing: currentTheme == AppDataTheme.dark
-                    ? const Icon(Icons.check_circle_rounded, color: Colors.blue)
+                    ? Icon(
+                        Icons.check_circle_rounded,
+                        color: KeyNestPalette.primaryColor(ctx),
+                      )
                     : null,
                 onTap: () async {
                   Navigator.of(ctx).pop();

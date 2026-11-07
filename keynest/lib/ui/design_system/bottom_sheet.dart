@@ -178,7 +178,7 @@ class KeyNestBottomSheet extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showDragHandle)
+                if (showDragHandle && !isDesktop)
                   Center(
                     child: Padding(
                       padding: const EdgeInsets.only(top: 12.0, bottom: 8.0),
@@ -196,11 +196,13 @@ class KeyNestBottomSheet extends StatelessWidget {
                       ),
                     ),
                   ),
-                Padding(
-                  padding:
-                      padding ??
-                      const EdgeInsets.all(KeyNestTokens.contentPadding),
-                  child: child,
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding:
+                        padding ??
+                        const EdgeInsets.all(KeyNestTokens.contentPadding),
+                    child: child,
+                  ),
                 ),
               ],
             ),

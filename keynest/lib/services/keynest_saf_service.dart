@@ -139,6 +139,59 @@ class KeyNestSafService {
     }
   }
 
+  /// Computes the relative subdirectory path inside an Android SAF [treeUri]
+  /// when [displayPath] points to a nested folder beneath the persisted tree root.
+  static String? extractRelativeSubPath(String? treeUri, String displayPath) {
+    if (treeUri == null || treeUri.isEmpty || displayPath.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final uri = Uri.parse(treeUri);
+      final segments = uri.pathSegments;
+      final treeIdx = segments.indexOf('tree');
+      if (treeIdx == -1 || treeIdx + 1 >= segments.length) {
+        return null;
+      }
+      final docId = Uri.decodeComponent(segments[treeIdx + 1]);
+      final parts = docId.split(':');
+      String treeRootPath;
+      if (parts.length >= 2) {
+        final vol = parts[0];
+        final rel = parts.sublist(1).join(':');
+        if (vol.toLowerCase() == 'primary') {
+          treeRootPath = rel.isEmpty
+              ? '/storage/emulated/0'
+              : '/storage/emulated/0/$rel';
+        } else {
+          treeRootPath = rel.isEmpty ? '/storage/$vol' : '/storage/$vol/$rel';
+        }
+      } else {
+        treeRootPath = docId.toLowerCase() == 'primary'
+            ? '/storage/emulated/0'
+            : docId;
+      }
+
+      var normTree = treeRootPath.replaceAll('\\', '/');
+      while (normTree.endsWith('/') && normTree.length > 1) {
+        normTree = normTree.substring(0, normTree.length - 1);
+      }
+      var normTarget = displayPath.replaceAll('\\', '/');
+      while (normTarget.endsWith('/') && normTarget.length > 1) {
+        normTarget = normTarget.substring(0, normTarget.length - 1);
+      }
+
+      if (normTarget.toLowerCase() == normTree.toLowerCase()) {
+        return null;
+      }
+      final prefix = '$normTree/';
+      if (normTarget.toLowerCase().startsWith(prefix.toLowerCase())) {
+        final sub = normTarget.substring(prefix.length).trim();
+        return sub.isEmpty ? null : sub;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Checks if a file named [fileName] already exists in [destination].
   static Future<bool> checkFileExists({
     required KeyNestDirectoryDestination destination,
@@ -146,11 +199,16 @@ class KeyNestSafService {
   }) async {
     if (destination.isSaf) {
       try {
+        final subPath = extractRelativeSubPath(
+          destination.treeUri,
+          destination.displayPath,
+        );
         final exists = await _miscChannel.invokeMethod<bool>(
           'safCheckFileExists',
           {
             'treeUri': destination.treeUri,
             'fileName': fileName,
+            'subPath': ?subPath,
           },
         );
         return exists == true;
@@ -173,8 +231,8 @@ class KeyNestSafService {
   ///   [FileSourceLocal.filePickerIdentifier].
   ///
   /// For direct filesystem directories:
-  /// - Writes atomically using a `.tmp` file in the destination or cache directory,
-  ///   then moves/renames it into place.
+  /// - Writes atomically using a `.tmp` file in the destination directory,
+  ///   moves any existing target to `.bak`, promotes `.tmp`, and cleans `.bak`.
   /// - Returns the absolute file path.
   ///
   /// Cleans up all temporary files on completion or failure.
@@ -187,18 +245,22 @@ class KeyNestSafService {
     io.File? cacheTempFile;
 
     try {
-      // 1. Stage bytes into app private cache
-      final tempDir = await getTemporaryDirectory();
-      cacheTempFile = io.File(
-        p.join(
-          tempDir.path,
-          'import_stage_${DateTime.now().microsecondsSinceEpoch}.kdbx.tmp',
-        ),
-      );
-      await cacheTempFile.writeAsBytes(bytes, flush: true);
-
-      // 2. Write to destination
+      // 1. Write to destination
       if (destination.isSaf) {
+        // Stage bytes into app private cache for native SAF streaming
+        final tempDir = await getTemporaryDirectory();
+        cacheTempFile = io.File(
+          p.join(
+            tempDir.path,
+            'import_stage_${DateTime.now().microsecondsSinceEpoch}.kdbx.tmp',
+          ),
+        );
+        await cacheTempFile.writeAsBytes(bytes, flush: true);
+
+        final subPath = extractRelativeSubPath(
+          destination.treeUri,
+          destination.displayPath,
+        );
         final res = await _miscChannel.invokeMapMethod<String, dynamic>(
           'safWriteFile',
           {
@@ -206,6 +268,7 @@ class KeyNestSafService {
             'fileName': fileName,
             'sourceFilePath': cacheTempFile.path,
             'overwrite': overwrite,
+            'subPath': ?subPath,
           },
         );
         if (res == null || res['uri'] == null) {
@@ -218,32 +281,36 @@ class KeyNestSafService {
         );
         return res['uri'] as String;
       } else {
-        // Direct filesystem write
+        // Direct filesystem atomic write (.tmp -> .bak -> target)
         final targetDir = io.Directory(destination.displayPath);
         if (!targetDir.existsSync()) {
           targetDir.createSync(recursive: true);
         }
 
         final finalFile = io.File(p.join(targetDir.path, fileName));
+        if (finalFile.existsSync() && !overwrite) {
+          throw io.FileSystemException(
+            'A file named $fileName already exists in the destination folder.',
+            finalFile.path,
+          );
+        }
+
+        final ts = DateTime.now().microsecondsSinceEpoch;
         final localTempFile = io.File(
-          p.join(
-            targetDir.path,
-            '$fileName.tmp_${DateTime.now().microsecondsSinceEpoch}',
-          ),
+          p.join(targetDir.path, '$fileName.tmp_$ts'),
         );
+        io.File? bakFile;
 
         try {
           await localTempFile.writeAsBytes(bytes, flush: true);
-          if (finalFile.existsSync() && overwrite) {
-            finalFile.deleteSync();
+          final writtenLen = localTempFile.lengthSync();
+          if (writtenLen != bytes.length) {
+            throw io.FileSystemException(
+              'Incomplete write to temporary vault file '
+              '($writtenLen != ${bytes.length} bytes).',
+              localTempFile.path,
+            );
           }
-          if (KeyNestPlatform.isWindows) {
-            await localTempFile.copy(finalFile.path);
-            await localTempFile.delete();
-          } else {
-            localTempFile.renameSync(finalFile.path);
-          }
-          return finalFile.path;
         } catch (e) {
           try {
             if (localTempFile.existsSync()) {
@@ -252,6 +319,61 @@ class KeyNestSafService {
           } catch (_) {}
           rethrow;
         }
+
+        try {
+          if (finalFile.existsSync()) {
+            bakFile = io.File(p.join(targetDir.path, '$fileName.bak_$ts'));
+            finalFile.renameSync(bakFile.path);
+          }
+
+          try {
+            localTempFile.renameSync(finalFile.path);
+          } on io.FileSystemException {
+            await localTempFile.copy(finalFile.path);
+            try {
+              localTempFile.deleteSync();
+            } catch (_) {}
+          }
+
+          if (!finalFile.existsSync() ||
+              finalFile.lengthSync() != bytes.length) {
+            throw io.FileSystemException(
+              'Vault verification failed after atomic write.',
+              finalFile.path,
+            );
+          }
+        } catch (e) {
+          if (bakFile != null && bakFile.existsSync()) {
+            try {
+              if (finalFile.existsSync()) {
+                finalFile.deleteSync();
+              }
+              bakFile.renameSync(finalFile.path);
+            } catch (restoreErr, restoreStack) {
+              _logger.severe(
+                'Failed to restore backup vault ${bakFile.path}',
+                restoreErr,
+                restoreStack,
+              );
+            }
+          }
+          try {
+            if (localTempFile.existsSync()) {
+              localTempFile.deleteSync();
+            }
+          } catch (_) {}
+          rethrow;
+        }
+
+        if (bakFile != null) {
+          try {
+            if (bakFile.existsSync()) {
+              bakFile.deleteSync();
+            }
+          } catch (_) {}
+        }
+
+        return finalFile.path;
       }
     } finally {
       try {

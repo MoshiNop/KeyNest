@@ -1,14 +1,8 @@
-# KeyNest Android Release Signing Configuration Template
-# Copy this file to 'key.properties' in this directory ('android/key.properties')
-# and populate your release keystore parameters.
-#
-# DO NOT commit 'key.properties' or keystore files to version control!
-#
-# Note for Windows paths:
-#   Use forward slashes (e.g. C:/Users/Moshiur/keystores/keynest-release.jks)
-#   or escaped backslashes (e.g. C:\\Users\\Moshiur\\keystores\\keynest-release.jks).
-
-storeFile=C:/Users/Moshiur/keystores/keynest-release.jks
-storePassword=YOUR_KEYSTORE_PASSWORD
+# Do NOT commit plaintext keystore passwords to disk when avoidable.
+# Prefer environment variables during release builds:
+#   ANDROID_KEYSTORE_PATH=/path/to/release.jks
+#   ANDROID_KEYSTORE_PASSWORD=...
+#   ANDROID_KEY_ALIAS=keynest
+#   ANDROID_KEY_PASSWORD=...
+storeFile=release.jks
 keyAlias=keynest
-keyPassword=YOUR_KEY_PASSWORD

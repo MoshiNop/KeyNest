@@ -33,6 +33,7 @@ class NoteDetailsScreen extends StatefulWidget {
     this.isEditing = false,
     this.initialFile,
     this.initialGroup,
+    this.onSaved,
   });
 
   static Route<void> route({
@@ -40,13 +41,16 @@ class NoteDetailsScreen extends StatefulWidget {
     bool isEditing = false,
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
+    ValueChanged<KdbxEntry>? onSaved,
   }) => KeyNestPageRoute(
     settings: const RouteSettings(name: '/noteDetails'),
     builder: (context) => NoteDetailsScreen(
+      key: entry != null ? ValueKey(entry.uuid) : null,
       entry: entry,
       isEditing: isEditing,
       initialFile: initialFile,
       initialGroup: initialGroup,
+      onSaved: onSaved,
     ),
   );
 
@@ -54,12 +58,14 @@ class NoteDetailsScreen extends StatefulWidget {
   final bool isEditing;
   final KdbxFile? initialFile;
   final KdbxGroup? initialGroup;
+  final ValueChanged<KdbxEntry>? onSaved;
 
   @override
   State<NoteDetailsScreen> createState() => _NoteDetailsScreenState();
 }
 
-class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
+class _NoteDetailsScreenState extends State<NoteDetailsScreen>
+    implements KeyNestDetailPaneGuard {
   late bool _isEditing;
   bool _isDirty = false;
   bool _showNotes = false;
@@ -82,6 +88,9 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
       'URL',
       'RecordType',
       'ItemCategory',
+      'KeyNest_Category',
+      'ItemType',
+      'KeyNest_ItemType',
       'KeyNest.ItemType',
       'IsDeleted',
       'CardColorHex',
@@ -116,6 +125,9 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
     }
   }
 
+  bool _isBodyProtected = false;
+  final Set<String> _protectedCustomFieldKeys = <String>{};
+
   void _populateFromEntry() {
     final entry = _currentEntry;
     _selectedFile = entry?.file ?? widget.initialFile;
@@ -123,24 +135,32 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
 
     if (entry != null) {
       _titleController.text = entry.label ?? '';
-      _bodyController.text = entry.getString(KdbxKey('Notes'))?.getText() ?? '';
+      final notesStringVal = entry.getString(KdbxKey('Notes'));
+      _isBodyProtected = notesStringVal is ProtectedValue;
+      _bodyController.text = notesStringVal?.getText() ?? '';
 
       _customFields.clear();
+      _protectedCustomFieldKeys.clear();
       for (final s in entry.stringEntries) {
         final k = s.key.key;
-        if (!_isInternalMetadataKey(k) &&
-            s.value?.getText()?.isNotEmpty == true) {
+        if (!_isInternalMetadataKey(k) && s.value != null) {
           final val = s.value!.getText() ?? '';
+          final wasProtected = s.value is ProtectedValue;
+          if (wasProtected) {
+            _protectedCustomFieldKeys.add(k);
+          }
           final kind = KeyNestCustomFieldSheet.resolveFieldKind(
             entry,
             k,
             value: val,
-            isProtected: s.value is ProtectedValue,
+            isProtected: wasProtected,
           );
           _customFields.add(CustomFieldModel(key: k, value: val, kind: kind));
         }
       }
     } else {
+      _isBodyProtected = false;
+      _protectedCustomFieldKeys.clear();
       _titleController.clear();
       _bodyController.clear();
       _customFields.clear();
@@ -186,6 +206,12 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
       SecurityService.copyNonSensitive(context, value, label: label);
     }
   }
+
+  @override
+  bool get hasUnsavedChanges => _isEditing && _isDirty;
+
+  @override
+  Future<bool> confirmDiscardChanges() => _confirmDiscard();
 
   Future<bool> _confirmDiscard() async {
     if (!_isDirty) {
@@ -269,8 +295,9 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
         );
 
     // If existing entry, preserve complete historical snapshot
+    KdbxEntry? historyClone;
     if (!isNew && entry.parent != null) {
-      final historyClone = entry.cloneInto(entry.parent!, toHistoryEntry: true);
+      historyClone = entry.cloneInto(entry.parent!, toHistoryEntry: true);
       entry.history.add(historyClone);
     }
 
@@ -286,7 +313,9 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
     }
     entry.setString(
       KdbxKey('Notes'),
-      PlainValue(_bodyController.text),
+      _isBodyProtected
+          ? ProtectedValue.fromString(_bodyController.text)
+          : PlainValue(_bodyController.text),
     );
 
     // Sync custom fields: delete removed
@@ -302,6 +331,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
     // Set updated custom fields
     for (final custom in _customFields) {
       final isSensitive =
+          _protectedCustomFieldKeys.contains(custom.key) ||
           custom.kind == CustomFieldKind.hidden ||
           custom.kind == CustomFieldKind.pin ||
           custom.kind == CustomFieldKind.authenticator ||
@@ -337,8 +367,12 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
           );
 
         if (widget.entry == null) {
-          // If this was a newly created note from FAB, pop back or show details
-          Navigator.of(context).pop();
+          if (widget.onSaved != null) {
+            widget.onSaved!(entry);
+          } else {
+            // If this was a newly created note from FAB, pop back or show details
+            Navigator.of(context).pop();
+          }
         } else {
           setState(() {
             _isEditing = false;
@@ -347,6 +381,9 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
         }
       }
     } catch (e, stack) {
+      if (historyClone != null) {
+        entry.history.remove(historyClone);
+      }
       _logger.severe('Failed to save note to encrypted vault', e, stack);
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -581,6 +618,29 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
         onPressed: _handleBack,
       ),
       actions: [
+        if (entry != null)
+          IconButton(
+            tooltip: KeyNestItemTypeHelper.isFavorite(entry)
+                ? 'Remove from Favorites'
+                : 'Add to Favorites',
+            icon: Icon(
+              KeyNestItemTypeHelper.isFavorite(entry)
+                  ? Icons.star_rounded
+                  : Icons.star_outline_rounded,
+              color: KeyNestItemTypeHelper.isFavorite(entry)
+                  ? Colors.amber
+                  : (isDark
+                        ? KeyNestPalette.textSecondaryDark
+                        : KeyNestPalette.textSecondaryLight),
+            ),
+            onPressed: () async {
+              final kdbxBloc = context.read<KdbxBloc>();
+              await KeyNestItemTypeHelper.toggleFavorite(entry, kdbxBloc);
+              if (mounted) {
+                setState(() {});
+              }
+            },
+          ),
         // View -> Edit toggle
         Padding(
           padding: const EdgeInsets.only(right: 8),
@@ -609,16 +669,19 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
               final kdbxBloc = context.read<KdbxBloc>();
               final navigator = Navigator.of(context);
               final scaffoldMessenger = ScaffoldMessenger.of(context);
+              final isTrash = KeyNestItemTypeHelper.isEntryInTrash(entry);
               final confirm = await DialogUtils.showConfirmDialog(
                 context: context,
                 params: ConfirmDialogParams(
-                  title: 'Delete Note',
-                  content: 'Are you sure you want to delete this note?',
-                  positiveButtonText: 'Delete',
+                  title: isTrash ? 'Delete Permanently' : 'Delete Note',
+                  content: isTrash
+                      ? 'Are you sure you want to permanently delete this note? This action cannot be undone.'
+                      : 'Are you sure you want to delete this note?',
+                  positiveButtonText: isTrash ? 'Delete Permanently' : 'Delete',
                 ),
               );
               if (confirm == true && mounted) {
-                if (KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+                if (isTrash) {
                   entry.file.deletePermanently(entry);
                 } else {
                   entry.file.deleteEntry(entry);
@@ -630,9 +693,13 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                   navigator.pop();
                   scaffoldMessenger.clearSnackBars();
                   scaffoldMessenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Note deleted successfully'),
-                      duration: Duration(milliseconds: 1800),
+                    SnackBar(
+                      content: Text(
+                        isTrash
+                            ? 'Note permanently deleted'
+                            : 'Note deleted successfully',
+                      ),
+                      duration: const Duration(milliseconds: 1800),
                     ),
                   );
                 }
@@ -909,7 +976,7 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
                   : KeyNestPalette.surfaceLight,
               borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),
               child: InkWell(
-                onTap: body.isNotEmpty
+                onTap: (body.isNotEmpty && !isNotesMasked)
                     ? () => _copyToClipboard('Note content', body)
                     : null,
                 borderRadius: BorderRadius.circular(KeyNestShapes.radiusCard),

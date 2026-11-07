@@ -393,7 +393,7 @@ class KeyNestImportExportService {
       // Write UTF-8 BOM so spreadsheet viewers render Unicode properly
       buffer.write('\uFEFF');
       buffer.writeln(
-        'Title,Type,Username,Password,URL,Notes,Category,Folder,TOTP,Cardholder,Expiry,CVV,PIN,Network,RecordType,CustomFields',
+        'Title,Type,Username,Password,URL,Notes,Category,Folder,TOTP,Cardholder,CardNumber,Expiry,CVV,PIN,Network,RecordType,CustomFields',
       );
 
       for (final entry in entries) {
@@ -402,14 +402,17 @@ class KeyNestImportExportService {
           rawStrings[s.key.key] = s.value?.getText() ?? '';
         }
 
+        final resolvedItemType = KeyNestItemTypeHelper.getItemType(entry);
         final title = rawStrings[KdbxKeyCommon.TITLE.key] ?? '';
         final type =
-            rawStrings['KeyNest_ItemType'] ??
-            rawStrings['ItemCategory'] ??
-            rawStrings['RecordType'] ??
-            'login';
+            rawStrings[KeyNestItemTypeHelper.itemTypeKey] ??
+            rawStrings[KeyNestItemTypeHelper.legacyItemTypeKey] ??
+            resolvedItemType.name;
         final username = rawStrings[KdbxKeyCommon.USER_NAME.key] ?? '';
-        final password = rawStrings[KdbxKeyCommon.PASSWORD.key] ?? '';
+        final isCard = resolvedItemType == KeyNestItemType.card;
+        final password = isCard
+            ? ''
+            : (rawStrings[KdbxKeyCommon.PASSWORD.key] ?? '');
         final url = rawStrings[KdbxKeyCommon.URL.key] ?? '';
         final notes = rawStrings[KdbxKey('Notes').key] ?? '';
         final category =
@@ -431,6 +434,9 @@ class KeyNestImportExportService {
         }
         final totp = rawStrings['OTPAuth'] ?? rawStrings['TOTP'] ?? '';
         final cardholder = rawStrings['Cardholder'] ?? '';
+        final cardNumber =
+            rawStrings['CardNumber'] ??
+            (isCard ? (rawStrings[KdbxKeyCommon.PASSWORD.key] ?? '') : '');
         final expiry = rawStrings['Expiry'] ?? '';
         final cvv = rawStrings['CVV'] ?? '';
         final pin = rawStrings['PIN'] ?? '';
@@ -445,10 +451,16 @@ class KeyNestImportExportService {
           'Notes',
           'ItemCategory',
           'KeyNest_Category',
+          'ItemType',
           'KeyNest_ItemType',
+          'KeyNest.ItemType',
+          'is_favorite',
+          'IsFavorite',
+          'IsDeleted',
           'OTPAuth',
           'TOTP',
           'Cardholder',
+          'CardNumber',
           'Expiry',
           'CVV',
           'PIN',
@@ -475,6 +487,7 @@ class KeyNestImportExportService {
             _escapeCsv(folderPath),
             _escapeCsv(totp),
             _escapeCsv(cardholder),
+            _escapeCsv(cardNumber),
             _escapeCsv(expiry),
             _escapeCsv(cvv),
             _escapeCsv(pin),
@@ -554,11 +567,15 @@ class KeyNestImportExportService {
           rawStrings[s.key.key] = s.value?.getText() ?? '';
         }
 
+        final resolvedItemType = KeyNestItemTypeHelper.getItemType(entry);
+        final isCard = resolvedItemType == KeyNestItemType.card;
         final type =
-            rawStrings['KeyNest_ItemType'] ??
-            rawStrings['ItemCategory'] ??
-            rawStrings['RecordType'] ??
-            'login';
+            rawStrings[KeyNestItemTypeHelper.itemTypeKey] ??
+            rawStrings[KeyNestItemTypeHelper.legacyItemTypeKey] ??
+            resolvedItemType.name;
+        final cardNumber =
+            rawStrings['CardNumber'] ??
+            (isCard ? (rawStrings[KdbxKeyCommon.PASSWORD.key] ?? '') : '');
 
         final rawFolderPath = _getPathSegments(
           entry,
@@ -578,7 +595,9 @@ class KeyNestImportExportService {
           if (isMultiVault) 'vault': vaultName,
           'folder': folderPath,
           'username': rawStrings[KdbxKeyCommon.USER_NAME.key] ?? '',
-          'password': rawStrings[KdbxKeyCommon.PASSWORD.key] ?? '',
+          'password': isCard
+              ? ''
+              : (rawStrings[KdbxKeyCommon.PASSWORD.key] ?? ''),
           'url': rawStrings[KdbxKeyCommon.URL.key] ?? '',
           'notes': rawStrings[KdbxKey('Notes').key] ?? '',
           'category':
@@ -587,6 +606,7 @@ class KeyNestImportExportService {
               '',
           'totp': rawStrings['OTPAuth'] ?? rawStrings['TOTP'] ?? '',
           'cardholder': rawStrings['Cardholder'] ?? '',
+          'cardNumber': cardNumber,
           'expiry': rawStrings['Expiry'] ?? '',
           'cvv': rawStrings['CVV'] ?? '',
           'pin': rawStrings['PIN'] ?? '',
@@ -678,10 +698,16 @@ class KeyNestImportExportService {
         }
       }
 
-      // 2. Index target entries for UUID matching and duplicate reconciliation
+      // 2. Index active (non-Recycle-Bin / non-trashed) target entries for UUID matching and duplicate reconciliation
+      final targetRecycleBin = targetFile.recycleBin;
       final targetEntriesByUuid = <KdbxUuid, KdbxEntry>{};
       final targetEntriesByFingerprint = <String, KdbxEntry>{};
       for (final entry in targetFile.body.rootGroup.getAllEntries()) {
+        if ((targetRecycleBin != null &&
+                _isDescendantOf(entry, targetRecycleBin)) ||
+            KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+          continue;
+        }
         targetEntriesByUuid[entry.uuid] = entry;
         final fp = _entryFingerprint(entry);
         if (fp.isNotEmpty) {
@@ -698,8 +724,9 @@ class KeyNestImportExportService {
       final sourceEntries = sourceFile.body.rootGroup.getAllEntries().toList();
       for (final src in sourceEntries) {
         // Skip trash entries from the source database
-        if (sourceRecycleBin != null &&
-            _isDescendantOf(src, sourceRecycleBin)) {
+        if ((sourceRecycleBin != null &&
+                _isDescendantOf(src, sourceRecycleBin)) ||
+            KeyNestItemTypeHelper.isEntryInTrash(src)) {
           continue;
         }
 
@@ -739,6 +766,18 @@ class KeyNestImportExportService {
               existing.setString(s.key, s.value);
             }
             existing.icon.set(src.icon.get() ?? KdbxIcon.Key);
+            if (src.customIcon != null) {
+              final custom = src.customIcon!;
+              if (!targetFile.body.meta.customIcons.containsKey(custom.uuid)) {
+                targetFile.body.meta.addCustomIcon(
+                  KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+                );
+              }
+              existing.customIcon =
+                  targetFile.body.meta.customIcons[custom.uuid] ?? custom;
+            } else {
+              existing.customIcon = null;
+            }
             existing.times.lastModificationTime.set(srcModTime);
           } else {
             // Existing is newer: push source to history so data is preserved
@@ -801,6 +840,16 @@ class KeyNestImportExportService {
           );
 
           final cloned = src.cloneInto(targetFolder);
+          if (src.customIcon != null) {
+            final custom = src.customIcon!;
+            if (!targetFile.body.meta.customIcons.containsKey(custom.uuid)) {
+              targetFile.body.meta.addCustomIcon(
+                KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+              );
+            }
+            cloned.customIcon =
+                targetFile.body.meta.customIcons[custom.uuid] ?? custom;
+          }
           targetEntriesByUuid[cloned.uuid] = cloned;
           final fp = _entryFingerprint(cloned);
           if (fp.isNotEmpty) {
@@ -1010,9 +1059,18 @@ class KeyNestImportExportService {
       final colTotp = mappings
           .firstWhereOrNull((m) => m.isStandard(KeyNestStandardField.totp))
           ?.sourceColumnIndex;
-      final colCategory = mappings
-          .firstWhereOrNull((m) => m.isStandard(KeyNestStandardField.category))
-          ?.sourceColumnIndex;
+      final categoryMapping = mappings.firstWhereOrNull(
+        (m) => m.isStandard(KeyNestStandardField.category),
+      );
+      final colCategory = categoryMapping?.sourceColumnIndex;
+      final categorySourceLower =
+          categoryMapping?.sourceColumnName
+              .trim()
+              .toLowerCase()
+              .replaceAll(RegExp(r'[\s_\-]+'), '') ??
+          '';
+      final isCategoryActuallyFolder =
+          categorySourceLower == 'folder' || categorySourceLower == 'grouping';
       final colCardholder = mappings
           .firstWhereOrNull(
             (m) => m.isStandard(KeyNestStandardField.cardholder),
@@ -1036,12 +1094,44 @@ class KeyNestImportExportService {
           .firstWhereOrNull((m) => m.isStandard(KeyNestStandardField.tags))
           ?.sourceColumnIndex;
 
-      // Extract custom field mappings
+      // Detect dedicated Folder / Type / CustomFields columns (e.g. from KeyNest CSV export)
+      final folderCustomMapping = mappings.firstWhereOrNull(
+        (m) =>
+            m.destinationType == KeyNestMappingDestinationType.customField &&
+            (m.customFieldName ?? m.sourceColumnName).trim().toLowerCase() ==
+                'folder',
+      );
+      final typeCustomMapping = mappings.firstWhereOrNull(
+        (m) =>
+            m.destinationType == KeyNestMappingDestinationType.customField &&
+            const {
+              'type',
+              'itemtype',
+              'keynest_itemtype',
+            }.contains(
+              (m.customFieldName ?? m.sourceColumnName).trim().toLowerCase(),
+            ),
+      );
+      final jsonCustomFieldsMapping = mappings.firstWhereOrNull(
+        (m) =>
+            m.destinationType == KeyNestMappingDestinationType.customField &&
+            (m.customFieldName ?? m.sourceColumnName).trim().toLowerCase() ==
+                'customfields',
+      );
+
+      // Extract custom field mappings (excluding structural columns handled natively)
+      final excludedCustomIndices = <int>{
+        if (folderCustomMapping != null) folderCustomMapping.sourceColumnIndex,
+        if (typeCustomMapping != null) typeCustomMapping.sourceColumnIndex,
+        if (jsonCustomFieldsMapping != null)
+          jsonCustomFieldsMapping.sourceColumnIndex,
+      };
       final customMappings = mappings
           .where(
             (m) =>
                 m.destinationType ==
                     KeyNestMappingDestinationType.customField &&
+                !excludedCustomIndices.contains(m.sourceColumnIndex) &&
                 m.customFieldName != null &&
                 m.customFieldName!.trim().isNotEmpty,
           )
@@ -1109,16 +1199,31 @@ class KeyNestImportExportService {
         final pin = getField(colPin);
         final tags = getField(colTags);
 
+        final folderPathRaw = folderCustomMapping != null
+            ? getField(folderCustomMapping.sourceColumnIndex)
+            : (isCategoryActuallyFolder ? category : '');
+        final explicitItemType = typeCustomMapping != null
+            ? getField(typeCustomMapping.sourceColumnIndex)
+            : '';
+        final rawJsonCustomFields = jsonCustomFieldsMapping != null
+            ? getField(jsonCustomFieldsMapping.sourceColumnIndex)
+            : '';
+        final effectiveCategory = isCategoryActuallyFolder ? '' : category;
+
         // Check if row has any non-empty data across standard and custom fields
-        final hasCustomData = customMappings.any(
-          (cm) => getField(cm.sourceColumnIndex).isNotEmpty,
-        );
+        final hasCustomData =
+            rawJsonCustomFields.isNotEmpty ||
+            customMappings.any(
+              (cm) => getField(cm.sourceColumnIndex).isNotEmpty,
+            );
         if (title.isEmpty &&
             user.isEmpty &&
             email.isEmpty &&
             pass.isEmpty &&
             url.isEmpty &&
             cardholder.isEmpty &&
+            cardNumber.isEmpty &&
+            totp.isEmpty &&
             notes.isEmpty &&
             !hasCustomData) {
           skippedCount++;
@@ -1128,6 +1233,119 @@ class KeyNestImportExportService {
         final itemTitle = title.isNotEmpty
             ? title
             : (url.isNotEmpty ? url : 'Imported Item');
+
+        final baseDestination = targetGroup ?? targetFile.body.rootGroup;
+        final resolvedFolder = folderPathRaw.isNotEmpty
+            ? _resolveOrCreateFolderPath(
+                targetFile,
+                baseDestination,
+                folderPathRaw,
+              )
+            : baseDestination;
+
+        void applyCsvFieldsToEntry(KdbxEntry entry) {
+          if (itemTitle.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
+          }
+          if (explicitItemType.isNotEmpty) {
+            entry.setString(
+              KdbxKey(KeyNestItemTypeHelper.itemTypeKey),
+              PlainValue(explicitItemType),
+            );
+          } else if (cardNumber.isNotEmpty || cardholder.isNotEmpty) {
+            KeyNestItemTypeHelper.setItemType(entry, KeyNestItemType.card);
+          }
+          if (user.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
+          }
+          if (email.isNotEmpty) {
+            entry.setString(KdbxKey('Email'), PlainValue(email));
+          }
+          if (pass.isNotEmpty) {
+            entry.setString(
+              KdbxKeyCommon.PASSWORD,
+              ProtectedValue.fromString(pass),
+            );
+          } else if (cardNumber.isNotEmpty) {
+            entry.setString(
+              KdbxKeyCommon.PASSWORD,
+              ProtectedValue.fromString(cardNumber),
+            );
+          }
+          if (url.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.URL, PlainValue(url));
+          }
+          if (notes.isNotEmpty) {
+            entry.setString(KdbxKey('Notes'), PlainValue(notes));
+          }
+          if (effectiveCategory.isNotEmpty) {
+            entry.setString(
+              KdbxKey('ItemCategory'),
+              PlainValue(effectiveCategory),
+            );
+          }
+          if (totp.isNotEmpty) {
+            entry.setString(
+              KdbxKey('OTPAuth'),
+              ProtectedValue.fromString(totp),
+            );
+          }
+          if (cardholder.isNotEmpty) {
+            entry.setString(KdbxKey('Cardholder'), PlainValue(cardholder));
+          }
+          if (cardNumber.isNotEmpty) {
+            entry.setString(
+              KdbxKey('CardNumber'),
+              ProtectedValue.fromString(cardNumber),
+            );
+          }
+          if (expiry.isNotEmpty) {
+            entry.setString(KdbxKey('Expiry'), PlainValue(expiry));
+          }
+          if (cvv.isNotEmpty) {
+            entry.setString(KdbxKey('CVV'), ProtectedValue.fromString(cvv));
+          }
+          if (pin.isNotEmpty) {
+            entry.setString(KdbxKey('PIN'), ProtectedValue.fromString(pin));
+          }
+          if (tags.isNotEmpty) {
+            entry.setString(KdbxKey('Tags'), PlainValue(tags));
+          }
+          for (final cm in customMappings) {
+            final val = getField(cm.sourceColumnIndex);
+            if (val.isNotEmpty) {
+              final fieldName = cm.customFieldName!.trim();
+              final sensitive = KeyNestItemTypeHelper.isSensitiveFieldKey(
+                fieldName,
+              );
+              entry.setString(
+                KdbxKey(fieldName),
+                sensitive ? ProtectedValue.fromString(val) : PlainValue(val),
+              );
+            }
+          }
+          if (rawJsonCustomFields.isNotEmpty) {
+            try {
+              final decodedExtra = jsonDecode(rawJsonCustomFields);
+              if (decodedExtra is Map) {
+                for (final kv in decodedExtra.entries) {
+                  final k = kv.key.toString().trim();
+                  final v = kv.value?.toString() ?? '';
+                  if (k.isNotEmpty && v.isNotEmpty) {
+                    final sensitive = KeyNestItemTypeHelper.isSensitiveFieldKey(
+                      k,
+                    );
+                    entry.setString(
+                      KdbxKey(k),
+                      sensitive ? ProtectedValue.fromString(v) : PlainValue(v),
+                    );
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+          KeyNestItemTypeHelper.upgradeEntrySensitiveFields(entry);
+        }
 
         // Check for duplicates
         if (duplicateStrategy != KeyNestImportDuplicateStrategy.keepBoth) {
@@ -1164,78 +1382,11 @@ class KeyNestImportExportService {
                   toHistoryEntry: true,
                 ),
               );
-              if (itemTitle.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
+              if (folderPathRaw.isNotEmpty &&
+                  existing.parent != resolvedFolder) {
+                targetFile.move(existing, resolvedFolder);
               }
-              if (user.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
-              }
-              if (email.isNotEmpty) {
-                existing.setString(KdbxKey('Email'), PlainValue(email));
-              }
-              if (pass.isNotEmpty) {
-                existing.setString(
-                  KdbxKeyCommon.PASSWORD,
-                  ProtectedValue.fromString(pass),
-                );
-              }
-              if (url.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.URL, PlainValue(url));
-              }
-              if (notes.isNotEmpty) {
-                existing.setString(KdbxKey('Notes'), PlainValue(notes));
-              }
-              if (category.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('ItemCategory'),
-                  PlainValue(category),
-                );
-              }
-              if (totp.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('OTPAuth'),
-                  ProtectedValue.fromString(totp),
-                );
-              }
-              if (cardholder.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('Cardholder'),
-                  PlainValue(cardholder),
-                );
-              }
-              if (cardNumber.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('CardNumber'),
-                  PlainValue(cardNumber),
-                );
-              }
-              if (expiry.isNotEmpty) {
-                existing.setString(KdbxKey('Expiry'), PlainValue(expiry));
-              }
-              if (cvv.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('CVV'),
-                  ProtectedValue.fromString(cvv),
-                );
-              }
-              if (pin.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('PIN'),
-                  ProtectedValue.fromString(pin),
-                );
-              }
-              if (tags.isNotEmpty) {
-                existing.setString(KdbxKey('Tags'), PlainValue(tags));
-              }
-              for (final cm in customMappings) {
-                final val = getField(cm.sourceColumnIndex);
-                if (val.isNotEmpty) {
-                  existing.setString(
-                    KdbxKey(cm.customFieldName!.trim()),
-                    PlainValue(val),
-                  );
-                }
-              }
+              applyCsvFieldsToEntry(existing);
               existing.times.lastModificationTime.set(DateTime.now().toUtc());
               updatedCount++;
               continue;
@@ -1243,68 +1394,12 @@ class KeyNestImportExportService {
           }
         }
 
-        final destinationFolder = targetGroup ?? targetFile.body.rootGroup;
         final newEntry = kdbxBloc.createEntry(
           file: targetFile,
-          group: destinationFolder,
+          group: resolvedFolder,
         );
         newlyCreatedEntries.add(newEntry);
-        newEntry.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
-        if (user.isNotEmpty) {
-          newEntry.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
-        }
-        if (email.isNotEmpty) {
-          newEntry.setString(KdbxKey('Email'), PlainValue(email));
-        }
-        if (pass.isNotEmpty) {
-          newEntry.setString(
-            KdbxKeyCommon.PASSWORD,
-            ProtectedValue.fromString(pass),
-          );
-        }
-        if (url.isNotEmpty) {
-          newEntry.setString(KdbxKeyCommon.URL, PlainValue(url));
-        }
-        if (notes.isNotEmpty) {
-          newEntry.setString(KdbxKey('Notes'), PlainValue(notes));
-        }
-        if (category.isNotEmpty) {
-          newEntry.setString(KdbxKey('ItemCategory'), PlainValue(category));
-        }
-        if (totp.isNotEmpty) {
-          newEntry.setString(
-            KdbxKey('OTPAuth'),
-            ProtectedValue.fromString(totp),
-          );
-        }
-        if (cardholder.isNotEmpty) {
-          newEntry.setString(KdbxKey('Cardholder'), PlainValue(cardholder));
-        }
-        if (cardNumber.isNotEmpty) {
-          newEntry.setString(KdbxKey('CardNumber'), PlainValue(cardNumber));
-        }
-        if (expiry.isNotEmpty) {
-          newEntry.setString(KdbxKey('Expiry'), PlainValue(expiry));
-        }
-        if (cvv.isNotEmpty) {
-          newEntry.setString(KdbxKey('CVV'), ProtectedValue.fromString(cvv));
-        }
-        if (pin.isNotEmpty) {
-          newEntry.setString(KdbxKey('PIN'), ProtectedValue.fromString(pin));
-        }
-        if (tags.isNotEmpty) {
-          newEntry.setString(KdbxKey('Tags'), PlainValue(tags));
-        }
-
-        for (final cm in customMappings) {
-          final val = getField(cm.sourceColumnIndex);
-          if (val.isNotEmpty) {
-            newEntry.setString(
-              KdbxKey(cm.customFieldName!.trim()),
-              PlainValue(val),
-            );
-          }
-        }
+        applyCsvFieldsToEntry(newEntry);
 
         final normT = KeyNestDuplicateDetector.normalize(itemTitle);
         final normU = KeyNestDuplicateDetector.normalize(
@@ -1423,8 +1518,24 @@ class KeyNestImportExportService {
         String notes = '';
         String category = '';
         String totp = '';
+        String rawFolder = '';
+        String cardholder = raw['cardholder']?.toString().trim() ?? '';
+        String cardNumber = raw['cardNumber']?.toString().trim() ?? '';
+        String expiry = raw['expiry']?.toString().trim() ?? '';
+        String cvv = raw['cvv']?.toString().trim() ?? '';
+        final pin = raw['pin']?.toString().trim() ?? '';
+        String network = raw['network']?.toString().trim() ?? '';
+        final recordType = raw['recordType']?.toString().trim() ?? '';
+        String itemType =
+            raw['type']?.toString().trim() ??
+            raw['itemType']?.toString().trim() ??
+            '';
 
-        if (raw.containsKey('title') || raw.containsKey('username')) {
+        if (raw.containsKey('title') ||
+            raw.containsKey('username') ||
+            raw.containsKey('cardNumber') ||
+            raw.containsKey('cardholder') ||
+            raw.containsKey('recordType')) {
           title = raw['title']?.toString().trim() ?? '';
           user = raw['username']?.toString().trim() ?? '';
           pass = raw['password']?.toString().trim() ?? '';
@@ -1432,10 +1543,24 @@ class KeyNestImportExportService {
           notes = raw['notes']?.toString().trim() ?? '';
           category = raw['category']?.toString().trim() ?? '';
           totp = raw['totp']?.toString().trim() ?? '';
+          rawFolder = raw['folder']?.toString().trim() ?? '';
         } else {
           // Bitwarden JSON structure
           title = raw['name']?.toString().trim() ?? '';
           notes = raw['notes']?.toString().trim() ?? '';
+          rawFolder = raw['folder']?.toString().trim() ?? '';
+          final bwType = raw['type'];
+          if (bwType is int) {
+            if (bwType == 2) {
+              itemType = KeyNestItemType.note.name;
+            } else if (bwType == 3) {
+              itemType = KeyNestItemType.card.name;
+            } else if (bwType == 4) {
+              itemType = KeyNestItemType.record.name;
+            } else {
+              itemType = KeyNestItemType.login.name;
+            }
+          }
           if (raw['login'] is Map) {
             final login = raw['login'] as Map;
             user = login['username']?.toString().trim() ?? '';
@@ -1450,13 +1575,169 @@ class KeyNestImportExportService {
               }
             }
           }
+          if (raw['card'] is Map) {
+            final card = raw['card'] as Map;
+            cardholder = card['cardholderName']?.toString().trim() ?? cardholder;
+            cardNumber = card['number']?.toString().trim() ?? cardNumber;
+            final expMonth = card['expMonth']?.toString().trim() ?? '';
+            final expYear = card['expYear']?.toString().trim() ?? '';
+            if (expiry.isEmpty && (expMonth.isNotEmpty || expYear.isNotEmpty)) {
+              final shortYear = expYear.length == 4
+                  ? expYear.substring(2)
+                  : expYear;
+              expiry = '${expMonth.padLeft(2, '0')}/$shortYear';
+            }
+            cvv = card['code']?.toString().trim() ?? cvv;
+            network = card['brand']?.toString().trim() ?? network;
+          }
         }
 
-        if (title.isEmpty && user.isEmpty && pass.isEmpty) continue;
+        final hasExtraFields =
+            (raw['fields'] is Map && (raw['fields'] as Map).isNotEmpty) ||
+            (raw['fields'] is List && (raw['fields'] as List).isNotEmpty);
+
+        if (title.isEmpty &&
+            user.isEmpty &&
+            pass.isEmpty &&
+            url.isEmpty &&
+            notes.isEmpty &&
+            totp.isEmpty &&
+            cardholder.isEmpty &&
+            cardNumber.isEmpty &&
+            !hasExtraFields) {
+          continue;
+        }
 
         final itemTitle = title.isNotEmpty
             ? title
             : (url.isNotEmpty ? url : 'Imported Item');
+
+        void applyJsonFieldsToEntry(KdbxEntry entry) {
+          if (itemTitle.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
+          }
+          if (itemType.isNotEmpty) {
+            entry.setString(
+              KdbxKey(KeyNestItemTypeHelper.itemTypeKey),
+              PlainValue(itemType),
+            );
+          } else if (cardNumber.isNotEmpty || cardholder.isNotEmpty) {
+            KeyNestItemTypeHelper.setItemType(entry, KeyNestItemType.card);
+          }
+          if (user.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
+          }
+          if (pass.isNotEmpty) {
+            entry.setString(
+              KdbxKeyCommon.PASSWORD,
+              ProtectedValue.fromString(pass),
+            );
+          } else if (cardNumber.isNotEmpty) {
+            entry.setString(
+              KdbxKeyCommon.PASSWORD,
+              ProtectedValue.fromString(cardNumber),
+            );
+          }
+          if (url.isNotEmpty) {
+            entry.setString(KdbxKeyCommon.URL, PlainValue(url));
+          }
+          if (notes.isNotEmpty) {
+            entry.setString(KdbxKey('Notes'), PlainValue(notes));
+          }
+          if (category.isNotEmpty) {
+            entry.setString(KdbxKey('ItemCategory'), PlainValue(category));
+          }
+          if (totp.isNotEmpty) {
+            entry.setString(
+              KdbxKey('OTPAuth'),
+              ProtectedValue.fromString(totp),
+            );
+          }
+          if (cardholder.isNotEmpty) {
+            entry.setString(KdbxKey('Cardholder'), PlainValue(cardholder));
+          }
+          if (cardNumber.isNotEmpty) {
+            entry.setString(
+              KdbxKey('CardNumber'),
+              ProtectedValue.fromString(cardNumber),
+            );
+          }
+          if (expiry.isNotEmpty) {
+            entry.setString(KdbxKey('Expiry'), PlainValue(expiry));
+          }
+          if (cvv.isNotEmpty) {
+            entry.setString(KdbxKey('CVV'), ProtectedValue.fromString(cvv));
+          }
+          if (pin.isNotEmpty) {
+            entry.setString(KdbxKey('PIN'), ProtectedValue.fromString(pin));
+          }
+          if (network.isNotEmpty) {
+            entry.setString(KdbxKey('Network'), PlainValue(network));
+          }
+          if (recordType.isNotEmpty) {
+            entry.setString(KdbxKey('RecordType'), PlainValue(recordType));
+          }
+
+          const standardJsonKeys = {
+            'Title',
+            'UserName',
+            'Password',
+            'URL',
+            'Notes',
+            'ItemCategory',
+            'OTPAuth',
+            'TOTP',
+            'Cardholder',
+            'CardNumber',
+            'Expiry',
+            'CVV',
+            'PIN',
+            'Network',
+            'RecordType',
+            'ItemType',
+            'KeyNest_ItemType',
+            'KeyNest.ItemType',
+            'KeyNest_Category',
+          };
+
+          if (raw['fields'] is Map) {
+            final fields = raw['fields'] as Map;
+            for (final f in fields.entries) {
+              final k = f.key.toString().trim();
+              final v = f.value?.toString() ?? '';
+              if (k.isNotEmpty &&
+                  !standardJsonKeys.contains(k) &&
+                  v.isNotEmpty) {
+                final sensitive = KeyNestItemTypeHelper.isSensitiveFieldKey(k);
+                entry.setString(
+                  KdbxKey(k),
+                  sensitive ? ProtectedValue.fromString(v) : PlainValue(v),
+                );
+              }
+            }
+          } else if (raw['fields'] is List) {
+            for (final f in raw['fields'] as List) {
+              if (f is Map) {
+                final k = f['name']?.toString().trim() ?? '';
+                final v = f['value']?.toString() ?? '';
+                final bwFieldType = f['type'];
+                if (k.isNotEmpty &&
+                    !standardJsonKeys.contains(k) &&
+                    v.isNotEmpty) {
+                  final sensitive =
+                      bwFieldType == 1 ||
+                      KeyNestItemTypeHelper.isSensitiveFieldKey(k);
+                  entry.setString(
+                    KdbxKey(k),
+                    sensitive ? ProtectedValue.fromString(v) : PlainValue(v),
+                  );
+                }
+              }
+            }
+          }
+
+          KeyNestItemTypeHelper.upgradeEntrySensitiveFields(entry);
+        }
 
         if (duplicateStrategy != KeyNestImportDuplicateStrategy.keepBoth) {
           final matches = KeyNestDuplicateDetector.findMatchesForCredential(
@@ -1464,7 +1745,7 @@ class KeyNestImportExportService {
             title: itemTitle,
             username: user,
             url: url,
-            password: pass,
+            password: pass.isNotEmpty ? pass : cardNumber,
           );
 
           if (matches.isNotEmpty) {
@@ -1480,36 +1761,7 @@ class KeyNestImportExportService {
                   toHistoryEntry: true,
                 ),
               );
-              if (itemTitle.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
-              }
-              if (user.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
-              }
-              if (pass.isNotEmpty) {
-                existing.setString(
-                  KdbxKeyCommon.PASSWORD,
-                  ProtectedValue.fromString(pass),
-                );
-              }
-              if (url.isNotEmpty) {
-                existing.setString(KdbxKeyCommon.URL, PlainValue(url));
-              }
-              if (notes.isNotEmpty) {
-                existing.setString(KdbxKey('Notes'), PlainValue(notes));
-              }
-              if (category.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('ItemCategory'),
-                  PlainValue(category),
-                );
-              }
-              if (totp.isNotEmpty) {
-                existing.setString(
-                  KdbxKey('OTPAuth'),
-                  ProtectedValue.fromString(totp),
-                );
-              }
+              applyJsonFieldsToEntry(existing);
               existing.times.lastModificationTime.set(DateTime.now().toUtc());
               updatedCount++;
               continue;
@@ -1517,98 +1769,16 @@ class KeyNestImportExportService {
           }
         }
 
-        final destinationFolder = targetGroup ?? targetFile.body.rootGroup;
+        final baseDestination = targetGroup ?? targetFile.body.rootGroup;
+        final destinationFolder = rawFolder.isNotEmpty
+            ? _resolveOrCreateFolderPath(targetFile, baseDestination, rawFolder)
+            : baseDestination;
         final newEntry = kdbxBloc.createEntry(
           file: targetFile,
           group: destinationFolder,
         );
         newlyCreatedEntries.add(newEntry);
-        newEntry.setString(KdbxKeyCommon.TITLE, PlainValue(itemTitle));
-        if (user.isNotEmpty) {
-          newEntry.setString(KdbxKeyCommon.USER_NAME, PlainValue(user));
-        }
-        if (pass.isNotEmpty) {
-          newEntry.setString(
-            KdbxKeyCommon.PASSWORD,
-            ProtectedValue.fromString(pass),
-          );
-        }
-        if (url.isNotEmpty) {
-          newEntry.setString(KdbxKeyCommon.URL, PlainValue(url));
-        }
-        if (notes.isNotEmpty) {
-          newEntry.setString(KdbxKey('Notes'), PlainValue(notes));
-        }
-        if (category.isNotEmpty) {
-          newEntry.setString(KdbxKey('ItemCategory'), PlainValue(category));
-        }
-        if (totp.isNotEmpty) {
-          newEntry.setString(
-            KdbxKey('OTPAuth'),
-            ProtectedValue.fromString(totp),
-          );
-        }
-
-        // Preserve all extra supported fields from JSON
-        final cardholder = raw['cardholder']?.toString().trim() ?? '';
-        if (cardholder.isNotEmpty) {
-          newEntry.setString(KdbxKey('Cardholder'), PlainValue(cardholder));
-        }
-        final expiry = raw['expiry']?.toString().trim() ?? '';
-        if (expiry.isNotEmpty) {
-          newEntry.setString(KdbxKey('Expiry'), PlainValue(expiry));
-        }
-        final cvv = raw['cvv']?.toString().trim() ?? '';
-        if (cvv.isNotEmpty) {
-          newEntry.setString(KdbxKey('CVV'), ProtectedValue.fromString(cvv));
-        }
-        final pin = raw['pin']?.toString().trim() ?? '';
-        if (pin.isNotEmpty) {
-          newEntry.setString(KdbxKey('PIN'), ProtectedValue.fromString(pin));
-        }
-        final network = raw['network']?.toString().trim() ?? '';
-        if (network.isNotEmpty) {
-          newEntry.setString(KdbxKey('Network'), PlainValue(network));
-        }
-        final recordType = raw['recordType']?.toString().trim() ?? '';
-        if (recordType.isNotEmpty) {
-          newEntry.setString(KdbxKey('RecordType'), PlainValue(recordType));
-        }
-        final itemType =
-            raw['type']?.toString().trim() ??
-            raw['itemType']?.toString().trim() ??
-            '';
-        if (itemType.isNotEmpty) {
-          newEntry.setString(KdbxKey('KeyNest_ItemType'), PlainValue(itemType));
-        }
-
-        if (raw['fields'] is Map) {
-          final fields = raw['fields'] as Map;
-          final standardJsonKeys = {
-            'Title',
-            'UserName',
-            'Password',
-            'URL',
-            'Notes',
-            'ItemCategory',
-            'OTPAuth',
-            'Cardholder',
-            'Expiry',
-            'CVV',
-            'PIN',
-            'Network',
-            'RecordType',
-            'KeyNest_ItemType',
-            'KeyNest_Category',
-          };
-          for (final f in fields.entries) {
-            final k = f.key.toString();
-            final v = f.value?.toString() ?? '';
-            if (!standardJsonKeys.contains(k) && v.isNotEmpty) {
-              newEntry.setString(KdbxKey(k), PlainValue(v));
-            }
-          }
-        }
+        applyJsonFieldsToEntry(newEntry);
 
         addedCount++;
       }
@@ -1643,14 +1813,70 @@ class KeyNestImportExportService {
     }
   }
 
-  static String _escapeCsv(String val) {
-    if (val.contains(',') ||
-        val.contains('"') ||
-        val.contains('\n') ||
-        val.contains('\r')) {
-      return '"${val.replaceAll('"', '""')}"';
+  static KdbxGroup _resolveOrCreateFolderPath(
+    KdbxFile targetFile,
+    KdbxGroup baseGroup,
+    String rawFolderPath,
+  ) {
+    final stripped = rawFolderPath
+        .trim()
+        .replaceFirst(RegExp(r'^\[[^\]]+\]\s*(?:/\s*)?'), '')
+        .trim();
+    if (stripped.isEmpty) {
+      return baseGroup;
     }
-    return val;
+
+    final segments = stripped
+        .split('/')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty && s != '.' && s != '..')
+        .toList();
+    if (segments.isEmpty) {
+      return baseGroup;
+    }
+
+    var current = baseGroup;
+    for (final segment in segments) {
+      final lower = segment.toLowerCase();
+      KdbxGroup? existingChild;
+      for (final g in current.groups) {
+        if (KeyNestItemTypeHelper.isTrashOrRecycleBin(g)) {
+          continue;
+        }
+        if ((g.name.get() ?? '').trim().toLowerCase() == lower) {
+          existingChild = g;
+          break;
+        }
+      }
+      existingChild ??= targetFile.createGroup(parent: current, name: segment);
+      current = existingChild;
+    }
+    return current;
+  }
+
+  static String _escapeCsv(String val) {
+    if (val.isEmpty) {
+      return val;
+    }
+    var safeVal = val;
+    final trimmedLeft = safeVal.trimLeft();
+    if (safeVal.startsWith('\t') ||
+        safeVal.startsWith('\r') ||
+        (trimmedLeft.isNotEmpty &&
+            (trimmedLeft.startsWith('=') ||
+                trimmedLeft.startsWith('+') ||
+                trimmedLeft.startsWith('-') ||
+                trimmedLeft.startsWith('@')))) {
+      safeVal = "'$safeVal";
+    }
+    if (safeVal.contains(',') ||
+        safeVal.contains('"') ||
+        safeVal.contains('\n') ||
+        safeVal.contains('\r') ||
+        safeVal.startsWith("'")) {
+      return '"${safeVal.replaceAll('"', '""')}"';
+    }
+    return safeVal;
   }
 
   static List<List<String>> _parseCsv(String text) {

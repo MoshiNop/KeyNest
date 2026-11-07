@@ -112,7 +112,7 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _logger.info('didChange');
+    _logger.fine('didChange');
   }
 
   @override
@@ -145,7 +145,7 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
       ),
     };
     return Shortcuts.manager(
-      manager: LoggingShortcutManager(shortcuts: shortcuts),
+      manager: KeyNestShortcutManager(shortcuts: shortcuts),
       child: Provider<KeyboardShortcutEvents>.value(
         value: _keyboardShortcutEvents,
         child: Actions(
@@ -154,7 +154,7 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
             ..._keyboardShortcutEvents._intentActionsMap,
             ...showHelpShortcut,
           },
-          dispatcher: LoggingActionDispatcher(),
+          dispatcher: const ActionDispatcher(),
           child: Focus(
             focusNode: _focusNode,
             autofocus: true,
@@ -167,9 +167,39 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
 
   @override
   void dispose() {
+    _focusNode.dispose();
     _keyboardShortcutEvents.dispose();
     _disposeSystemWideShortcuts();
     super.dispose();
+  }
+}
+
+class KeyNestShortcutManager extends ShortcutManager {
+  KeyNestShortcutManager({super.shortcuts});
+
+  static bool _shouldDeferToEditableText(Intent intent) {
+    return intent is MoveUpIntent ||
+        intent is MoveDownIntent ||
+        intent is CopyPasswordIntent ||
+        intent is CopyUsernameIntent ||
+        intent is CopyTotpIntent ||
+        intent is CopyUrlIntent ||
+        intent is OpenUrlIntent ||
+        intent is KeyboardShortcutHelpIntent;
+  }
+
+  @override
+  KeyEventResult handleKeypress(BuildContext context, KeyEvent event) {
+    if (isEditableTextFocused(context)) {
+      for (final entry in shortcuts.entries) {
+        if (entry.key.accepts(event, HardwareKeyboard.instance)) {
+          if (_shouldDeferToEditableText(entry.value)) {
+            return KeyEventResult.ignored;
+          }
+        }
+      }
+    }
+    return super.handleKeypress(context, event);
   }
 }
 
@@ -191,6 +221,7 @@ class KeyboardShortcutEvents with StreamSubscriberBase {
 
   void _removeActions(IntentActionRegistration registration) {
     registration._registeredActions.forEach(_intentActions.remove);
+    _intentActionsMap = Map.fromEntries(_intentActions);
     // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
     _changeNotifier.notifyListeners();
   }
@@ -208,34 +239,5 @@ class IntentActionRegistration {
 
   void dispose() {
     _registrar._removeActions(this);
-  }
-}
-
-/// A ShortcutManager that logs all keys that it handles.
-class LoggingShortcutManager extends ShortcutManager {
-  LoggingShortcutManager({required super.shortcuts});
-
-  @override
-  KeyEventResult handleKeypress(
-    BuildContext context,
-    KeyEvent event, {
-    LogicalKeySet? keysPressed,
-  }) {
-    final KeyEventResult result = super.handleKeypress(context, event);
-    _logger.info('handleKeyPress($event, $keysPressed) result: $result');
-    return result;
-  }
-}
-
-/// An ActionDispatcher that logs all the actions that it invokes.
-class LoggingActionDispatcher extends ActionDispatcher {
-  @override
-  Object? invokeAction(
-    covariant Action<Intent> action,
-    covariant Intent intent, [
-    BuildContext? context,
-  ]) {
-    _logger.fine('Action invoked: $action($intent) from $context');
-    return super.invokeAction(action, intent, context);
   }
 }

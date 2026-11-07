@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:keynest/bloc/analytics.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
+import 'package:keynest/services/keynest_pending_login_memory.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
+import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
+import 'package:keynest/ui/design_system/design_tokens.dart';
 import 'package:keynest/ui/screens/keynest_vault_manager_screen.dart';
+import 'package:keynest/ui/screens/locked_screen.dart';
 import 'package:keynest/ui/screens/preferences.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:provider/provider.dart';
@@ -134,12 +138,26 @@ class KeyNestDesktopNavRail extends StatelessWidget {
           _RailActionButton(
             icon: Icons.lock_outline_rounded,
             tooltip: 'Lock Vault',
-            color: KeyNestPalette.error,
-            onPressed: () {
+            color: isDark ? KeyNestTokens.darkError : KeyNestPalette.error,
+            onPressed: () async {
               context.read<Analytics>().events.trackActionPressed(
                 action: 'lockFiles',
               );
-              context.read<KdbxBloc>().closeAllFiles(clearQuickUnlock: false);
+              final nav = Navigator.of(context, rootNavigator: true);
+              final kdbxBloc = context.read<KdbxBloc>();
+              KeyNestClipboard.clearNow();
+              QuickUnlockStorage.clearSession();
+              KeyNestPendingLoginMemory.instance.clear();
+              if (kdbxBloc.isSaving) {
+                try {
+                  await kdbxBloc.waitForPendingSaves();
+                } catch (_) {}
+              }
+              await kdbxBloc.closeAllFiles(clearQuickUnlock: false);
+              nav.pushAndRemoveUntil(
+                LockedScreen.route(),
+                (_) => false,
+              );
             },
           ),
           // Manage Vaults Folder Button

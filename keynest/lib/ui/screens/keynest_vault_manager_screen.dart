@@ -748,7 +748,8 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
     final isFolderCollapsed = _collapsedFolders.contains(groupUuid);
     final hasSubgroups = group.groups.isNotEmpty;
     final isRecycleBin = kdbxFile.recycleBin == group;
-    final isInsideTrash = !isRecycleBin && group.isInRecycleBin();
+    final isInsideTrash =
+        !isRecycleBin && KeyNestItemTypeHelper.isTrashOrRecycleBin(group);
     final groupName = group.name.get() ?? 'Folder';
     final entriesCount = group.entries.length;
 
@@ -1230,10 +1231,10 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.security_rounded,
                         size: 16,
-                        color: KeyNestTokens.primary,
+                        color: KeyNestTokens.primaryColor(ctx),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
@@ -2119,10 +2120,13 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         await kdbxBloc.saveFile(kdbxFile);
 
         if (mounted) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Permanently deleted "$folderName".'),
-              backgroundColor: KeyNestTokens.primary,
+              backgroundColor: isDark
+                  ? KeyNestTokens.darkPrimaryContainer
+                  : KeyNestTokens.primary,
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -2223,11 +2227,13 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         List<KdbxGroup>.from(
           recycleBin.groups,
         ).forEach(kdbxFile.deletePermanently);
-        List<KdbxEntry>.from(
-          recycleBin.entries,
-        ).forEach(kdbxFile.deletePermanently);
+        for (final e in List<KdbxEntry>.from(recycleBin.entries)) {
+          kdbxFile.deletePermanently(e);
+          KeyNestItemTypeHelper.invalidateCache(e);
+        }
 
         await kdbxBloc.saveFile(kdbxFile);
+        KeyNestVaultScope.instance.notifyScopeChanged();
         if (mounted) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2932,6 +2938,11 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         }
       }
     } finally {
+      nameController.dispose();
+      passwordController.clear();
+      passwordController.dispose();
+      confirmController.clear();
+      confirmController.dispose();
       keyFileController.dispose();
     }
   }

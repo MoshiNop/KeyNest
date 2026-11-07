@@ -579,16 +579,16 @@ class _KeyNestMergeVaultsScreenState extends State<KeyNestMergeVaultsScreen> {
       padding: EdgeInsets.zero,
       child: Column(
         children: [
-          const ListTile(
+          ListTile(
             leading: Icon(
               Icons.check_circle_rounded,
-              color: KeyNestPalette.success,
+              color: KeyNestPalette.successColorFor(isDark),
             ),
-            title: Text(
+            title: const Text(
               'Source vaults preserved intact',
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
-            subtitle: Text(
+            subtitle: const Text(
               'Source KDBX files on disk remain completely unmodified.',
               style: TextStyle(fontSize: 12),
             ),

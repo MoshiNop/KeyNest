@@ -175,6 +175,16 @@ class GoogleDriveSyncEngine {
     return '$trimmed.kdbx';
   }
 
+  static String disambiguateFilename(String filename, String vaultId) {
+    final clean = ensureKdbxExtension(filename);
+    final stem = clean.substring(0, clean.length - 5);
+    final alnum = vaultId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
+    final suffix = alnum.length >= 6
+        ? alnum.substring(0, 6).toLowerCase()
+        : (alnum.isNotEmpty ? alnum.toLowerCase() : '2');
+    return '${stem}_$suffix.kdbx';
+  }
+
   Future<GoogleDriveSyncResult> _syncVaultInternal({
     required String vaultId,
     required String vaultFilename,
@@ -183,7 +193,8 @@ class GoogleDriveSyncEngine {
     KdbxFile? unlockedLocalFile,
     Credentials? credentials,
   }) async {
-    final effectiveFilename = ensureKdbxExtension(vaultFilename);
+    var effectiveFilename = ensureKdbxExtension(vaultFilename);
+    var hadSameNameOwnedByOtherVault = false;
     try {
       String keynestFolderId;
       try {
@@ -243,6 +254,7 @@ class GoogleDriveSyncEngine {
               if (owner == null || owner == stateStore.sanitizeVaultId(vaultId)) {
                 availableFiles.add(f);
               } else {
+                hadSameNameOwnedByOtherVault = true;
                 _logger.warning(
                   'Remote file "${f.name}" (${f.id}) is mapped to another vault ($owner). Not adopting for $vaultId.',
                 );
@@ -302,6 +314,7 @@ class GoogleDriveSyncEngine {
             if (owner == null || owner == stateStore.sanitizeVaultId(vaultId)) {
               availableFiles.add(f);
             } else {
+              hadSameNameOwnedByOtherVault = true;
               _logger.warning(
                 'Remote file "${f.name}" (${f.id}) is mapped to another vault ($owner). Not adopting for $vaultId.',
               );
@@ -402,6 +415,32 @@ class GoogleDriveSyncEngine {
       final localBytes = await getLocalBytes();
 
       // Case 0: Remote file does not exist yet (Initial upload into visible KeyNest folder)
+      if (remoteMeta == null) {
+        if (hadSameNameOwnedByOtherVault) {
+          final disambiguated = disambiguateFilename(
+            effectiveFilename,
+            vaultId,
+          );
+          _logger.info(
+            'Disambiguating Google Drive vault filename from "$effectiveFilename" to "$disambiguated" for vault $vaultId.',
+          );
+          effectiveFilename = disambiguated;
+          // Check if our disambiguated file already exists in the folder
+          final existingDisambiguated = await client.findFilesInFolder(
+            keynestFolderId,
+            effectiveFilename,
+          );
+          for (final df in existingDisambiguated) {
+            final owner = await stateStore.findVaultIdByDriveFileId(df.id);
+            if (owner == null || owner == stateStore.sanitizeVaultId(vaultId)) {
+              remoteMeta = df;
+              await stateStore.setDriveFileId(vaultId, df.id);
+              break;
+            }
+          }
+        }
+      }
+
       if (remoteMeta == null) {
         _logger.info(
           'Remote vault does not exist on Drive. Performing initial upload to KeyNest folder...',
@@ -595,6 +634,7 @@ class GoogleDriveSyncEngine {
   }
 
   /// Executes 3-way in-memory merge and uploads merged vault. Retries up to 3 times on conflict.
+  /// Never mutates [unlockedLocalFile] or local disk until remote upload and MD5 check succeed.
   Future<GoogleDriveSyncResult> _runMergeProcedure({
     required String vaultId,
     required String remoteFileId,
@@ -611,6 +651,9 @@ class GoogleDriveSyncEngine {
     }
 
     const maxAttempts = 3;
+    bool backupCreated = false;
+    final currentLocalBytes = await getLocalBytes();
+
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       _logger.info('Merge attempt $attempt of $maxAttempts...');
 
@@ -622,8 +665,19 @@ class GoogleDriveSyncEngine {
         );
       }
 
-      // 2. Open remote file in memory with current credentials
+      // 2. Open fresh working copy of local & remote files in memory
       final kdbxFormat = KdbxFormat();
+      KdbxFile workingLocalFile;
+      try {
+        workingLocalFile = await kdbxFormat.read(
+          currentLocalBytes,
+          effectiveCreds,
+        );
+      } catch (_) {
+        final fallbackBytes = await unlockedLocalFile.save();
+        workingLocalFile = await kdbxFormat.read(fallbackBytes, effectiveCreds);
+      }
+
       KdbxFile remoteFile;
       try {
         remoteFile = await kdbxFormat.read(remoteBytes, effectiveCreds);
@@ -649,25 +703,34 @@ class GoogleDriveSyncEngine {
         }
       }
 
-      // 4. Pre-merge local backup
-      final currentLocalBytes = await getLocalBytes();
-      await stateStore.createBackup(
-        vaultId: vaultId,
-        currentVaultBytes: currentLocalBytes,
-      );
+      // 4. Pre-merge local backup (once per merge procedure)
+      if (!backupCreated) {
+        await stateStore.createBackup(
+          vaultId: vaultId,
+          currentVaultBytes: currentLocalBytes,
+        );
+        backupCreated = true;
+      }
 
-      // 5. Run in-memory 3-way merge using DropboxVaultMergeEngine unchanged
-      final mergeResult = DropboxVaultMergeEngine.merge(
-        localFile: unlockedLocalFile,
-        remoteFile: remoteFile,
-        baseFile: baseFile,
-      );
+      // 5. Run in-memory 3-way merge on isolated [workingLocalFile]
+      DropboxMergeResult mergeResult;
+      try {
+        mergeResult = DropboxVaultMergeEngine.merge(
+          localFile: workingLocalFile,
+          remoteFile: remoteFile,
+          baseFile: baseFile,
+        );
+      } on DropboxMergeCredentialMismatchException catch (e) {
+        return GoogleDriveSyncResult.error(e.message);
+      } on DropboxMergeValidationException catch (e) {
+        return GoogleDriveSyncResult.error(
+          'Validation failure during merge: ${e.message}',
+        );
+      }
 
-      // 6. Save merged file locally
-      final mergedBytes = await unlockedLocalFile.save();
-      await saveLocalBytes(mergedBytes);
+      final mergedBytes = await workingLocalFile.save();
 
-      // 7. Mitigation 1: Pre-upload re-check
+      // 6. Mitigation 1: Pre-upload re-check BEFORE mutating local disk or in-memory vault
       final preUploadMeta = await client.getFileMetadata(remoteFileId);
       if (preUploadMeta != null &&
           preUploadMeta.md5Checksum != null &&
@@ -681,13 +744,13 @@ class GoogleDriveSyncEngine {
         }
       }
 
-      // 8. Upload merged database
+      // 7. Upload merged database
       final updatedMeta = await client.updateVault(
         fileId: remoteFileId,
         bytes: mergedBytes,
       );
 
-      // 9. Post-upload verification
+      // 8. Post-upload verification
       final expectedMd5 = GoogleDriveClient.computeMd5(mergedBytes);
       if (updatedMeta.md5Checksum != null &&
           updatedMeta.md5Checksum != expectedMd5) {
@@ -697,7 +760,14 @@ class GoogleDriveSyncEngine {
         }
       }
 
-      // 10. Update state store checkpoints
+      // 9. Commit merged state to unlockedLocalFile, disk, and checkpoints!
+      DropboxVaultMergeEngine.merge(
+        localFile: unlockedLocalFile,
+        remoteFile: remoteFile,
+        baseFile: baseFile,
+      );
+      await saveLocalBytes(mergedBytes);
+
       await stateStore.setSyncCheckpoint(
         vaultId: vaultId,
         md5: updatedMeta.md5Checksum,

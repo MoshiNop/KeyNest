@@ -3676,61 +3676,39 @@ void main() {
       );
 
       test(
-        'Derived package reverse domain notation matches web URL entries',
+        'Unverified reverse-package domain derivation is blocked without explicit androidapp:// URI or DAL verification',
         () {
-          // Simulating AutofillCredentialStore.deriveDomainFromPackage
-          String? deriveDomain(String pkg) {
-            final parts = pkg
-                .toLowerCase()
-                .split('.')
-                .where((p) => p.isNotEmpty)
-                .toList();
-            if (parts.length >= 2) {
-              final tld = parts[0];
-              final brand = parts[1];
-              final knownTlds = {
-                'com',
-                'org',
-                'net',
-                'io',
-                'app',
-                'co',
-                'us',
-                'de',
-                'uk',
-                'ch',
-              };
-              if (knownTlds.contains(tld) && brand.length >= 2) {
-                return '$brand.$tld';
-              }
-            }
-            return null;
-          }
+          // SEC-03: Unverified package names (e.g. com.paypal.evil) must NOT
+          // automatically match https://paypal.com entries via string splitting.
+          final matcher = CredentialMatcher();
+          final request = CredentialRequest.application('com.todoist');
+          final quality = matcher.matchBest(
+            [request],
+            todoistEntry.autofillUrls,
+          );
+          expect(quality, isNull);
 
-          expect(deriveDomain('com.todoist'), equals('todoist.com'));
-          expect(
-            deriveDomain('com.netflix.mediaclient'),
-            equals('netflix.com'),
+          // Spoofed reverse-domain package names must never match web entries.
+          final spoofedRequest = CredentialRequest.application(
+            'com.paypal.evil',
           );
           expect(
-            deriveDomain('com.paypal.android.p2pmobile'),
-            equals('paypal.com'),
+            matcher.matchBest([spoofedRequest], paypalEntry.autofillUrls),
+            isNull,
           );
-          expect(deriveDomain('us.zoom.videomeetings'), equals('zoom.us'));
 
-          // Match against Todoist entry URL
-          final derived = deriveDomain('com.todoist');
-          expect(derived, isNotNull);
-          final matches = appVault.body.rootGroup.getAllEntries().where((e) {
-            final urls = e.autofillUrls;
-            return urls.any((u) {
-              final host = (Uri.tryParse(u)?.host ?? u).toLowerCase();
-              return host == derived || host.endsWith('.$derived');
-            });
-          }).toList();
+          // Curated associated app and explicit androidapp:// binding continue to match cleanly.
+          final uberRequest = CredentialRequest.application('com.ubercab');
           expect(
-            matches.any((e) => e.uuid.uuid == todoistEntry.uuid.uuid),
-            isTrue,
+            matcher.matchBest([uberRequest], uberEntry.autofillUrls),
+            equals(CredentialMatchQuality.associatedApplication),
+          );
+          expect(
+            matcher.matchBest(
+              [request],
+              ['androidapp://com.todoist'],
+            ),
+            equals(CredentialMatchQuality.application),
           );
         },
       );

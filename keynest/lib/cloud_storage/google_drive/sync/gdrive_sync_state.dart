@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:keynest/utils/path_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
+import 'package:synchronized/synchronized.dart';
 
 final _logger = Logger('gdrive_sync_state');
 
@@ -52,6 +53,20 @@ class GoogleDriveSyncStateStore {
   final PathUtils _pathUtils;
   final Directory? _overrideSyncDir;
 
+  static final Map<String, Lock> _dirLocks = {};
+
+  static Lock _lockForDir(Directory dir) {
+    final key = p.normalize(dir.absolute.path).toLowerCase();
+    return _dirLocks.putIfAbsent(key, Lock.new);
+  }
+
+  Future<T> _withMetadataLock<T>(
+    Future<T> Function(Directory dir) action,
+  ) async {
+    final dir = await _getSyncDir();
+    return _lockForDir(dir).synchronized(() => action(dir));
+  }
+
   Future<Directory> _getSyncDir() async {
     final overrideDir = _overrideSyncDir;
     if (overrideDir != null) {
@@ -80,8 +95,7 @@ class GoogleDriveSyncStateStore {
   File _getMetadataFile(Directory dir) =>
       File(p.join(dir.path, 'metadata.json'));
 
-  Future<Map<String, dynamic>> _readMetadata() async {
-    final dir = await _getSyncDir();
+  Future<Map<String, dynamic>> _readMetadataLocked(Directory dir) async {
     final file = _getMetadataFile(dir);
     if (!await file.exists()) {
       return {};
@@ -95,158 +109,174 @@ class GoogleDriveSyncStateStore {
     }
   }
 
-  Future<void> _writeMetadata(Map<String, dynamic> data) async {
-    final dir = await _getSyncDir();
+  Future<void> _writeMetadataLocked(
+    Directory dir,
+    Map<String, dynamic> data,
+  ) async {
     final file = _getMetadataFile(dir);
-    await file.writeAsString(json.encode(data), flush: true);
+    final tmpFile = File('${file.path}.tmp');
+    await tmpFile.writeAsString(json.encode(data), flush: true);
+    await tmpFile.rename(file.path);
   }
 
   String _sanitizeVaultId(String vaultId) =>
       vaultId.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
 
   // Drive File ID
-  Future<String?> getDriveFileId(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    return vaultData?['drive_file_id'] as String?;
-  }
+  Future<String?> getDriveFileId(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['drive_file_id'] as String?;
+      });
 
-  Future<void> setDriveFileId(String vaultId, String? fileId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    if (fileId != null) {
-      vaultData['drive_file_id'] = fileId;
-    } else {
-      vaultData.remove('drive_file_id');
-    }
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setDriveFileId(String vaultId, String? fileId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        if (fileId != null) {
+          vaultData['drive_file_id'] = fileId;
+        } else {
+          vaultData.remove('drive_file_id');
+        }
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
   String sanitizeVaultId(String vaultId) => _sanitizeVaultId(vaultId);
 
   /// Resolves the vault ID that currently owns [fileId] in metadata, or null if unclaimed.
-  Future<String?> findVaultIdByDriveFileId(String fileId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    for (final entry in vaults.entries) {
-      final vData = entry.value as Map<String, dynamic>?;
-      if (vData?['drive_file_id'] == fileId) {
-        return entry.key;
-      }
-    }
-    return null;
-  }
+  Future<String?> findVaultIdByDriveFileId(String fileId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        for (final entry in vaults.entries) {
+          final vData = entry.value as Map<String, dynamic>?;
+          if (vData?['drive_file_id'] == fileId) {
+            return entry.key;
+          }
+        }
+        return null;
+      });
 
   // KeyNest Visible Folder ID
-  Future<String?> getKeyNestFolderId() async {
-    final data = await _readMetadata();
+  Future<String?> getKeyNestFolderId() => _withMetadataLock((dir) async {
+    final data = await _readMetadataLocked(dir);
     return data['keynest_folder_id'] as String?;
-  }
+  });
 
-  Future<void> setKeyNestFolderId(String? folderId) async {
-    final data = await _readMetadata();
-    if (folderId != null) {
-      data['keynest_folder_id'] = folderId;
-    } else {
-      data.remove('keynest_folder_id');
-    }
-    await _writeMetadata(data);
-  }
+  Future<void> setKeyNestFolderId(String? folderId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        if (folderId != null) {
+          data['keynest_folder_id'] = folderId;
+        } else {
+          data.remove('keynest_folder_id');
+        }
+        await _writeMetadataLocked(dir, data);
+      });
 
   // Legacy Migration Tracking
-  Future<bool> isVaultMigrated(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    return vaultData?['is_migrated_visible'] as bool? ?? false;
-  }
+  Future<bool> isVaultMigrated(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['is_migrated_visible'] as bool? ?? false;
+      });
 
-  Future<void> setVaultMigrated(String vaultId, bool migrated) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    vaultData['is_migrated_visible'] = migrated;
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setVaultMigrated(String vaultId, bool migrated) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        vaultData['is_migrated_visible'] = migrated;
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
-  Future<String?> getLegacyDriveFileId(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    return vaultData?['legacy_drive_file_id'] as String?;
-  }
+  Future<String?> getLegacyDriveFileId(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['legacy_drive_file_id'] as String?;
+      });
 
-  Future<void> setLegacyDriveFileId(String vaultId, String? legacyId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    if (legacyId != null) {
-      vaultData['legacy_drive_file_id'] = legacyId;
-    } else {
-      vaultData.remove('legacy_drive_file_id');
-    }
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setLegacyDriveFileId(String vaultId, String? legacyId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        if (legacyId != null) {
+          vaultData['legacy_drive_file_id'] = legacyId;
+        } else {
+          vaultData.remove('legacy_drive_file_id');
+        }
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
-  Future<String?> getMigratedFileIdForLegacyId(String legacyId) async {
-    final data = await _readMetadata();
-    final map = data['legacy_migration_map'] as Map<String, dynamic>?;
-    return map?[legacyId] as String?;
-  }
+  Future<String?> getMigratedFileIdForLegacyId(String legacyId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final map = data['legacy_migration_map'] as Map<String, dynamic>?;
+        return map?[legacyId] as String?;
+      });
 
-  Future<void> recordLegacyMigration(String legacyId, String newId) async {
-    final data = await _readMetadata();
-    final map = data['legacy_migration_map'] as Map<String, dynamic>? ?? {};
-    map[legacyId] = newId;
-    data['legacy_migration_map'] = map;
-    await _writeMetadata(data);
-  }
+  Future<void> recordLegacyMigration(String legacyId, String newId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final map = data['legacy_migration_map'] as Map<String, dynamic>? ?? {};
+        map[legacyId] = newId;
+        data['legacy_migration_map'] = map;
+        await _writeMetadataLocked(dir, data);
+      });
 
   // MD5 & Version
-  Future<String?> getLastSyncedMd5(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    return vaultData?['last_synced_md5'] as String?;
-  }
+  Future<String?> getLastSyncedMd5(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        return vaultData?['last_synced_md5'] as String?;
+      });
 
-  Future<int?> getLastSyncedVersion(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    final val = vaultData?['last_synced_version'];
-    if (val is int) {
-      return val;
-    }
-    if (val is String) {
-      return int.tryParse(val);
-    }
-    return null;
-  }
+  Future<int?> getLastSyncedVersion(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        final val = vaultData?['last_synced_version'];
+        if (val is int) {
+          return val;
+        }
+        if (val is String) {
+          return int.tryParse(val);
+        }
+        return null;
+      });
 
   Future<void> setSyncCheckpoint({
     required String vaultId,
     required String? md5,
     required int? version,
     String? driveFileId,
-  }) async {
-    final data = await _readMetadata();
+  }) => _withMetadataLock((dir) async {
+    final data = await _readMetadataLocked(dir);
     final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
     final key = _sanitizeVaultId(vaultId);
     final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
@@ -270,37 +300,39 @@ class GoogleDriveSyncStateStore {
 
     vaults[key] = vaultData;
     data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+    await _writeMetadataLocked(dir, data);
+  });
 
-  Future<DateTime?> getLastSyncedTime(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final vaultData =
-        vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
-    final timeStr = vaultData?['last_synced_time'] as String?;
-    return timeStr != null ? DateTime.tryParse(timeStr) : null;
-  }
+  Future<DateTime?> getLastSyncedTime(String vaultId) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final vaultData =
+            vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
+        final timeStr = vaultData?['last_synced_time'] as String?;
+        return timeStr != null ? DateTime.tryParse(timeStr) : null;
+      });
 
   // Local Dirty Flag
-  Future<bool> isLocalDirty(String vaultId) async {
-    final data = await _readMetadata();
+  Future<bool> isLocalDirty(String vaultId) => _withMetadataLock((dir) async {
+    final data = await _readMetadataLocked(dir);
     final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
     final vaultData =
         vaults[_sanitizeVaultId(vaultId)] as Map<String, dynamic>?;
     return vaultData?['local_dirty'] as bool? ?? false;
-  }
+  });
 
-  Future<void> setLocalDirty(String vaultId, bool dirty) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
-    final key = _sanitizeVaultId(vaultId);
-    final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
-    vaultData['local_dirty'] = dirty;
-    vaults[key] = vaultData;
-    data['vaults'] = vaults;
-    await _writeMetadata(data);
-  }
+  Future<void> setLocalDirty(String vaultId, bool dirty) =>
+      _withMetadataLock((dir) async {
+        final data = await _readMetadataLocked(dir);
+        final vaults = data['vaults'] as Map<String, dynamic>? ?? {};
+        final key = _sanitizeVaultId(vaultId);
+        final vaultData = vaults[key] as Map<String, dynamic>? ?? {};
+        vaultData['local_dirty'] = dirty;
+        vaults[key] = vaultData;
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      });
 
   Future<void> markLocalDirty(String vaultId) => setLocalDirty(vaultId, true);
   Future<void> markLocalClean(String vaultId) => setLocalDirty(vaultId, false);
@@ -419,34 +451,36 @@ class GoogleDriveSyncStateStore {
   /// Cleans up Google Drive sync state and base copies upon disconnect,
   /// while keeping local vault files completely untouched.
   Future<void> clearSyncState() async {
-    final dir = await _getSyncDir();
-    final metaFile = _getMetadataFile(dir);
-    if (await metaFile.exists()) {
-      await metaFile.delete();
-    }
-
-    final entities = await dir.list().toList();
-    for (final entity in entities) {
-      if (entity is File && p.basename(entity.path).startsWith('base_')) {
-        try {
-          await entity.delete();
-        } catch (_) {}
+    await _withMetadataLock((dir) async {
+      final metaFile = _getMetadataFile(dir);
+      if (await metaFile.exists()) {
+        await metaFile.delete();
       }
-    }
+
+      final entities = await dir.list().toList();
+      for (final entity in entities) {
+        if (entity is File && p.basename(entity.path).startsWith('base_')) {
+          try {
+            await entity.delete();
+          } catch (_) {}
+        }
+      }
+    });
   }
 
   /// Clears sync state, base copies, and backups for a single vault when it is disconnected or deleted.
   Future<void> clearVaultSyncState(String vaultId) async {
-    final data = await _readMetadata();
-    final vaults = data['vaults'] as Map<String, dynamic>?;
-    final sanitized = _sanitizeVaultId(vaultId);
-    if (vaults != null && vaults.containsKey(sanitized)) {
-      vaults.remove(sanitized);
-      data['vaults'] = vaults;
-      await _writeMetadata(data);
-    }
-
-    final dir = await _getSyncDir();
+    final dir = await _withMetadataLock((dir) async {
+      final data = await _readMetadataLocked(dir);
+      final vaults = data['vaults'] as Map<String, dynamic>?;
+      final sanitized = _sanitizeVaultId(vaultId);
+      if (vaults != null && vaults.containsKey(sanitized)) {
+        vaults.remove(sanitized);
+        data['vaults'] = vaults;
+        await _writeMetadataLocked(dir, data);
+      }
+      return dir;
+    });
     final baseFile = _getBaseFile(dir, vaultId);
     if (await baseFile.exists()) {
       try {

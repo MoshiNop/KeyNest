@@ -7,9 +7,11 @@ import 'package:file/file.dart';
 import 'package:keynest/bloc/kdbx/file_content.dart';
 import 'package:keynest/bloc/kdbx/file_source.dart';
 import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
+import 'package:keynest/utils/path_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:logging_appenders/logging_appenders.dart';
 import 'package:string_literal_finder_annotations/string_literal_finder_annotations.dart';
+import 'package:synchronized/synchronized.dart';
 
 final _logger = Logger('file_source_cloud_storage');
 
@@ -19,31 +21,37 @@ const _jsonMetadata = 'metadata';
 const _jsonCacheDate = 'cacheDate';
 @NonNls
 const _jsonCacheSize = 'cacheSize';
+@NonNls
+const _jsonIsDirty = 'isDirty';
 
 class FileContentCached {
   FileContentCached({
     required this.metadata,
     required this.cacheDate,
     required this.cacheSize,
+    this.isDirty = false,
   }) : assert(cacheDate.isUtc);
   factory FileContentCached.fromJson(Map<String, dynamic> json) =>
       FileContentCached(
         metadata: json[_jsonMetadata] as Map<String, dynamic>?,
         cacheDate: DateTime.fromMillisecondsSinceEpoch(
-          json[_jsonCacheDate] as int,
+          (json[_jsonCacheDate] as num?)?.toInt() ?? 0,
           isUtc: true,
         ),
         cacheSize: json[_jsonCacheSize] as int?,
+        isDirty: (json[_jsonIsDirty] as bool?) ?? false,
       );
 
   final Map<String, dynamic>? metadata;
   final DateTime cacheDate;
   final int? cacheSize;
+  final bool isDirty;
 
   Map<String, Object?> toJson() => {
     _jsonMetadata: metadata,
-    _jsonCacheDate: cacheDate.millisecond,
+    _jsonCacheDate: cacheDate.millisecondsSinceEpoch,
     _jsonCacheSize: cacheSize,
+    _jsonIsDirty: isDirty,
   };
 
   @override
@@ -59,11 +67,59 @@ class FileSourceCloudStorage extends FileSource {
     super.initialCachedContent,
   });
 
-  static Directory? _cacheDir;
+  static final Map<String, Lock> _cacheLocks = <String, Lock>{};
+  Lock get _cacheLock => _cacheLocks.putIfAbsent(uuid, Lock.new);
 
-  Future<Directory> _getCacheDir() => provider.pathUtil.getTemporaryDirectory(
-    subNamespace: 'cloud_storage_cache',
-  );
+  Directory? _resolvedCacheDir;
+
+  Future<Directory> _getCacheDir() async {
+    if (_resolvedCacheDir != null) {
+      return _resolvedCacheDir!;
+    }
+
+    Directory persistentDir;
+    if (provider.pathUtil is PathUtils) {
+      final appDir = await (provider.pathUtil as PathUtils).getAppDataDirectory();
+      persistentDir = appDir.childDirectory('cloud_storage_cache')
+        ..createSync(recursive: true);
+    } else {
+      persistentDir = await provider.pathUtil.getCacheDirectory(
+        subNamespace: 'cloud_storage_cache',
+      );
+    }
+
+    // One-time migration from legacy OS-evictable temporary directory if present
+    final targetKdbx = _cacheKdbxFile(persistentDir);
+    if (!targetKdbx.existsSync()) {
+      try {
+        final legacyTempDir = await provider.pathUtil.getTemporaryDirectory(
+          subNamespace: 'cloud_storage_cache',
+        );
+        if (legacyTempDir.path != persistentDir.path) {
+          final legacyKdbx = _cacheKdbxFile(legacyTempDir);
+          final legacyMeta = _cacheMetadataFile(legacyTempDir);
+          if (legacyKdbx.existsSync()) {
+            await targetKdbx.writeAsBytes(
+              await legacyKdbx.readAsBytes(),
+              flush: true,
+            );
+            if (legacyMeta.existsSync()) {
+              await _cacheMetadataFile(persistentDir).writeAsString(
+                await legacyMeta.readAsString(),
+                flush: true,
+              );
+              await legacyMeta.delete();
+            }
+            await legacyKdbx.delete();
+          }
+        }
+      } catch (e) {
+        _logger.fine('Legacy cloud storage temp cache check skipped: $e');
+      }
+    }
+
+    return _resolvedCacheDir = persistentDir;
+  }
 
   final CloudStorageProvider provider;
 
@@ -89,14 +145,39 @@ class FileSourceCloudStorage extends FileSource {
   bool get isWorkingCopyDirty => _isWorkingCopyDirty;
 
   @override
+  Stream<FileContent> content({
+    bool updateCache = true,
+    bool forceReload = false,
+  }) async* {
+    if (!forceReload) {
+      yield* super.content(updateCache: updateCache, forceReload: false);
+      return;
+    }
+
+    // Explicit forceReload: fetch directly from remote provider.
+    final freshContent = await provider.loadFile(fileInfo);
+    yield freshContent;
+    if (updateCache && !_isWorkingCopyDirty) {
+      await _writeCache(freshContent, isDirty: false);
+      setCachedContent(
+        FileContent(
+          freshContent.content,
+          freshContent.metadata,
+          FileContentSource.memoryCache,
+        ),
+      );
+    }
+  }
+
+  @override
   Stream<FileContent> load() async* {
     // 1. First load from local working copy cache if present
-    final cacheDir = _cacheDir ??= await _getCacheDir();
+    final cacheDir = await _getCacheDir();
     final metadataFile = _cacheMetadataFile(cacheDir);
     final kdbxFile = _cacheKdbxFile(cacheDir);
     bool yieldedCachedVersion = false;
     try {
-      if (metadataFile.existsSync()) {
+      if (metadataFile.existsSync() && kdbxFile.existsSync()) {
         final cacheInfo = FileContentCached.fromJson(
           json.decode(await metadataFile.readAsString())
               as Map<String, dynamic>,
@@ -108,6 +189,7 @@ class FileSourceCloudStorage extends FileSource {
             'cache file. ${content.length} vs $cacheInfo',
           );
         }
+        _isWorkingCopyDirty = _isWorkingCopyDirty || cacheInfo.isDirty;
         yield FileContent(content, cacheInfo.metadata, FileContentSource.cache);
         yieldedCachedVersion = true;
       }
@@ -125,8 +207,10 @@ class FileSourceCloudStorage extends FileSource {
     _logger.finer('loading ${toString()}');
     try {
       final freshContent = await provider.loadFile(fileInfo);
+      if (!_isWorkingCopyDirty) {
+        await _writeCache(freshContent, isDirty: false);
+      }
       yield freshContent;
-      unawaited(_writeCache(freshContent));
     } on LoadFileException catch (e, stackTrace) {
       _logger.severe(
         'Error while loading file from provider ${toString()}',
@@ -151,26 +235,50 @@ class FileSourceCloudStorage extends FileSource {
     }
   }
 
-  Future<void> _writeCache(FileContent freshContent) async {
+  Future<void> _writeCache(
+    FileContent freshContent, {
+    required bool isDirty,
+  }) async {
     try {
-      final cacheDir = _cacheDir ??= await _getCacheDir();
-      final metadataFile = _cacheMetadataFile(cacheDir);
-      final kdbxFile = _cacheKdbxFile(cacheDir);
-      final cacheInfo = FileContentCached(
-        metadata: freshContent.metadata,
-        cacheDate: clock.now().toUtc(),
-        cacheSize: freshContent.content.length,
-      );
-      _logger.finer('Writing cache ${metadataFile.path}');
-      await metadataFile.writeAsString(
-        json.encode(cacheInfo.toJson()),
-        flush: true,
-      );
-      await kdbxFile.writeAsBytes(freshContent.content, flush: true);
-      _logger.finer('Done: Written cache ${metadataFile.path}');
+      await _cacheLock.synchronized(() async {
+        if (!isDirty && _isWorkingCopyDirty) {
+          return;
+        }
+        final cacheDir = await _getCacheDir();
+        await _writeAtomicBytesAndMetadata(
+          cacheDir: cacheDir,
+          bytes: freshContent.content,
+          metadata: freshContent.metadata,
+          isDirty: isDirty,
+        );
+      });
     } catch (e, stackTrace) {
       _logger.severe('Error while writing cache for $uuid', e, stackTrace);
     }
+  }
+
+  Future<void> _writeAtomicBytesAndMetadata({
+    required Directory cacheDir,
+    required Uint8List bytes,
+    required Map<String, dynamic>? metadata,
+    required bool isDirty,
+  }) async {
+    final kdbxFile = _cacheKdbxFile(cacheDir);
+    final metadataFile = _cacheMetadataFile(cacheDir);
+    final tmpKdbx = cacheDir.childFile('$uuid.kdbx.tmp');
+    final tmpMeta = cacheDir.childFile('$uuid.kdbx.json.tmp');
+
+    final cacheInfo = FileContentCached(
+      metadata: metadata,
+      cacheDate: clock.now().toUtc(),
+      cacheSize: bytes.length,
+      isDirty: isDirty,
+    );
+
+    await tmpKdbx.writeAsBytes(bytes, flush: true);
+    await tmpKdbx.rename(kdbxFile.path);
+    await tmpMeta.writeAsString(json.encode(cacheInfo.toJson()), flush: true);
+    await tmpMeta.rename(metadataFile.path);
   }
 
   @override
@@ -182,25 +290,60 @@ class FileSourceCloudStorage extends FileSource {
     Map<String, dynamic>? previousMetadata,
   ) async {
     _isWorkingCopyDirty = true;
-    final cacheDir = _cacheDir ??= await _getCacheDir();
-    final metadataFile = _cacheMetadataFile(cacheDir);
-    final kdbxFile = _cacheKdbxFile(cacheDir);
-    final cacheInfo = FileContentCached(
-      metadata: previousMetadata,
-      cacheDate: clock.now().toUtc(),
-      cacheSize: bytes.length,
-    );
-    await metadataFile.writeAsString(
-      json.encode(cacheInfo.toJson()),
-      flush: true,
-    );
-    await kdbxFile.writeAsBytes(bytes, flush: true);
+    await _cacheLock.synchronized(() async {
+      final cacheDir = await _getCacheDir();
+      await _writeAtomicBytesAndMetadata(
+        cacheDir: cacheDir,
+        bytes: bytes,
+        metadata: previousMetadata,
+        isDirty: true,
+      );
+    });
     return previousMetadata;
+  }
+
+  /// Updates the local persistent working copy cache after an authoritative
+  /// 3-way cloud sync completes and clears the dirty flag.
+  bool get hasUnsavedChanges => _isWorkingCopyDirty;
+
+  Future<FileContent> markWorkingCopySynced(
+    Uint8List bytes, [
+    Map<String, dynamic>? metadata,
+  ]) async {
+    final effectiveMeta = metadata ?? cached?.metadata;
+    await _cacheLock.synchronized(() async {
+      final cacheDir = await _getCacheDir();
+      await _writeAtomicBytesAndMetadata(
+        cacheDir: cacheDir,
+        bytes: bytes,
+        metadata: effectiveMeta,
+        isDirty: false,
+      );
+      _isWorkingCopyDirty = false;
+    });
+    final syncedContent = FileContent(
+      bytes,
+      effectiveMeta,
+      FileContentSource.memoryCache,
+    );
+    setCachedContent(syncedContent);
+    return syncedContent;
+  }
+
+  /// Reads the current working copy bytes from the persistent cache, falling
+  /// back to in-memory cached content if needed.
+  Future<Uint8List?> readWorkingCopyBytes() async {
+    final cacheDir = await _getCacheDir();
+    final kdbxFile = _cacheKdbxFile(cacheDir);
+    if (kdbxFile.existsSync()) {
+      return await kdbxFile.readAsBytes();
+    }
+    return cached?.content;
   }
 
   /// Asynchronously uploads the current local working copy to the remote cloud provider.
   Future<Map<String, dynamic>?> uploadWorkingCopy() async {
-    final cacheDir = _cacheDir ??= await _getCacheDir();
+    final cacheDir = await _getCacheDir();
     final kdbxFile = _cacheKdbxFile(cacheDir);
     if (!kdbxFile.existsSync()) {
       return null;
@@ -218,8 +361,7 @@ class FileSourceCloudStorage extends FileSource {
       } catch (_) {}
     }
     final newMetadata = await provider.saveFile(fileInfo, bytes, prevMeta);
-    await _writeCache(FileContent(bytes, newMetadata));
-    _isWorkingCopyDirty = false;
+    await markWorkingCopySynced(bytes, newMetadata);
     return newMetadata;
   }
 

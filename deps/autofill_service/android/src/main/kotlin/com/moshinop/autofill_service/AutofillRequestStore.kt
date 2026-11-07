@@ -2,9 +2,13 @@ package com.moshinop.autofill_service
 
 import android.app.assist.AssistStructure
 import android.os.Build
+import android.util.Base64
 import android.view.autofill.AutofillId
 import androidx.annotation.RequiresApi
 import mu.KotlinLogging
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
 
 private val logger = KotlinLogging.logger {}
 
@@ -97,6 +101,91 @@ object AutofillRequestStore {
 
     var onCancelledListener: ((Int) -> Unit)? = null
 
+    private data class FastFillGrant(
+        val requestId: Int,
+        val entryId: String,
+        val createdAt: Long,
+        val tokenBytes: ByteArray
+    )
+
+    private val secureRandom = SecureRandom()
+    private val fastFillGrants = ConcurrentHashMap<String, FastFillGrant>()
+
+    private fun encodeUrlBase64(bytes: ByteArray): String {
+        return try {
+            Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP)
+        } catch (_: Throwable) {
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        }
+    }
+
+    private fun decodeUrlBase64(str: String): ByteArray {
+        return try {
+            Base64.decode(str, Base64.URL_SAFE or Base64.NO_WRAP)
+        } catch (_: Throwable) {
+            java.util.Base64.getUrlDecoder().decode(str)
+        }
+    }
+
+    /**
+     * Issues a 256-bit one-time capability nonce bound to [requestId] and [entryId]
+     * for authenticating `FILL_ENTRY` intents on exported `MainActivity`.
+     */
+    fun issueFastFillToken(requestId: Int, entryId: String): String {
+        val now = System.currentTimeMillis()
+        fastFillGrants.entries.removeIf { (_, grant) -> (now - grant.createdAt) >= REQUEST_TTL_MS }
+        val bytes = ByteArray(32)
+        secureRandom.nextBytes(bytes)
+        val token = encodeUrlBase64(bytes)
+        fastFillGrants[token] = FastFillGrant(
+            requestId = requestId,
+            entryId = entryId,
+            createdAt = now,
+            tokenBytes = bytes
+        )
+        return token
+    }
+
+    /**
+     * Verifies a `FILL_ENTRY` capability nonce in constant time without consuming it
+     * (used when recording `selectedEntryId` while the vault is still locked prior to biometric auth).
+     */
+    fun verifyFastFillToken(token: String?, requestId: Int, entryId: String): Boolean {
+        if (token.isNullOrBlank() || entryId.isBlank()) return false
+        val grant = fastFillGrants[token] ?: return false
+        val now = System.currentTimeMillis()
+        if ((now - grant.createdAt) >= REQUEST_TTL_MS) {
+            fastFillGrants.remove(token)
+            return false
+        }
+        val candidateBytes = try {
+            decodeUrlBase64(token)
+        } catch (_: Exception) {
+            return false
+        }
+        val tokenValid = MessageDigest.isEqual(grant.tokenBytes, candidateBytes)
+        val reqMatches = requestId < 0 || grant.requestId == requestId
+        return tokenValid && reqMatches && grant.entryId == entryId
+    }
+
+    /**
+     * Verifies and atomically consumes a one-time `FILL_ENTRY` capability nonce in constant time.
+     */
+    fun consumeFastFillToken(token: String?, requestId: Int, entryId: String): Boolean {
+        if (token.isNullOrBlank() || entryId.isBlank()) return false
+        val grant = fastFillGrants.remove(token) ?: return false
+        val now = System.currentTimeMillis()
+        if ((now - grant.createdAt) >= REQUEST_TTL_MS) return false
+        val candidateBytes = try {
+            decodeUrlBase64(token)
+        } catch (_: Exception) {
+            return false
+        }
+        val tokenValid = MessageDigest.isEqual(grant.tokenBytes, candidateBytes)
+        val reqMatches = requestId < 0 || grant.requestId == requestId
+        return tokenValid && reqMatches && grant.entryId == entryId
+    }
+
     @RequiresApi(Build.VERSION_CODES.O)
     fun saveRequest(
         authLevel: String,
@@ -113,8 +202,14 @@ object AutofillRequestStore {
         overrideConfirmPwIds: List<AutofillId>? = null,
         overrideOtpIds: List<AutofillId>? = null
     ) {
+        val isSameContext = (packageName.isNotBlank() && packageName == targetPackageName) ||
+                (webDomain.isNotBlank() && webDomain == targetWebDomain)
         activeRequestId = requestId
-        selectedEntryId = entryId
+        if (entryId != null) {
+            selectedEntryId = entryId
+        } else if (!isSameContext) {
+            selectedEntryId = null
+        }
         activeSessionTimestamp = System.currentTimeMillis()
         pendingAuthLevel = authLevel
         targetPackageName = packageName
@@ -173,5 +268,6 @@ object AutofillRequestStore {
         latestStructure = null
         latestParser = null
         hasActiveRequest = false
+        fastFillGrants.clear()
     }
 }
