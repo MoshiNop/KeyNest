@@ -113,12 +113,16 @@ class TestPathUtil extends PathUtil {
 }
 
 class EnvSecretsFake extends Fake implements EnvSecrets {
-  EnvSecretsFake(this.microsoftClientId);
+  EnvSecretsFake(this.microsoftClientId, {this.dropboxKey});
   EnvSecretsFake.fromJson(Map<String, dynamic> map)
-    : microsoftClientId = map['microsoftClientId'] as String?;
+    : microsoftClientId = map['microsoftClientId'] as String?,
+      dropboxKey = map['dropboxKey'] as String?;
 
   @override
   final String? microsoftClientId;
+
+  @override
+  final String? dropboxKey;
 }
 
 class TestEnv extends Env {

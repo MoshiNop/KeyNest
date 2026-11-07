@@ -312,8 +312,10 @@ class FakeTestFileSource extends FileSource {
   bool get supportsWrite => true;
 
   @override
-  Stream<FileContent> content({bool updateCache = true}) =>
-      const Stream.empty();
+  Stream<FileContent> content({
+    bool updateCache = true,
+    bool forceReload = false,
+  }) => const Stream.empty();
 
   @override
   Future<FileContent> contentWrite(

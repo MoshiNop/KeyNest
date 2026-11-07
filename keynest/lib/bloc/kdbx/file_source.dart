@@ -166,8 +166,11 @@ abstract class FileSource {
     _cached = content;
   }
 
-  Stream<FileContent> content({bool updateCache = true}) async* {
-    if (_cached != null) {
+  Stream<FileContent> content({
+    bool updateCache = true,
+    bool forceReload = false,
+  }) async* {
+    if (!forceReload && _cached != null) {
       // Memory cache is perfectly fine; avoid redundant re-reads.
       yield _cached!;
       return;

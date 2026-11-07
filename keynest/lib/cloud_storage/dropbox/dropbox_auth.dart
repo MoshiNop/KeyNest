@@ -289,34 +289,54 @@ class DropboxAuthService {
 
       final sub = server.listen((HttpRequest request) async {
         final uri = request.uri;
-        final isError = uri.queryParameters.containsKey('error');
-        final errorDesc =
-            uri.queryParameters['error_description'] ??
-            'Authorization cancelled.';
+        // Ignore browser auxiliary requests such as /favicon.ico that carry
+        // neither an authorization code nor an OAuth error parameter.
+        if (uri.path == '/favicon.ico' ||
+            (!uri.queryParameters.containsKey('code') &&
+                !uri.queryParameters.containsKey('error'))) {
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          return;
+        }
 
+        const htmlEscape = HtmlEscape();
+        final isError = uri.queryParameters.containsKey('error');
+        final safeErrorDesc = htmlEscape.convert(
+          uri.queryParameters['error_description'] ??
+              'Authorization cancelled.',
+        );
+
+        String? validatedCode;
+        Object? validationError;
+        try {
+          validatedCode = validateRedirect(redirectUri: uri, session: session);
+        } catch (e) {
+          validationError = e;
+        }
+
+        final isSuccess = !isError && validationError == null;
         request.response
-          ..statusCode = HttpStatus.ok
+          ..statusCode = validationError != null && !isError
+              ? HttpStatus.badRequest
+              : HttpStatus.ok
           ..headers.contentType = ContentType.html
           ..write('''
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>KeyNest Authorization</title></head>
 <body style="font-family:sans-serif;background:#0D1B2A;color:#E0E1DD;text-align:center;padding:50px;">
-  <h2>${isError ? 'Authorization Cancelled' : 'Connected to KeyNest!'}</h2>
-  <p>${isError ? errorDesc : 'Dropbox has authorized KeyNest. You can close this window and return to the application.'}</p>
+  <h2>${isSuccess ? 'Connected to KeyNest!' : 'Authorization Cancelled'}</h2>
+  <p>${isSuccess ? 'Dropbox has authorized KeyNest. You can close this window and return to the application.' : (isError ? safeErrorDesc : 'Authorization state verification failed. Please return to KeyNest and try again.')}</p>
 </body>
 </html>
 ''');
         await request.response.close();
 
-        try {
-          final code = validateRedirect(redirectUri: uri, session: session);
-          if (!completer.isCompleted) {
-            completer.complete(code);
-          }
-        } catch (e) {
-          if (!completer.isCompleted) {
-            completer.completeError(e);
+        if (!completer.isCompleted) {
+          if (validationError != null) {
+            completer.completeError(validationError);
+          } else {
+            completer.complete(validatedCode);
           }
         }
       });

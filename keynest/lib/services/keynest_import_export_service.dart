@@ -678,10 +678,16 @@ class KeyNestImportExportService {
         }
       }
 
-      // 2. Index target entries for UUID matching and duplicate reconciliation
+      // 2. Index active (non-Recycle-Bin / non-trashed) target entries for UUID matching and duplicate reconciliation
+      final targetRecycleBin = targetFile.recycleBin;
       final targetEntriesByUuid = <KdbxUuid, KdbxEntry>{};
       final targetEntriesByFingerprint = <String, KdbxEntry>{};
       for (final entry in targetFile.body.rootGroup.getAllEntries()) {
+        if ((targetRecycleBin != null &&
+                _isDescendantOf(entry, targetRecycleBin)) ||
+            KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+          continue;
+        }
         targetEntriesByUuid[entry.uuid] = entry;
         final fp = _entryFingerprint(entry);
         if (fp.isNotEmpty) {
@@ -698,8 +704,9 @@ class KeyNestImportExportService {
       final sourceEntries = sourceFile.body.rootGroup.getAllEntries().toList();
       for (final src in sourceEntries) {
         // Skip trash entries from the source database
-        if (sourceRecycleBin != null &&
-            _isDescendantOf(src, sourceRecycleBin)) {
+        if ((sourceRecycleBin != null &&
+                _isDescendantOf(src, sourceRecycleBin)) ||
+            KeyNestItemTypeHelper.isEntryInTrash(src)) {
           continue;
         }
 
@@ -739,6 +746,18 @@ class KeyNestImportExportService {
               existing.setString(s.key, s.value);
             }
             existing.icon.set(src.icon.get() ?? KdbxIcon.Key);
+            if (src.customIcon != null) {
+              final custom = src.customIcon!;
+              if (!targetFile.body.meta.customIcons.containsKey(custom.uuid)) {
+                targetFile.body.meta.addCustomIcon(
+                  KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+                );
+              }
+              existing.customIcon =
+                  targetFile.body.meta.customIcons[custom.uuid] ?? custom;
+            } else {
+              existing.customIcon = null;
+            }
             existing.times.lastModificationTime.set(srcModTime);
           } else {
             // Existing is newer: push source to history so data is preserved
@@ -801,6 +820,16 @@ class KeyNestImportExportService {
           );
 
           final cloned = src.cloneInto(targetFolder);
+          if (src.customIcon != null) {
+            final custom = src.customIcon!;
+            if (!targetFile.body.meta.customIcons.containsKey(custom.uuid)) {
+              targetFile.body.meta.addCustomIcon(
+                KdbxCustomIcon(uuid: custom.uuid, data: custom.data),
+              );
+            }
+            cloned.customIcon =
+                targetFile.body.meta.customIcons[custom.uuid] ?? custom;
+          }
           targetEntriesByUuid[cloned.uuid] = cloned;
           final fp = _entryFingerprint(cloned);
           if (fp.isNotEmpty) {

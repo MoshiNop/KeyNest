@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:keynest/bloc/app_data.dart';
 import 'package:keynest/bloc/kdbx/file_content.dart';
 import 'package:keynest/bloc/kdbx/file_source.dart';
+import 'package:keynest/bloc/kdbx/storage_exception.dart';
 import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
 import 'package:keynest/cloud_storage/cloud_storage_ui_adapt.dart';
 import 'package:keynest/cloud_storage/google_drive/sync/gdrive_auth.dart';
@@ -209,6 +210,34 @@ class GoogleDriveProvider extends CloudStorageProvider
     Map<String, dynamic>? previousMetadata,
   ) async {
     final effectiveId = await _resolveEffectiveFileId(file.id);
+    final prevDriveMeta =
+        (previousMetadata?[_METADATA_KEY_GOOGLE_DRIVE_DATA]
+            as Map<String, dynamic>?) ??
+        previousMetadata;
+    if (prevDriveMeta != null) {
+      final expectedVersion = prevDriveMeta['version'];
+      final expectedMd5 = prevDriveMeta['md5Checksum'] as String?;
+      if (expectedVersion != null || expectedMd5 != null) {
+        final remoteMeta = await driveClient.getFileMetadata(effectiveId);
+        if (remoteMeta != null) {
+          final versionMismatch =
+              expectedVersion != null &&
+              remoteMeta.version != null &&
+              remoteMeta.version.toString() != expectedVersion.toString();
+          final md5Mismatch =
+              expectedMd5 != null &&
+              remoteMeta.md5Checksum != null &&
+              remoteMeta.md5Checksum != expectedMd5;
+          if (versionMismatch || md5Mismatch) {
+            throw StorageException.conflict(
+              'Google Drive vault modified remotely '
+              '(expected version=$expectedVersion md5=$expectedMd5, '
+              'found version=${remoteMeta.version} md5=${remoteMeta.md5Checksum}).',
+            );
+          }
+        }
+      }
+    }
     final updated = await driveClient.updateVault(
       fileId: effectiveId,
       bytes: bytes,

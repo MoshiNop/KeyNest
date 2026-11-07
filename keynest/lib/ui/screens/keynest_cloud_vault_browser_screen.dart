@@ -12,6 +12,7 @@ import 'package:keynest/bloc/kdbx/file_source_cloud_storage.dart';
 import 'package:keynest/bloc/kdbx/file_source_local.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
+import 'package:keynest/cloud_storage/dropbox/dropbox_client.dart';
 import 'package:keynest/cloud_storage/dropbox/dropbox_provider.dart';
 import 'package:keynest/cloud_storage/dropbox/dropbox_sync_state.dart';
 import 'package:keynest/cloud_storage/google_drive/google_drive_provider.dart';
@@ -172,28 +173,39 @@ class _KeyNestCloudVaultBrowserScreenState
         }
       } else if (widget.provider is DropboxProvider) {
         final dropbox = widget.provider as DropboxProvider;
-        var files = await dropbox.dropboxClient.listFiles(
+        final keyNestFiles = await dropbox.dropboxClient.listFiles(
           folderPath: '/KeyNest',
         );
-        if (files.isEmpty) {
-          final rootFiles = await dropbox.dropboxClient.listFiles(
+        List<DropboxFileMetadata> rootFiles = const [];
+        try {
+          rootFiles = await dropbox.dropboxClient.listFiles(
             folderPath: '',
           );
-          files = rootFiles
-              .where((f) => f.name.toLowerCase().endsWith('.kdbx'))
-              .toList();
+        } catch (e) {
+          _logger.fine('Listing Dropbox root skipped: $e');
         }
 
-        for (final f in files) {
+        final seenPaths = <String>{};
+        final files = <DropboxFileMetadata>[];
+        for (final f in [...keyNestFiles, ...rootFiles]) {
           if (!f.name.toLowerCase().endsWith('.kdbx')) {
             continue;
           }
+          final normPath = f.pathLower.toLowerCase();
+          if (seenPaths.add(normPath)) {
+            files.add(f);
+          }
+        }
+
+        for (final f in files) {
           final isLinked = openedFiles.any(
             (s) =>
                 s.displayName.toLowerCase() == f.name.toLowerCase() ||
                 (s is FileSourceCloudStorage &&
-                    s.fileInfo['path']?.toLowerCase() ==
-                        f.pathLower.toLowerCase()),
+                    (s.fileInfo['path']?.toLowerCase() ==
+                            f.pathLower.toLowerCase() ||
+                        s.fileInfo['id']?.toLowerCase() ==
+                            f.pathLower.toLowerCase())),
           );
           items.add(
             CloudVaultItem(
@@ -250,6 +262,7 @@ class _KeyNestCloudVaultBrowserScreenState
         source = FileSourceCloudStorage(
           provider: widget.provider,
           fileInfo: {
+            'id': vault.id,
             'path': vault.id,
             'name': vault.name,
           },
@@ -988,7 +1001,7 @@ class _KeyNestCloudVaultBrowserScreenState
           bytes = await google.driveClient.downloadFile(vault.id);
         } else {
           final dropbox = widget.provider as DropboxProvider;
-          final res = await dropbox.dropboxClient.downloadVault(vault.name);
+          final res = await dropbox.dropboxClient.downloadVault(vault.id);
           bytes = res.bytes;
         }
 

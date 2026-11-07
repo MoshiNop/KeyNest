@@ -1,21 +1,28 @@
+// ignore_for_file: avoid_slow_async_io
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:collection/collection.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:kdbx/kdbx.dart';
+import 'package:keynest/bloc/kdbx/file_content.dart';
 import 'package:keynest/bloc/kdbx/file_source.dart';
 import 'package:keynest/bloc/kdbx/file_source_cloud_storage.dart';
 import 'package:keynest/bloc/kdbx/file_source_local.dart';
+import 'package:keynest/bloc/kdbx/storage_exception.dart';
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/cloud_storage/cloud_storage_provider.dart';
+import 'package:keynest/cloud_storage/dropbox/dropbox_merge_engine.dart';
 import 'package:keynest/cloud_storage/dropbox/dropbox_provider.dart';
 import 'package:keynest/cloud_storage/dropbox/dropbox_sync_engine.dart';
 import 'package:keynest/cloud_storage/dropbox/dropbox_sync_state.dart';
 import 'package:keynest/cloud_storage/google_drive/google_drive_provider.dart';
 import 'package:keynest/cloud_storage/google_drive/sync/gdrive_sync_engine.dart';
 import 'package:keynest/cloud_storage/google_drive/sync/gdrive_sync_state.dart';
+import 'package:keynest/cloud_storage/onedrive/onedrive_provider.dart';
+import 'package:keynest/cloud_storage/webdav/webdav_provider.dart';
 import 'package:keynest/utils/path_utils.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
@@ -108,6 +115,7 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
 
   // Per-vault locks to serialize sync execution and avoid concurrent jobs
   final Map<String, Lock> _vaultLocks = {};
+  final Lock _prefsLock = Lock();
 
   Lock _getLock(String vaultId) =>
       _vaultLocks.putIfAbsent(vaultId, () => Lock());
@@ -148,127 +156,142 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
   }
 
   Future<void> load({io.File? fileOverride}) async {
-    if (fileOverride != null) {
-      _fileOverride = fileOverride;
-    }
-    if (_loaded && _fileOverride == null) {
-      return;
-    }
-    try {
-      final file = await _getPrefsFile();
-      if (file.existsSync()) {
-        final content = file.readAsStringSync();
-        if (content.trim().isNotEmpty) {
-          final decoded = json.decode(content) as Map<String, dynamic>;
-          final rawSelections =
-              decoded['selections'] as Map<String, dynamic>? ?? {};
-          _selections.clear();
-          for (final pEntry in rawSelections.entries) {
-            final providerMap = pEntry.value as Map<String, dynamic>? ?? {};
-            _selections[pEntry.key] = providerMap.map(
-              (k, v) => MapEntry(k, v == true),
-            );
-          }
-
-          final rawSync = decoded['lastSync'] as Map<String, dynamic>? ?? {};
-          _syncInfo.clear();
-          for (final pEntry in rawSync.entries) {
-            final vaultMap = pEntry.value as Map<String, dynamic>? ?? {};
-            _syncInfo[pEntry.key] = vaultMap.map((k, v) {
-              final infoMap = v as Map<String, dynamic>? ?? {};
-              final timeStr = infoMap['time'] as String?;
-              final time = timeStr != null ? DateTime.tryParse(timeStr) : null;
-              final successTimeStr = infoMap['successTime'] as String?;
-              final successTime = successTimeStr != null
-                  ? DateTime.tryParse(successTimeStr)
-                  : null;
-              final attemptTimeStr = infoMap['attemptTime'] as String?;
-              final attemptTime = attemptTimeStr != null
-                  ? DateTime.tryParse(attemptTimeStr)
-                  : time;
-
-              final statusStr = infoMap['status'] as String? ?? 'idle';
-              KeyNestSyncStatus status;
-              switch (statusStr) {
-                case 'success':
-                  status = KeyNestSyncStatus.success;
-                  break;
-                case 'conflict':
-                  status = KeyNestSyncStatus.conflict;
-                  break;
-                case 'error':
-                  status = KeyNestSyncStatus.error;
-                  break;
-                case 'syncing':
-                  status = KeyNestSyncStatus.syncing;
-                  break;
-                case 'disabled':
-                  status = KeyNestSyncStatus.disabled;
-                  break;
-                default:
-                  status = KeyNestSyncStatus.idle;
-              }
-              return MapEntry(
-                k,
-                VaultSyncInfo(
-                  status: status,
-                  lastSyncTime: time,
-                  lastSuccessfulSyncTime:
-                      successTime ?? (status == KeyNestSyncStatus.success ? time : null),
-                  lastAttemptedSyncTime: attemptTime,
-                  message: infoMap['message'] as String?,
-                ),
+    return _prefsLock.synchronized(() async {
+      if (fileOverride != null) {
+        _fileOverride = fileOverride;
+      }
+      if (_loaded && _fileOverride == null) {
+        return;
+      }
+      try {
+        final file = await _getPrefsFile();
+        if (await file.exists()) {
+          final content = await file.readAsString();
+          if (content.trim().isNotEmpty) {
+            final decoded = json.decode(content) as Map<String, dynamic>;
+            final rawSelections =
+                decoded['selections'] as Map<String, dynamic>? ?? {};
+            _selections.clear();
+            for (final pEntry in rawSelections.entries) {
+              final providerMap = pEntry.value as Map<String, dynamic>? ?? {};
+              _selections[pEntry.key] = providerMap.map(
+                (k, v) => MapEntry(k, v == true),
               );
-            });
+            }
+
+            final rawSync = decoded['lastSync'] as Map<String, dynamic>? ?? {};
+            _syncInfo.clear();
+            for (final pEntry in rawSync.entries) {
+              final vaultMap = pEntry.value as Map<String, dynamic>? ?? {};
+              _syncInfo[pEntry.key] = vaultMap.map((k, v) {
+                final infoMap = v as Map<String, dynamic>? ?? {};
+                final timeStr = infoMap['time'] as String?;
+                final time = timeStr != null ? DateTime.tryParse(timeStr) : null;
+                final successTimeStr = infoMap['successTime'] as String?;
+                final successTime = successTimeStr != null
+                    ? DateTime.tryParse(successTimeStr)
+                    : null;
+                final attemptTimeStr = infoMap['attemptTime'] as String?;
+                final attemptTime = attemptTimeStr != null
+                    ? DateTime.tryParse(attemptTimeStr)
+                    : time;
+
+                final statusStr = infoMap['status'] as String? ?? 'idle';
+                KeyNestSyncStatus status;
+                switch (statusStr) {
+                  case 'success':
+                    status = KeyNestSyncStatus.success;
+                    break;
+                  case 'conflict':
+                    status = KeyNestSyncStatus.conflict;
+                    break;
+                  case 'error':
+                    status = KeyNestSyncStatus.error;
+                    break;
+                  case 'syncing':
+                    // Never resurrect a transient 'syncing' state from a prior
+                    // process termination; normalize back to idle.
+                    status = KeyNestSyncStatus.idle;
+                    break;
+                  case 'disabled':
+                    status = KeyNestSyncStatus.disabled;
+                    break;
+                  default:
+                    status = KeyNestSyncStatus.idle;
+                }
+                return MapEntry(
+                  k,
+                  VaultSyncInfo(
+                    status: status,
+                    lastSyncTime: time,
+                    lastSuccessfulSyncTime:
+                        successTime ??
+                        (status == KeyNestSyncStatus.success ? time : null),
+                    lastAttemptedSyncTime: attemptTime,
+                    message: statusStr == 'syncing'
+                        ? null
+                        : infoMap['message'] as String?,
+                  ),
+                );
+              });
+            }
           }
         }
+        _loaded = true;
+      } catch (e, stack) {
+        _logger.warning('Failed to load cloud sync preferences: $e', stack);
       }
-      _loaded = true;
-    } catch (e, stack) {
-      _logger.warning('Failed to load cloud sync preferences: $e', stack);
-    }
+    });
   }
 
   Future<void> _save() async {
-    try {
-      final file = await _getPrefsFile();
-      if (!file.parent.existsSync()) {
-        file.parent.createSync(recursive: true);
-      }
-      final outSelections = <String, Map<String, bool>>{};
-      for (final e in _selections.entries) {
-        outSelections[e.key] = Map<String, bool>.from(e.value);
-      }
-
-      final outSync = <String, Map<String, dynamic>>{};
-      for (final pEntry in _syncInfo.entries) {
-        final vMap = <String, dynamic>{};
-        for (final vEntry in pEntry.value.entries) {
-          final info = vEntry.value;
-          vMap[vEntry.key] = {
-            'status': info.status.name,
-            if (info.lastSyncTime != null)
-              'time': info.lastSyncTime!.toIso8601String(),
-            if (info.lastSuccessfulSyncTime != null)
-              'successTime': info.lastSuccessfulSyncTime!.toIso8601String(),
-            if (info.lastAttemptedSyncTime != null)
-              'attemptTime': info.lastAttemptedSyncTime!.toIso8601String(),
-            if (info.message != null) 'message': info.message,
-          };
+    return _prefsLock.synchronized(() async {
+      try {
+        final file = await _getPrefsFile();
+        if (!await file.parent.exists()) {
+          await file.parent.create(recursive: true);
         }
-        outSync[pEntry.key] = vMap;
+        final outSelections = <String, Map<String, bool>>{};
+        for (final e in _selections.entries) {
+          outSelections[e.key] = Map<String, bool>.from(e.value);
+        }
+
+        final outSync = <String, Map<String, dynamic>>{};
+        for (final pEntry in _syncInfo.entries) {
+          final vMap = <String, dynamic>{};
+          for (final vEntry in pEntry.value.entries) {
+            final info = vEntry.value;
+            vMap[vEntry.key] = {
+              'status': info.status.name,
+              if (info.lastSyncTime != null)
+                'time': info.lastSyncTime!.toIso8601String(),
+              if (info.lastSuccessfulSyncTime != null)
+                'successTime': info.lastSuccessfulSyncTime!.toIso8601String(),
+              if (info.lastAttemptedSyncTime != null)
+                'attemptTime': info.lastAttemptedSyncTime!.toIso8601String(),
+              if (info.message != null) 'message': info.message,
+            };
+          }
+          outSync[pEntry.key] = vMap;
+        }
+
+        final data = {
+          'selections': outSelections,
+          'lastSync': outSync,
+        };
+
+        final tmpFile = io.File('${file.path}.tmp');
+        await tmpFile.writeAsString(json.encode(data), flush: true);
+        await tmpFile.rename(file.path);
+      } catch (e, stack) {
+        _logger.severe('Failed to save cloud sync preferences: $e', stack);
       }
-
-      final data = {
-        'selections': outSelections,
-        'lastSync': outSync,
-      };
-
-      file.writeAsStringSync(json.encode(data), flush: true);
-    } catch (e, stack) {
-      _logger.severe('Failed to save cloud sync preferences: $e', stack);
-    }
+    });
   }
+
+  @visibleForTesting
+  Future<void> flushPreferencesForTesting() =>
+      _prefsLock.synchronized(() async {});
 
   /// Returns whether synchronization is enabled for [vaultId] on [providerId].
   /// All eligible vaults default to true unless the user explicitly opted out.
@@ -303,17 +326,38 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
     return _syncInfo[providerId]?[vaultId] ?? VaultSyncInfo();
   }
 
-  /// Marks a vault dirty across all supported sync state stores to guarantee
-  /// upload on next sync even if the app terminates early.
-  Future<void> markVaultDirty(String vaultId) async {
-    try {
-      final gdriveState = GoogleDriveSyncStateStore(pathUtils: PathUtils());
-      await gdriveState.markLocalDirty(vaultId);
-    } catch (_) {}
-    try {
-      final dropboxState = DropboxSyncStateStore(pathUtils: PathUtils());
-      await dropboxState.markLocalDirty(vaultId);
-    } catch (_) {}
+  /// Marks a vault dirty on authenticated & sync-enabled providers to guarantee
+  /// upload on next sync even if the app terminates early, without polluting
+  /// disabled or unconfigured providers.
+  Future<void> markVaultDirty(String vaultId, {KdbxBloc? kdbxBloc}) async {
+    await load();
+    bool shouldMarkProvider(String providerId) {
+      if (!isVaultSyncEnabled(providerId, vaultId)) {
+        return false;
+      }
+      if (kdbxBloc != null) {
+        final authed = kdbxBloc.cloudStorageBloc.availableCloudStorage.any(
+          (p) => p.id == providerId && p.isAuthenticated,
+        );
+        if (!authed) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    if (shouldMarkProvider('GoogleDriveProvider')) {
+      try {
+        final gdriveState = GoogleDriveSyncStateStore(pathUtils: PathUtils());
+        await gdriveState.markLocalDirty(vaultId);
+      } catch (_) {}
+    }
+    if (shouldMarkProvider('DropboxProvider')) {
+      try {
+        final dropboxState = DropboxSyncStateStore(pathUtils: PathUtils());
+        await dropboxState.markLocalDirty(vaultId);
+      } catch (_) {}
+    }
   }
 
   /// Ensures a vault filename retains the .kdbx extension.
@@ -371,7 +415,7 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
       final vaultId = opened.fileSource.uuid;
       _localGenerations[vaultId] = (_localGenerations[vaultId] ?? 0) + 1;
       _pendingPostSaveVaults.add(vaultId);
-      unawaited(markVaultDirty(vaultId));
+      unawaited(markVaultDirty(vaultId, kdbxBloc: kdbxBloc));
 
       _vaultDebounceTimers[vaultId]?.cancel();
       _vaultDebounceTimers[vaultId] = Timer(debounce, () {
@@ -517,10 +561,195 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
       try {
         if (source is FileSourceCloudStorage &&
             source.provider.id == provider.id) {
-          // Vault is already native cloud-backed for this provider:
-          // Flush pending local saves and upload working copy to provider asynchronously
           await kdbxBloc.waitForPendingSaves();
-          await source.uploadWorkingCopy();
+
+          Future<Uint8List> getCloudWorkingBytes() async {
+            await kdbxBloc.waitForPendingSaves();
+            final working = await source.readWorkingCopyBytes();
+            if (working != null && working.isNotEmpty) {
+              return working;
+            }
+            if (source.lastContent?.content != null &&
+                source.lastContent!.content.isNotEmpty) {
+              return source.lastContent!.content;
+            }
+            return await openedFile.kdbxFile.save();
+          }
+
+          if (provider is GoogleDriveProvider) {
+            final stateStore = GoogleDriveSyncStateStore(
+              pathUtils: PathUtils(),
+            );
+            final fileId = source.fileInfo['id'];
+            if (fileId != null && fileId.isNotEmpty) {
+              final existingId = await stateStore.getDriveFileId(vaultId);
+              if (existingId == null || existingId.isEmpty) {
+                await stateStore.setDriveFileId(vaultId, fileId);
+                await stateStore.setVaultMigrated(vaultId, true);
+              }
+            }
+            if (source.hasUnsavedChanges) {
+              await stateStore.markLocalDirty(vaultId);
+            }
+
+            final syncRes = await provider.syncEngine.syncVault(
+              vaultId: vaultId,
+              vaultFilename: remoteFilename,
+              getLocalBytes: getCloudWorkingBytes,
+              saveLocalBytes: (bytes) async {
+                final syncedContent = await source.markWorkingCopySynced(bytes);
+                await kdbxBloc.applySyncedBytes(
+                  openedFile,
+                  bytes,
+                  syncedContent: syncedContent,
+                );
+              },
+              unlockedLocalFile: openedFile.kdbxFile,
+              credentials: openedFile.kdbxFile.credentials,
+            );
+
+            if (syncRes.status == GoogleDriveSyncStatus.upToDate ||
+                syncRes.status == GoogleDriveSyncStatus.uploaded) {
+              final latestBytes = await getCloudWorkingBytes();
+              final syncedContent = await source.markWorkingCopySynced(
+                latestBytes,
+              );
+              await kdbxBloc.applySyncedBytes(
+                openedFile,
+                latestBytes,
+                syncedContent: syncedContent,
+              );
+            }
+
+            KeyNestSyncStatus status;
+            if (syncRes.status == GoogleDriveSyncStatus.conflict) {
+              status = KeyNestSyncStatus.conflict;
+            } else if (syncRes.status == GoogleDriveSyncStatus.offline ||
+                syncRes.status == GoogleDriveSyncStatus.error) {
+              status = KeyNestSyncStatus.error;
+            } else {
+              status = KeyNestSyncStatus.success;
+            }
+            final res = VaultSyncResult(
+              vaultId: vaultId,
+              vaultName: remoteFilename,
+              status: status,
+              message: syncRes.message ?? 'Synchronized with Google Drive.',
+              timestamp: DateTime.now(),
+            );
+            _updateSyncInfo(provider.id, vaultId, status, res.message);
+            return res;
+          } else if (provider is DropboxProvider) {
+            final stateStore = DropboxSyncStateStore(pathUtils: PathUtils());
+            final rawPath = source.fileInfo['path'] ?? source.fileInfo['id'];
+            if (rawPath != null &&
+                rawPath.isNotEmpty &&
+                rawPath.startsWith('/')) {
+              final existingPath = await stateStore.getRemotePath(vaultId);
+              if (existingPath == null || existingPath.isEmpty) {
+                await stateStore.setRemotePath(vaultId, rawPath);
+              }
+            }
+            if (source.hasUnsavedChanges) {
+              await stateStore.markLocalDirty(vaultId);
+            }
+
+            final syncRes = await provider.syncEngine.syncVault(
+              vaultId: vaultId,
+              vaultFilename: remoteFilename,
+              getLocalBytes: getCloudWorkingBytes,
+              saveLocalBytes: (bytes) async {
+                final syncedContent = await source.markWorkingCopySynced(bytes);
+                await kdbxBloc.applySyncedBytes(
+                  openedFile,
+                  bytes,
+                  syncedContent: syncedContent,
+                );
+              },
+              unlockedLocalFile: openedFile.kdbxFile,
+              credentials: openedFile.kdbxFile.credentials,
+            );
+
+            if (syncRes.status == SyncStatus.upToDate ||
+                syncRes.status == SyncStatus.uploaded) {
+              final latestBytes = await getCloudWorkingBytes();
+              final syncedContent = await source.markWorkingCopySynced(
+                latestBytes,
+              );
+              await kdbxBloc.applySyncedBytes(
+                openedFile,
+                latestBytes,
+                syncedContent: syncedContent,
+              );
+            }
+
+            KeyNestSyncStatus status;
+            if (syncRes.status == SyncStatus.conflict) {
+              status = KeyNestSyncStatus.conflict;
+            } else if (syncRes.status == SyncStatus.offline ||
+                syncRes.status == SyncStatus.error) {
+              status = KeyNestSyncStatus.error;
+            } else {
+              status = KeyNestSyncStatus.success;
+            }
+            final res = VaultSyncResult(
+              vaultId: vaultId,
+              vaultName: remoteFilename,
+              status: status,
+              message: syncRes.message ?? 'Synchronized with Dropbox.',
+              timestamp: DateTime.now(),
+            );
+            _updateSyncInfo(provider.id, vaultId, status, res.message);
+            return res;
+          }
+
+          // Native cloud-backed vault for OneDrive / WebDAV / other providers:
+          // Upload working copy, and on 409/412 conflict perform 3-way KDBX merge.
+          try {
+            await source.uploadWorkingCopy();
+          } on StorageConflictException {
+            final remoteContent = await source
+                .content(updateCache: false, forceReload: true)
+                .last;
+            final credentials = openedFile.kdbxFile.credentials;
+            final remoteFile = await KdbxFormat().read(
+              remoteContent.content,
+              credentials,
+            );
+            KdbxFile? baseFile;
+            try {
+              final baseBytes = openedFile.kdbxFileContent.content;
+              if (baseBytes.isNotEmpty) {
+                baseFile = await KdbxFormat().read(baseBytes, credentials);
+              }
+            } catch (_) {}
+            final localBytes = await getCloudWorkingBytes();
+            final workingLocal = await KdbxFormat().read(
+              localBytes,
+              credentials,
+            );
+            DropboxVaultMergeEngine.merge(
+              localFile: workingLocal,
+              remoteFile: remoteFile,
+              baseFile: baseFile,
+            );
+            final mergedBytes = await workingLocal.save();
+            final newMeta = await provider.saveFile(
+              source.fileInfo,
+              mergedBytes,
+              remoteContent.metadata,
+            );
+            final syncedContent = await source.markWorkingCopySynced(
+              mergedBytes,
+              newMeta,
+            );
+            await kdbxBloc.applySyncedBytes(
+              openedFile,
+              mergedBytes,
+              syncedContent: syncedContent,
+            );
+          }
+
           final res = VaultSyncResult(
             vaultId: vaultId,
             vaultName: remoteFilename,
@@ -544,9 +773,10 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
               source.lastContent!.content.isNotEmpty) {
             return source.lastContent!.content;
           }
-          if (source is FileSourceLocal && source.filePickerIdentifier == null) {
+          if (source is FileSourceLocal &&
+              source.filePickerIdentifier == null) {
             final f = source.file;
-            if (f.existsSync()) {
+            if (await f.exists()) {
               return await f.readAsBytes();
             }
           }
@@ -564,8 +794,15 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
             vaultFilename: remoteFilename,
             getLocalBytes: getLatestBytes,
             saveLocalBytes: (bytes) async {
-              await source.contentWrite(bytes, metadata: null);
-              unawaited(kdbxBloc.reload(openedFile).last);
+              final savedContent = await source.contentWrite(
+                bytes,
+                metadata: null,
+              );
+              await kdbxBloc.applySyncedBytes(
+                openedFile,
+                bytes,
+                syncedContent: savedContent,
+              );
             },
             unlockedLocalFile: openedFile.kdbxFile,
             credentials: openedFile.kdbxFile.credentials,
@@ -601,8 +838,15 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
             vaultFilename: remoteFilename,
             getLocalBytes: getLatestBytes,
             saveLocalBytes: (bytes) async {
-              await source.contentWrite(bytes, metadata: null);
-              unawaited(kdbxBloc.reload(openedFile).last);
+              final savedContent = await source.contentWrite(
+                bytes,
+                metadata: null,
+              );
+              await kdbxBloc.applySyncedBytes(
+                openedFile,
+                bytes,
+                syncedContent: savedContent,
+              );
             },
             unlockedLocalFile: openedFile.kdbxFile,
             credentials: openedFile.kdbxFile.credentials,
@@ -629,6 +873,23 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
             provider.id,
             vaultId,
             status,
+            res.message,
+          );
+          return res;
+        } else if (provider is OneDriveProvider || provider is WebDavProvider) {
+          final res = await _syncGenericProviderVault(
+            provider: provider,
+            vaultId: vaultId,
+            remoteFilename: remoteFilename,
+            source: source,
+            openedFile: openedFile,
+            kdbxBloc: kdbxBloc,
+            getLatestBytes: getLatestBytes,
+          );
+          _updateSyncInfo(
+            provider.id,
+            vaultId,
+            res.status,
             res.message,
           );
           return res;
@@ -666,6 +927,151 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
         return res;
       }
     });
+  }
+
+  Future<VaultSyncResult> _syncGenericProviderVault({
+    required CloudStorageProvider provider,
+    required String vaultId,
+    required String remoteFilename,
+    required FileSource source,
+    required KdbxOpenedFile openedFile,
+    required KdbxBloc kdbxBloc,
+    required Future<Uint8List> Function() getLatestBytes,
+  }) async {
+    final localBytes = await getLatestBytes();
+    final rootListing = await provider.list();
+    final keyNestFolder = rootListing.results.firstWhereOrNull(
+      (e) =>
+          e?.type == CloudStorageEntityType.directory &&
+          e?.name?.toLowerCase() == 'keynest',
+    );
+
+    CloudStorageEntity? remoteEntity;
+    if (keyNestFolder != null) {
+      final folderListing = await provider.list(parent: keyNestFolder);
+      remoteEntity = folderListing.results.firstWhereOrNull(
+        (e) =>
+            e?.type == CloudStorageEntityType.file &&
+            e?.name?.toLowerCase() == remoteFilename.toLowerCase(),
+      );
+    }
+    remoteEntity ??= rootListing.results.firstWhereOrNull(
+      (e) =>
+          e?.type == CloudStorageEntityType.file &&
+          e?.name?.toLowerCase() == remoteFilename.toLowerCase(),
+    );
+
+    if (remoteEntity == null) {
+      await provider.createEntity(
+        CloudStorageSelectorSaveResult(
+          keyNestFolder,
+          remoteFilename,
+        ),
+        localBytes,
+      );
+      return VaultSyncResult(
+        vaultId: vaultId,
+        vaultName: remoteFilename,
+        status: KeyNestSyncStatus.success,
+        message: 'Uploaded vault to ${provider.displayName}.',
+        timestamp: DateTime.now(),
+      );
+    }
+
+    const maxAttempts = 3;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      final FileContent remoteContent = await provider.loadEntity(remoteEntity);
+      final localSha = sha256.convert(localBytes).toString();
+      final remoteSha = sha256.convert(remoteContent.content).toString();
+      if (localSha == remoteSha) {
+        return VaultSyncResult(
+          vaultId: vaultId,
+          vaultName: remoteFilename,
+          status: KeyNestSyncStatus.success,
+          message: 'Vault is up to date on ${provider.displayName}.',
+          timestamp: DateTime.now(),
+        );
+      }
+
+      final credentials = openedFile.kdbxFile.credentials;
+      final KdbxFile remoteFile;
+      try {
+        remoteFile = await KdbxFormat().read(
+          remoteContent.content,
+          credentials,
+        );
+      } on KdbxInvalidKeyException {
+        return VaultSyncResult(
+          vaultId: vaultId,
+          vaultName: remoteFilename,
+          status: KeyNestSyncStatus.conflict,
+          message:
+              'Remote vault on ${provider.displayName} uses different master credentials.',
+          timestamp: DateTime.now(),
+        );
+      }
+
+      final workingLocal = await KdbxFormat().read(localBytes, credentials);
+      try {
+        DropboxVaultMergeEngine.merge(
+          localFile: workingLocal,
+          remoteFile: remoteFile,
+          baseFile: null,
+        );
+      } on DropboxMergeCredentialMismatchException catch (e) {
+        return VaultSyncResult(
+          vaultId: vaultId,
+          vaultName: remoteFilename,
+          status: KeyNestSyncStatus.conflict,
+          message: e.message,
+          timestamp: DateTime.now(),
+        );
+      }
+
+      final mergedBytes = await workingLocal.save();
+      try {
+        await provider.saveEntity(
+          remoteEntity,
+          mergedBytes,
+          remoteContent.metadata,
+        );
+        final savedContent = await source.contentWrite(
+          mergedBytes,
+          metadata: null,
+        );
+        await kdbxBloc.applySyncedBytes(
+          openedFile,
+          mergedBytes,
+          syncedContent: savedContent,
+        );
+        return VaultSyncResult(
+          vaultId: vaultId,
+          vaultName: remoteFilename,
+          status: KeyNestSyncStatus.success,
+          message: 'Synchronized with ${provider.displayName}.',
+          timestamp: DateTime.now(),
+        );
+      } on StorageConflictException {
+        if (attempt == maxAttempts) {
+          return VaultSyncResult(
+            vaultId: vaultId,
+            vaultName: remoteFilename,
+            status: KeyNestSyncStatus.conflict,
+            message:
+                'Concurrent modifications persisted on ${provider.displayName} after $maxAttempts attempts.',
+            timestamp: DateTime.now(),
+          );
+        }
+      }
+    }
+
+    return VaultSyncResult(
+      vaultId: vaultId,
+      vaultName: remoteFilename,
+      status: KeyNestSyncStatus.error,
+      message: 'Failed to synchronize with ${provider.displayName}.',
+      timestamp: DateTime.now(),
+    );
   }
 
   /// Synchronizes ALL vaults currently selected (checked) for [provider].

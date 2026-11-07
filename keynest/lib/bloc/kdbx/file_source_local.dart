@@ -77,12 +77,18 @@ class FileSourceLocal extends FileSource {
   }
 
   @override
-  Stream<FileContent> content({bool updateCache = true}) async* {
-    if (cached != null) {
+  Stream<FileContent> content({
+    bool updateCache = true,
+    bool forceReload = false,
+  }) async* {
+    if (!forceReload && cached != null) {
       yield cached!;
       return;
     }
-    await for (final c in super.content(updateCache: updateCache)) {
+    await for (final c in super.content(
+      updateCache: updateCache,
+      forceReload: forceReload,
+    )) {
       yield c;
     }
   }
