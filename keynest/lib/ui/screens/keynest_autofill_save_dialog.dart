@@ -439,20 +439,16 @@ class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color:
-                          (_saveMode == SaveMode.updateExisting
-                                  ? KeyNestPalette.accent
-                                  : KeyNestPalette.primary)
-                              .withValues(alpha: 0.15),
+                      color: KeyNestPalette.primaryColorFor(
+                        isDark,
+                      ).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Icon(
                       _saveMode == SaveMode.updateExisting
                           ? Icons.published_with_changes_rounded
                           : Icons.bookmark_add_rounded,
-                      color: _saveMode == SaveMode.updateExisting
-                          ? KeyNestPalette.accent
-                          : KeyNestPalette.primary,
+                      color: KeyNestPalette.primaryColorFor(isDark),
                       size: 24,
                     ),
                   ),

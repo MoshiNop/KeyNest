@@ -14,6 +14,8 @@ class KeyNestPressScale extends StatefulWidget {
     this.pressedScale = KeyNestTokens.pressedScale,
     this.haptic = true,
     this.behavior = HitTestBehavior.opaque,
+    this.animateOnly = false,
+    this.semanticLabel,
   });
 
   final Widget child;
@@ -23,6 +25,8 @@ class KeyNestPressScale extends StatefulWidget {
   final double pressedScale;
   final bool haptic;
   final HitTestBehavior behavior;
+  final bool animateOnly;
+  final String? semanticLabel;
 
   @override
   State<KeyNestPressScale> createState() => _KeyNestPressScaleState();
@@ -131,15 +135,50 @@ class _KeyNestPressScaleState extends State<KeyNestPressScale>
       child: widget.child,
     );
 
+    if (widget.animateOnly) {
+      if (widget.enabled && (widget.onTap != null || widget.onLongPress != null)) {
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) {
+            if (widget.enabled) {
+              _controller.forward();
+            }
+          },
+          onPointerUp: (_) {
+            if (widget.enabled) {
+              _controller.reverse();
+            }
+          },
+          onPointerCancel: (_) {
+            if (widget.enabled) {
+              _controller.reverse();
+            }
+          },
+          child: content,
+        );
+      }
+      return content;
+    }
+
     if (widget.onTap != null || widget.onLongPress != null) {
-      content = GestureDetector(
-        behavior: widget.behavior,
-        onTapDown: _handleTapDown,
-        onTapUp: _handleTapUp,
-        onTapCancel: _handleTapCancel,
-        onTap: _handleTap,
-        onLongPress: _handleLongPress,
-        child: content,
+      content = Semantics(
+        button: true,
+        enabled: widget.enabled,
+        label: widget.semanticLabel,
+        child: MouseRegion(
+          cursor: widget.enabled
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          child: GestureDetector(
+            behavior: widget.behavior,
+            onTapDown: _handleTapDown,
+            onTapUp: _handleTapUp,
+            onTapCancel: _handleTapCancel,
+            onTap: _handleTap,
+            onLongPress: _handleLongPress,
+            child: content,
+          ),
+        ),
       );
     }
 

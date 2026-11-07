@@ -266,6 +266,20 @@ class _ManageFileState extends State<ManageFile> with FutureTaskStateMixin {
                             KdbxVersion.V4,
                           ),
                           onPressed: asyncTaskCallback((progress) async {
+                            final confirmed =
+                                await DialogUtils.showConfirmDialog(
+                                  context: context,
+                                  params: ConfirmDialogParams(
+                                    title: loc.databaseKdbxUpgradeVersion(
+                                      KdbxVersion.V4,
+                                    ),
+                                    content:
+                                        'Upgrading to KDBX 4 (Argon2) is irreversible and older KDBX 3 clients will not be able to open this database. Continue?',
+                                  ),
+                                );
+                            if (!confirmed || !context.mounted) {
+                              return;
+                            }
                             _file!.kdbxFile.upgrade(KdbxVersion.V4.major);
                             await _kdbxBloc.saveFile(_file!.kdbxFile);
                             if (!context.mounted) {

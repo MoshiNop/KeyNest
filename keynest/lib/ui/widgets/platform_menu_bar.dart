@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:keynest/bloc/deps.dart';
+import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/ui/screens/about.dart';
 import 'package:keynest/ui/screens/preferences.dart';
@@ -20,6 +21,10 @@ class PlatformMenuBarWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final deps = context.read<Deps>();
+    final openedFiles = context.watch<OpenedKdbxFiles?>();
+    final hasOpenVaults =
+        (openedFiles?.isNotEmpty ?? false) ||
+        deps.kdbxBloc.openedFilesKdbx.isNotEmpty;
     final loc = AppLocalizations.of(context);
     return PlatformMenuBar(
       menus: [
@@ -42,9 +47,13 @@ class PlatformMenuBarWrapper extends StatelessWidget {
               members: <PlatformMenuItem>[
                 PlatformMenuItem(
                   label: loc.menuItemPreferences,
-                  onSelected: () {
-                    navigatorKey.currentState?.push(PreferencesScreen.route());
-                  },
+                  onSelected: hasOpenVaults
+                      ? () {
+                          navigatorKey.currentState?.push(
+                            PreferencesScreen.route(),
+                          );
+                        }
+                      : null,
                   shortcut: const SingleActivator(
                     LogicalKeyboardKey.comma,
                     meta: true,

@@ -700,19 +700,22 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
   }
 
   Color _qualityColor(CredentialMatchQuality? quality, bool isCarryover) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (isCarryover) {
-      return KeyNestPalette.accent;
+      return KeyNestPalette.primaryColorFor(isDark);
     }
     switch (quality) {
       case CredentialMatchQuality.host:
-        return KeyNestPalette.success;
+        return KeyNestPalette.successColorFor(isDark);
       case CredentialMatchQuality.registrableDomain:
-        return KeyNestPalette.primary;
+        return KeyNestPalette.primaryColorFor(isDark);
       case CredentialMatchQuality.application:
       case CredentialMatchQuality.associatedApplication:
-        return KeyNestPalette.accent;
+        return KeyNestPalette.primaryColorFor(isDark);
       case null:
-        return KeyNestPalette.textSecondaryLight;
+        return isDark
+            ? KeyNestPalette.textSecondaryDark
+            : KeyNestPalette.textSecondaryLight;
     }
   }
 

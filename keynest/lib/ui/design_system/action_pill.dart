@@ -218,12 +218,34 @@ class _KeyNestActionPillButtonState extends State<KeyNestActionPillButton> {
       button = KeyNestPressScale(
         onTap: _handleClick,
         enabled: widget.enabled,
-        child: button,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 44.0, minWidth: 44.0),
+          child: Center(widthFactor: 1.0, child: button),
+        ),
       );
     } else if (widget.enabled) {
-      button = GestureDetector(
-        onTap: _handleClick,
-        child: button,
+      button = Semantics(
+        button: true,
+        enabled: widget.enabled,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _handleClick,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                minHeight: 44.0,
+                minWidth: 44.0,
+              ),
+              child: Center(widthFactor: 1.0, child: button),
+            ),
+          ),
+        ),
+      );
+    } else {
+      button = ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44.0, minWidth: 44.0),
+        child: Center(widthFactor: 1.0, child: button),
       );
     }
 

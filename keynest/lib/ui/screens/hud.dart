@@ -16,7 +16,7 @@ class FullScreenHud extends StatelessWidget {
         onTap: () {
           Navigator.of(context).pop();
         },
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:keynest/theme.dart';
 
@@ -102,15 +104,29 @@ Future<T?> showAnchoredPopover<T>({
   if (centerOnAnchor) {
     top = null;
     bottom = null;
-    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(120.0, screenSize.height - 32.0);
+    final maxAllowedHeight = math.max(120.0, screenSize.height - 32.0);
+    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(120.0, maxAllowedHeight);
   } else if (placeBelow) {
-    top = (anchorRect.bottom + offset.dy).clamp(16.0, screenSize.height - 80.0);
+    final maxTop = math.max(16.0, screenSize.height - 80.0);
+    top = (anchorRect.bottom + offset.dy).clamp(16.0, maxTop);
     bottom = null;
-    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(120.0, spaceBelow.clamp(120.0, screenSize.height * 0.85));
+    final maxAllowedSpace = math.max(120.0, screenSize.height * 0.85);
+    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(
+      120.0,
+      spaceBelow.clamp(120.0, maxAllowedSpace),
+    );
   } else {
     top = null;
-    bottom = (screenSize.height - anchorRect.top + offset.dy).clamp(16.0, screenSize.height - 80.0);
-    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(120.0, spaceAbove.clamp(120.0, screenSize.height * 0.85));
+    final maxBottom = math.max(16.0, screenSize.height - 80.0);
+    bottom = (screenSize.height - anchorRect.top + offset.dy).clamp(
+      16.0,
+      maxBottom,
+    );
+    final maxAllowedSpace = math.max(120.0, screenSize.height * 0.85);
+    effectiveMaxHeight = (maxHeight ?? 480.0).clamp(
+      120.0,
+      spaceAbove.clamp(120.0, maxAllowedSpace),
+    );
   }
 
   final isDark = Theme.of(anchorContext).brightness == Brightness.dark;

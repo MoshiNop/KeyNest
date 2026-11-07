@@ -2,7 +2,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/ui/widgets/shortcut/keynest_intents.dart';
-import 'package:keynest/utils/constants.dart';
 
 typedef LabelProvider = String Function(AppLocalizations loc);
 
@@ -67,12 +66,28 @@ final defaultKeyNestShortcuts = [
     intent: CancelSearchFilterIntent(),
     label: (loc) => loc.shortcutCancelSearch,
   ),
-  KeyNestShortcut.all(
-    key: const CharacterActivator(CharConstants.questionMark),
+  KeyNestShortcut.def(
+    key: LogicalKeyboardKey.slash,
     intent: KeyboardShortcutHelpIntent(),
     label: (loc) => loc.shortcutShortcutHelp,
   ),
 ];
+
+bool isEditableTextFocused([BuildContext? fallbackContext]) {
+  final focusContext =
+      FocusManager.instance.primaryFocus?.context ?? fallbackContext;
+  if (focusContext == null) {
+    return false;
+  }
+  if (focusContext.widget is EditableText) {
+    return true;
+  }
+  if (focusContext is StatefulElement &&
+      focusContext.state is EditableTextState) {
+    return true;
+  }
+  return focusContext.findAncestorStateOfType<EditableTextState>() != null;
+}
 
 class KeyNestShortcut {
   const KeyNestShortcut({

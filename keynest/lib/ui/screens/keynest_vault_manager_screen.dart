@@ -1230,10 +1230,10 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.security_rounded,
                         size: 16,
-                        color: KeyNestTokens.primary,
+                        color: KeyNestTokens.primaryColor(ctx),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
@@ -2119,10 +2119,13 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         await kdbxBloc.saveFile(kdbxFile);
 
         if (mounted) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Permanently deleted "$folderName".'),
-              backgroundColor: KeyNestTokens.primary,
+              backgroundColor: isDark
+                  ? KeyNestTokens.darkPrimaryContainer
+                  : KeyNestTokens.primary,
               behavior: SnackBarBehavior.floating,
             ),
           );

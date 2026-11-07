@@ -2713,19 +2713,19 @@ class _PasswordListContentState extends State<PasswordListContent>
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: KeyNestPalette.success.withValues(
-                                  alpha: 0.15,
-                                ),
+                                color: KeyNestPalette.successColorFor(
+                                  isDark,
+                                ).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 _autofillMatchedByUrl
                                     ? 'Domain Matched'
                                     : 'Active',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: KeyNestPalette.success,
+                                  color: KeyNestPalette.successColorFor(isDark),
                                 ),
                               ),
                             ),
@@ -3503,9 +3503,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
         resizeDuration: null,
         background: Container(
           alignment: Alignment.centerLeft,
-          color: theme.brightness == Brightness.light
-              ? Colors.lightBlueAccent
-              : Colors.blueAccent,
+          color: theme.brightness == Brightness.dark
+              ? KeyNestPalette.primaryDark.withValues(alpha: 0.25)
+              : KeyNestPalette.primary.withValues(alpha: 0.15),
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3518,9 +3518,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
         ),
         secondaryBackground: Container(
           alignment: Alignment.centerRight,
-          color: theme.brightness == Brightness.light
-              ? Colors.limeAccent
-              : Colors.brown,
+          color: theme.brightness == Brightness.dark
+              ? KeyNestPalette.surfaceContainerDark
+              : KeyNestPalette.primaryContainerLight,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3567,7 +3567,9 @@ class PasswordEntryListTileWrapper extends StatelessWidget {
                 : (selectedEntry == entry.entry
                       ? BoxDecoration(
                           color: KeyNestPlatform.isDesktopOrWeb
-                              ? const Color(0xFF0A85EA)
+                              ? (theme.brightness == Brightness.dark
+                                    ? KeyNestPalette.primaryContainerDark
+                                    : KeyNestPalette.primary)
                               : (theme.listTileTheme.selectedTileColor ??
                                   (theme.brightness == Brightness.dark
                                       ? KeyNestPalette.surfaceContainerDark

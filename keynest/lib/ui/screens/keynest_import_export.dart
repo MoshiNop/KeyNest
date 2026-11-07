@@ -674,10 +674,13 @@ class _KeyNestImportExportScreenState extends State<KeyNestImportExportScreen> {
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          content: Text(text),
+          content: Text(
+            text,
+            style: const TextStyle(color: Colors.white),
+          ),
           duration: const Duration(milliseconds: 1800),
           backgroundColor: isError
-              ? KeyNestPalette.error
+              ? (isDark ? KeyNestPalette.errorContainerDark : KeyNestPalette.error)
               : (isDark
                     ? KeyNestPalette.successContainerDark
                     : KeyNestPalette.success),

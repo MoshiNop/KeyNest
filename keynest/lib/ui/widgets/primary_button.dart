@@ -35,6 +35,8 @@ class PrimaryButton extends StatelessWidget {
 
     return KeyNestPressScale(
       onTap: onPressed,
+      enabled: onPressed != null,
+      animateOnly: true,
       child: Theme(
         data: _createMainButtonTheme(
           theme,

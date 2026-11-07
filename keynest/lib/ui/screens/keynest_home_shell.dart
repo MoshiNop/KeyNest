@@ -18,7 +18,6 @@ import 'package:keynest/ui/screens/records_tab.dart';
 import 'package:keynest/ui/widgets/keynest_header.dart';
 import 'package:keynest/ui/widgets/keynest_nav_bar.dart';
 import 'package:keynest/ui/widgets/keynest_tab_navigation_handler.dart';
-import 'package:keynest/utils/entry_totp_helper.dart';
 import 'package:keynest/utils/item_type_helper.dart';
 import 'package:provider/provider.dart';
 
@@ -60,6 +59,9 @@ class KeyNestHomeShell extends StatefulWidget {
   static Widget phoneHomeShell(BuildContext context) {
     return KeyNestHomeShell(
       onEntrySelected: (entry, type) {
+        if (type == EntrySelectionType.passiveHighlight) {
+          return;
+        }
         openEntry(
           context,
           entry,
@@ -147,120 +149,27 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
           _animateToTab(targetTab);
         }
       }
-      _tabCounts.clear();
-      _isComputingTabCounts = false;
       setState(() {});
     }
   }
 
   void _updateTabCount(int tabIndex, int count) {
-    if (_tabCounts[tabIndex] != count) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _tabCounts[tabIndex] != count) {
-          setState(() {
-            _tabCounts[tabIndex] = count;
-          });
-        }
-      });
-    }
-  }
-
-  void _computeAllBaselineTabCounts(KdbxBloc kdbxBloc) {
-    final scope = KeyNestVaultScope.instance;
-    final currentFolder = scope.getCurrentFolder(kdbxBloc);
-    final isInsideTrash = KeyNestItemTypeHelper.isTrashOrRecycleBin(
-      currentFolder,
-    );
-    final candidateEntries = scope.getScopedEntries(
-      kdbxBloc,
-      directOnlyForFolder: false,
-    );
-
-    int secrets = 0;
-    int records = 0;
-    int cards = 0;
-    int notes = 0;
-    int tfas = 0;
-
-    final favOnly = scope.favoritesOnly;
-    final selectedCat = scope.selectedCategory?.toLowerCase();
-    for (final e in candidateEntries) {
-      // candidateEntries is already filtered by excludeTrash: !isInsideTrash
-      if (isInsideTrash && !KeyNestItemTypeHelper.isEntryInTrash(e)) {
-        continue;
-      }
-      if (favOnly) {
-        final isFav =
-            e.getString(KdbxKey('is_favorite'))?.getText() == 'true' ||
-            e.getString(KdbxKey('IsFavorite'))?.getText() == 'true';
-        if (!isFav) {
-          continue;
-        }
-      }
-
-      final type = KeyNestItemTypeHelper.getItemType(e);
-      if (type == KeyNestItemType.record) {
-        records++;
-      } else if (type == KeyNestItemType.card) {
-        cards++;
-      } else if (type == KeyNestItemType.note) {
-        notes++;
-      } else {
-        if (selectedCat != null) {
-          if (KeyNestItemTypeHelper.getCategory(e).toLowerCase() ==
-              selectedCat) {
-            secrets++;
-          }
-        } else {
-          secrets++;
-        }
-      }
-
-      if (EntryTotpHelper.hasTotp(e)) {
-        tfas++;
-      }
-    }
-
-    _tabCounts[0] = secrets;
-    _tabCounts[1] = records;
-    _tabCounts[2] = cards;
-    _tabCounts[3] = notes;
-    _tabCounts[4] = tfas;
-  }
-
-  bool _isComputingTabCounts = false;
-
-  int _getTabCount(int tabIndex, KdbxBloc kdbxBloc) {
-    if (!_tabCounts.containsKey(tabIndex)) {
-      if (!_isComputingTabCounts) {
-        _isComputingTabCounts = true;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _computeAllBaselineTabCounts(kdbxBloc);
-            _isComputingTabCounts = false;
-            if (mounted) {
-              setState(() {});
-            }
-          }
-        });
-      }
-    }
-    return _tabCounts[tabIndex] ?? 0;
+    _tabCounts[tabIndex] = count;
   }
 
   void _handleEntrySelected(KdbxEntry entry, EntrySelectionType type) {
+    if (widget.onEntrySelected != null) {
+      widget.onEntrySelected!(entry, type);
+      return;
+    }
     if (type == EntrySelectionType.passiveHighlight) {
       return;
     }
-    if (widget.onEntrySelected != null) {
-      widget.onEntrySelected!(entry, type);
-    } else {
-      KeyNestHomeShell.openEntry(
-        context,
-        entry,
-        isNew: type == EntrySelectionType.newEntry,
-      );
-    }
+    KeyNestHomeShell.openEntry(
+      context,
+      entry,
+      isNew: type == EntrySelectionType.newEntry,
+    );
   }
 
   Future<void> _onFabPressed() async {
@@ -606,14 +515,8 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
       return;
     }
 
-    // (4) Switch from Cards/Notes/Authenticator to Records, and from Records to Secrets
-    if (_currentTabIndex == 2 ||
-        _currentTabIndex == 3 ||
-        _currentTabIndex == 4) {
-      _switchToTab(1); // Records
-      return;
-    }
-    if (_currentTabIndex == 1) {
+    // (4) Switch from any secondary tab back to Secrets (home tab 0)
+    if (_currentTabIndex != 0) {
       _switchToTab(0); // Secrets
       return;
     }
@@ -711,6 +614,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             _activatedTabs.contains(2)
                                 ? CardsTab(
                                     selectedEntry: widget.selectedEntry,
+                                    onAddNewItem: widget.onAddNewItem,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(
@@ -731,6 +635,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                             _activatedTabs.contains(3)
                                 ? NotesTab(
                                     selectedEntry: widget.selectedEntry,
+                                    onAddNewItem: widget.onAddNewItem,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(
@@ -752,6 +657,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
                                 ? AuthenticatorTab(
                                     isActive: _currentTabIndex == 4,
                                     selectedEntry: widget.selectedEntry,
+                                    onAddNewItem: widget.onAddNewItem,
                                     onEntrySelected:
                                         widget.onEntrySelected != null
                                         ? (entry) => _handleEntrySelected(
@@ -832,13 +738,7 @@ class _KeyNestHomeShellState extends State<KeyNestHomeShell>
             ? null
             : KeyNestBottomNav(
                 currentIndex: _currentTabIndex,
-                counts: {
-                  0: _getTabCount(0, kdbxBloc),
-                  1: _getTabCount(1, kdbxBloc),
-                  2: _getTabCount(2, kdbxBloc),
-                  3: _getTabCount(3, kdbxBloc),
-                  4: _getTabCount(4, kdbxBloc),
-                },
+                counts: _tabCounts,
                 onTap: _switchToTab,
               ),
       ),

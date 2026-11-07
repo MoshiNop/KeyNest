@@ -104,15 +104,21 @@ class _KeyNestDuplicatesScreenState extends State<KeyNestDuplicatesScreen> {
   }
 
   void _showSnack(String message, {bool isError = false}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          content: Text(message),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white),
+          ),
           duration: const Duration(milliseconds: 2000),
           backgroundColor: isError
-              ? KeyNestPalette.error
-              : KeyNestPalette.success,
+              ? (isDark ? KeyNestPalette.errorContainerDark : KeyNestPalette.error)
+              : (isDark
+                    ? KeyNestPalette.successContainerDark
+                    : KeyNestPalette.success),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),

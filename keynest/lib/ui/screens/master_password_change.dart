@@ -861,10 +861,10 @@ class _MasterPasswordChangeScreenState
                           _newKeyFileBytes == null) ...[
                         Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.vpn_key_rounded,
                               size: 20,
-                              color: KeyNestPalette.primary,
+                              color: KeyNestPalette.primaryColorFor(isDark),
                             ),
                             const SizedBox(width: 10),
                             const Expanded(
@@ -884,7 +884,9 @@ class _MasterPasswordChangeScreenState
                               onPressed: () =>
                                   setState(() => _removeKeyFile = true),
                               style: TextButton.styleFrom(
-                                foregroundColor: KeyNestPalette.error,
+                                foregroundColor: KeyNestPalette.errorColorFor(
+                                  isDark,
+                                ),
                               ),
                               child: const Text('Remove'),
                             ),
@@ -893,10 +895,10 @@ class _MasterPasswordChangeScreenState
                       ] else if (_removeKeyFile) ...[
                         Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.remove_circle_outline_rounded,
                               size: 20,
-                              color: KeyNestPalette.error,
+                              color: KeyNestPalette.errorColorFor(isDark),
                             ),
                             const SizedBox(width: 10),
                             const Expanded(
@@ -918,10 +920,10 @@ class _MasterPasswordChangeScreenState
                       ] else if (_newKeyFileBytes != null) ...[
                         Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.check_circle_rounded,
                               size: 20,
-                              color: KeyNestPalette.primary,
+                              color: KeyNestPalette.primaryColorFor(isDark),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -997,18 +999,22 @@ class _MasterPasswordChangeScreenState
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: KeyNestPalette.warning.withValues(alpha: 0.1),
+                    color: KeyNestPalette.warningColorFor(
+                      isDark,
+                    ).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: KeyNestPalette.warning.withValues(alpha: 0.3),
+                      color: KeyNestPalette.warningColorFor(
+                        isDark,
+                      ).withValues(alpha: 0.3),
                     ),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.warning_amber_rounded,
-                        color: KeyNestPalette.warning,
+                        color: KeyNestPalette.warningColorFor(isDark),
                         size: 20,
                       ),
                       const SizedBox(width: 10),
@@ -1150,13 +1156,15 @@ class _MasterPasswordChangeScreenState
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: KeyNestPalette.success.withValues(alpha: 0.15),
+                color: KeyNestPalette.successColorFor(
+                  isDark,
+                ).withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
+              child: Text(
                 'Active',
                 style: TextStyle(
-                  color: KeyNestPalette.success,
+                  color: KeyNestPalette.successColorFor(isDark),
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
                 ),

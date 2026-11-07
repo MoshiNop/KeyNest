@@ -773,11 +773,14 @@ class _KeyNestCloudVaultBrowserScreenState
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(KeyNestTokens.radiusDialog),
               ),
-              title: const Row(
+              title: Row(
                 children: [
-                  Icon(Icons.download_rounded, color: KeyNestTokens.primary),
-                  SizedBox(width: 8),
-                  Text('Import to Local'),
+                  Icon(
+                    Icons.download_rounded,
+                    color: KeyNestTokens.primaryColorFor(isDark),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Import to Local'),
                 ],
               ),
               content: SingleChildScrollView(

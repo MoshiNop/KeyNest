@@ -116,6 +116,7 @@ class KeyNestCard extends StatelessWidget {
       content = KeyNestPressScale(
         onTap: onTap,
         onLongPress: onLongPress,
+        animateOnly: true,
         child: content,
       );
     }

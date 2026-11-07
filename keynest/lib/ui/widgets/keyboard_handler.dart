@@ -145,7 +145,7 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
       ),
     };
     return Shortcuts.manager(
-      manager: ShortcutManager(shortcuts: shortcuts),
+      manager: KeyNestShortcutManager(shortcuts: shortcuts),
       child: Provider<KeyboardShortcutEvents>.value(
         value: _keyboardShortcutEvents,
         child: Actions(
@@ -171,6 +171,35 @@ class _KeyboardHandlerState extends State<KeyboardHandler> {
     _keyboardShortcutEvents.dispose();
     _disposeSystemWideShortcuts();
     super.dispose();
+  }
+}
+
+class KeyNestShortcutManager extends ShortcutManager {
+  KeyNestShortcutManager({super.shortcuts});
+
+  static bool _shouldDeferToEditableText(Intent intent) {
+    return intent is MoveUpIntent ||
+        intent is MoveDownIntent ||
+        intent is CopyPasswordIntent ||
+        intent is CopyUsernameIntent ||
+        intent is CopyTotpIntent ||
+        intent is CopyUrlIntent ||
+        intent is OpenUrlIntent ||
+        intent is KeyboardShortcutHelpIntent;
+  }
+
+  @override
+  KeyEventResult handleKeypress(BuildContext context, KeyEvent event) {
+    if (isEditableTextFocused(context)) {
+      for (final entry in shortcuts.entries) {
+        if (entry.key.accepts(event, HardwareKeyboard.instance)) {
+          if (_shouldDeferToEditableText(entry.value)) {
+            return KeyEventResult.ignored;
+          }
+        }
+      }
+    }
+    return super.handleKeypress(context, event);
   }
 }
 

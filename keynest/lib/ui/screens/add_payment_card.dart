@@ -20,22 +20,27 @@ class AddPaymentCardScreen extends StatefulWidget {
     this.existingEntry,
     this.initialFile,
     this.initialGroup,
+    this.onSaved,
   });
 
   final KdbxEntry? existingEntry;
   final KdbxFile? initialFile;
   final KdbxGroup? initialGroup;
+  final ValueChanged<KdbxEntry>? onSaved;
 
   static Route<void> route({
     KdbxEntry? existingEntry,
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
+    ValueChanged<KdbxEntry>? onSaved,
   }) => KeyNestPushPageRoute(
     settings: const RouteSettings(name: '/addCard'),
     builder: (context) => AddPaymentCardScreen(
+      key: existingEntry != null ? ValueKey(existingEntry.uuid) : null,
       existingEntry: existingEntry,
       initialFile: initialFile,
       initialGroup: initialGroup,
+      onSaved: onSaved,
     ),
   );
 
@@ -76,7 +81,8 @@ class AddPaymentCardScreen extends StatefulWidget {
   State<AddPaymentCardScreen> createState() => _AddPaymentCardScreenState();
 }
 
-class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
+class _AddPaymentCardScreenState extends State<AddPaymentCardScreen>
+    implements KeyNestDetailPaneGuard {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _numberController = TextEditingController();
@@ -246,6 +252,12 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
       setState(() => _isDirty = true);
     }
   }
+
+  @override
+  bool get hasUnsavedChanges => _isDirty && !_didCompleteSave;
+
+  @override
+  Future<bool> confirmDiscardChanges() => _confirmDiscardIfNeeded();
 
   Future<bool> _confirmDiscardIfNeeded() async {
     if (!_isDirty || _didCompleteSave) {
@@ -597,7 +609,11 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
               duration: Duration(milliseconds: 1800),
             ),
           );
-        Navigator.of(context).pop();
+        if (widget.existingEntry == null && widget.onSaved != null) {
+          widget.onSaved!(entry);
+        } else {
+          Navigator.of(context).pop();
+        }
       }
     } catch (e) {
       if (historyClone != null && widget.existingEntry != null) {

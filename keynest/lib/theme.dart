@@ -52,9 +52,33 @@ class KeyNestPalette {
   static const Color warningContainerDark = KeyNestTokens.darkWarningContainer;
   static const Color warningContainer = KeyNestTokens.lightWarningContainer;
   static const Color error = KeyNestTokens.lightError;
+  static const Color errorDark = KeyNestTokens.darkError;
   static const Color errorContainer = KeyNestTokens.lightErrorContainer;
+  static const Color errorContainerDark = KeyNestTokens.darkErrorContainer;
   static const Color info = KeyNestTokens.brandBlue;
   static const Color infoContainer = KeyNestTokens.lightPrimaryContainer;
+
+  /// Theme-aware primary foreground color providing high contrast in light and dark modes.
+  static Color primaryColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? KeyNestTokens.darkPrimary
+        : KeyNestTokens.lightPrimary;
+  }
+
+  static Color primaryColorFor(bool isDark) {
+    return isDark ? KeyNestTokens.darkPrimary : KeyNestTokens.lightPrimary;
+  }
+
+  /// Theme-aware error foreground color providing high contrast in light and dark modes.
+  static Color errorColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? KeyNestTokens.darkError
+        : KeyNestTokens.lightError;
+  }
+
+  static Color errorColorFor(bool isDark) {
+    return isDark ? KeyNestTokens.darkError : KeyNestTokens.lightError;
+  }
 
   /// Theme-aware success foreground color providing high contrast in light and dark modes.
   static Color successColor(BuildContext context) {
@@ -105,7 +129,7 @@ class KeyNestTheme {
   @NonNls
   static const monoFontFamily = 'JetBrainsMono';
 
-  static const int _primaryColorValue = 0xFF4D65D9;
+  static const int _primaryColorValue = 0xFF384476;
   static const Color primaryColor = KeyNestPalette.primary;
   static const Color linkColor = primaryColor;
   static const MaterialColor primarySwatch = MaterialColor(
@@ -116,11 +140,11 @@ class KeyNestTheme {
       200: Color(0xFFC3CDFE),
       300: Color(0xFFA1B2FD),
       400: Color(0xFF778DF0),
-      500: Color(0xFF4D65D9),
-      600: Color(0xFF3E54C4),
-      700: Color(0xFF3244AF),
-      800: Color(0xFF263595),
-      900: Color(0xFF1A267A),
+      500: Color(0xFF384476),
+      600: Color(0xFF323D6A),
+      700: Color(0xFF2B355E),
+      800: Color(0xFF232B4D),
+      900: Color(0xFF1A203B),
     },
   );
 
@@ -244,6 +268,7 @@ ThemeData createTheme() {
   return _customize(
     ThemeData(
       useMaterial3: true,
+      fontFamily: nonNls('Inter'),
       colorScheme: colorScheme,
       primarySwatch: KeyNestTheme.primarySwatch,
       primaryColor: KeyNestPalette.primary,
@@ -498,12 +523,15 @@ ThemeData createDarkTheme() {
     onSurface: KeyNestPalette.textPrimaryDark,
     outline: KeyNestPalette.cardBorderDark,
     outlineVariant: KeyNestPalette.cardBorderDark,
-    error: KeyNestPalette.error,
-    onError: Colors.white,
+    error: KeyNestPalette.errorDark,
+    onError: KeyNestTokens.darkOnError,
+    errorContainer: KeyNestPalette.errorContainerDark,
+    onErrorContainer: KeyNestTokens.darkOnErrorContainer,
   );
   return _customize(
     ThemeData(
       useMaterial3: true,
+      fontFamily: nonNls('Inter'),
       colorScheme: colorScheme,
       primarySwatch: KeyNestTheme.primarySwatch,
       primaryColor: KeyNestPalette.primaryDark,

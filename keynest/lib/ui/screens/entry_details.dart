@@ -45,6 +45,7 @@ import 'package:keynest/ui/widgets/keynest_totp_tile.dart';
 import 'package:keynest/ui/widgets/link_button.dart';
 import 'package:keynest/ui/widgets/primary_button.dart';
 import 'package:keynest/ui/widgets/shortcut/keynest_intents.dart';
+import 'package:keynest/ui/widgets/shortcut/shortcuts.dart';
 import 'package:keynest/utils/base32utils.dart';
 import 'package:keynest/utils/constants.dart';
 import 'package:keynest/utils/dialog_utils.dart';
@@ -84,6 +85,7 @@ class EntryDetailsScreen extends StatefulWidget {
   }) => KeyNestPageRoute<bool>(
     settings: const RouteSettings(name: '/entry'),
     builder: (context) => EntryDetailsScreen(
+      key: ValueKey(entry.uuid),
       entry: entry,
       isNew: isNew,
       isEditing: isEditing,
@@ -256,12 +258,36 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
     with
         TaskStateMixin<EntryDetailsScreen>,
         StreamSubscriberMixin<EntryDetailsScreen>,
-        KdbxObjectSavableStateMixin<EntryDetailsScreen> {
+        KdbxObjectSavableStateMixin<EntryDetailsScreen>
+    implements KeyNestDetailPaneGuard {
   bool _isSaved = false;
   late bool _isNew;
   late bool _isEditing;
   int _viewVersion = 0;
   _EntrySnapshot? _entrySnapshot;
+
+  @override
+  bool get hasUnsavedChanges =>
+      _isEditing &&
+      !_isSaved &&
+      (isFormDirty || (_entrySnapshot?.hasChangesFrom(widget.entry) ?? false));
+
+  @override
+  Future<bool> confirmDiscardChanges() async {
+    if (!hasUnsavedChanges || !mounted) {
+      return true;
+    }
+    final loc = AppLocalizations.of(context);
+    final discard = await DialogUtils.showConfirmDialog(
+      context: context,
+      params: ConfirmDialogParams(
+        title: loc.unsavedChangesWarningTitle,
+        content: loc.unsavedChangesWarningBody,
+        positiveButtonText: loc.unsavedChangesDiscardActionLabel,
+      ),
+    );
+    return discard;
+  }
 
   @override
   void initState() {
@@ -341,6 +367,10 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
 
   @override
   void dispose() {
+    if (_isEditing && !_isSaved && !_isNew) {
+      _entrySnapshot?.restore(widget.entry);
+      _entrySnapshot = null;
+    }
     _cleanupUnsavedEntry();
     super.dispose();
   }
@@ -984,8 +1014,15 @@ class _EntryDetailsState extends State<EntryDetails>
           final context = FocusManager.instance.primaryFocus?.context;
           if (context != null) {
             _logger.fine('context: $context');
-            if (context.widget is EditableText) {
-              final ctrl = (context.widget as EditableText).controller;
+            EditableTextState? editableState;
+            if (context is StatefulElement &&
+                context.state is EditableTextState) {
+              editableState = context.state as EditableTextState;
+            }
+            editableState ??= context
+                .findAncestorStateOfType<EditableTextState>();
+            if (editableState != null) {
+              final ctrl = editableState.widget.controller;
               if (!ctrl.selection.isCollapsed && ctrl.selection.isNormalized) {
                 final data = ctrl.selection.textInside(ctrl.text);
                 if (data.isNotEmpty) {
@@ -1006,7 +1043,7 @@ class _EntryDetailsState extends State<EntryDetails>
                       label: 'Selection',
                     );
                   }
-                  return;
+                  return null;
                 }
               }
             }
@@ -1015,10 +1052,10 @@ class _EntryDetailsState extends State<EntryDetails>
                 .findAncestorStateOfType<_EntryFieldState>();
             if (entryFieldState != null) {
               entryFieldState.copyValue();
-              return;
+              return null;
             }
-            if (widget is EditableText) {
-              return;
+            if (editableState != null || isEditableTextFocused(context)) {
+              return null;
             }
           }
 
@@ -1924,7 +1961,13 @@ class EntryMetaInfo extends StatelessWidget {
             ...?onTap == null
                 ? null
                 : [
-                    const Icon(Icons.edit, size: 16, color: Colors.black45),
+                    Icon(
+                      Icons.edit,
+                      size: 16,
+                      color: theme.brightness == Brightness.dark
+                          ? KeyNestPalette.textSecondaryDark
+                          : KeyNestPalette.textSecondaryLight,
+                    ),
                     const SizedBox(width: 8),
                   ],
             Expanded(
@@ -2151,9 +2194,9 @@ class _EntryFieldState extends State<EntryField>
       key: ValueKey(widget.fieldKey),
       background: Container(
         alignment: Alignment.centerLeft,
-        color: theme.brightness == Brightness.light
-            ? Colors.lightBlueAccent
-            : Colors.blueAccent,
+        color: theme.brightness == Brightness.dark
+            ? KeyNestPalette.primaryDark.withValues(alpha: 0.25)
+            : KeyNestPalette.primary.withValues(alpha: 0.15),
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,

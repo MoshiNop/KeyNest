@@ -478,13 +478,17 @@ class _SelectFileWidgetState extends State<SelectFileWidget>
                             KeyNestCompactIconTile(
                               size: 44,
                               cornerRadius: 12,
-                              containerColor: KeyNestPalette.success.withValues(
-                                alpha: 0.12,
+                              containerColor: KeyNestPalette.successColorFor(
+                                theme.brightness == Brightness.dark,
+                              ).withValues(alpha: 0.12),
+                              contentColor: KeyNestPalette.successColorFor(
+                                theme.brightness == Brightness.dark,
                               ),
-                              contentColor: KeyNestPalette.success,
-                              child: const Icon(
+                              child: Icon(
                                 Icons.add_circle_outline_rounded,
-                                color: KeyNestPalette.success,
+                                color: KeyNestPalette.successColorFor(
+                                  theme.brightness == Brightness.dark,
+                                ),
                                 size: 24,
                               ),
                             ),

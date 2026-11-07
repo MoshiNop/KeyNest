@@ -20,12 +20,14 @@ class NotesTab extends StatefulWidget {
   const NotesTab({
     super.key,
     this.onEntrySelected,
+    this.onAddNewItem,
     this.onCountChanged,
     this.onRegisterNavigationHandler,
     this.selectedEntry,
   });
 
   final void Function(KdbxEntry entry)? onEntrySelected;
+  final VoidCallback? onAddNewItem;
   final void Function(int count)? onCountChanged;
   final ValueChanged<KeyNestTabNavigationHandler>? onRegisterNavigationHandler;
   final KdbxEntry? selectedEntry;
@@ -236,26 +238,25 @@ class _NotesTabState extends State<NotesTab> with WidgetsBindingObserver {
                     type: EmptyStateType.notes,
                     actionLabel: 'Add Note',
                     onAction: () {
-                      if (KeyNestPlatform.isDesktopOrWeb &&
-                          widget.onEntrySelected != null) {
-                        final newEntry = kdbxBloc.createEntry(
-                          file: scope.getSelectedVault(kdbxBloc) ??
-                              kdbxBloc.openedFilesKdbx.firstOrNull,
-                          group: scope.getCurrentFolder(
-                            kdbxBloc,
-                            KeyNestTab.notes,
-                          ),
-                        );
-                        KeyNestItemTypeHelper.setItemType(
-                          newEntry,
-                          KeyNestItemType.note,
-                        );
-                        widget.onEntrySelected!(newEntry);
+                      if (widget.onAddNewItem != null) {
+                        widget.onAddNewItem!();
                         return;
                       }
-                      Navigator.of(
-                        context,
-                      ).push(NoteDetailsScreen.route(isEditing: true));
+                      final activeVault =
+                          scope.getSelectedVault(kdbxBloc) ??
+                          kdbxBloc.openedFilesKdbx.firstOrNull;
+                      final activeFolder = scope.getCurrentFolder(
+                        kdbxBloc,
+                        KeyNestTab.notes,
+                      );
+                      Navigator.of(context).push(
+                        NoteDetailsScreen.route(
+                          isEditing: true,
+                          initialFile: activeVault,
+                          initialGroup: activeFolder,
+                          onSaved: widget.onEntrySelected,
+                        ),
+                      );
                     },
                   )
                 : displayedNoteEntries.isEmpty

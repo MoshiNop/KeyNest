@@ -459,8 +459,8 @@ class _KeyNestVaultHealthScreenState extends State<KeyNestVaultHealthScreen> {
           count: report.weakPasswords.length,
           icon: Icons.shield_outlined,
           badgeColor: report.weakPasswords.isEmpty
-              ? KeyNestPalette.success
-              : KeyNestPalette.error,
+              ? KeyNestPalette.successColorFor(isDark)
+              : KeyNestPalette.errorColorFor(isDark),
           isExpanded: _expandedSections.contains('weak'),
           onToggle: () => _toggleSection('weak'),
           children: report.weakPasswords.map((item) {

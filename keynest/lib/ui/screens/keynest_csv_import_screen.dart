@@ -183,9 +183,12 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
       ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
-          content: Text(message),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white),
+          ),
           backgroundColor: isError
-              ? KeyNestPalette.error
+              ? (isDark ? KeyNestPalette.errorContainerDark : KeyNestPalette.error)
               : (isDark
                     ? KeyNestPalette.successContainerDark
                     : KeyNestPalette.success),
@@ -919,6 +922,7 @@ class _KeyNestCsvImportScreenState extends State<KeyNestCsvImportScreen> {
           if (mapping.isCustomField) ...[
             const SizedBox(height: 10),
             TextFormField(
+              key: ValueKey('custom_field_${mapping.sourceColumnIndex}'),
               initialValue: mapping.customFieldName ?? mapping.sourceColumnName,
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(

@@ -506,7 +506,9 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
               duration: const Duration(milliseconds: 100),
               builder: (context, value, child) {
                 return MediaQuery(
-                  data: mq.copyWith(textScaler: TextScaler.linear(value)),
+                  data: mq.copyWith(
+                    textScaler: TextScaler.linear(mq.textScaler.scale(value)),
+                  ),
                   child: ret,
                 );
               },

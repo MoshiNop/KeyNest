@@ -7,6 +7,7 @@ class MainFlutterWindow: NSWindow {
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
+    self.minSize = NSSize(width: 800, height: 600)
     // Prevent screen recorders and window sharing from capturing vault contents.
     self.sharingType = .none
 

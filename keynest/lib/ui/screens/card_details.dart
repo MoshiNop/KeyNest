@@ -22,7 +22,10 @@ class CardDetailsScreen extends StatefulWidget {
 
   static Route<void> route({required KdbxEntry entry}) => KeyNestPageRoute(
     settings: const RouteSettings(name: '/cardDetails'),
-    builder: (context) => CardDetailsScreen(entry: entry),
+    builder: (context) => CardDetailsScreen(
+      key: ValueKey(entry.uuid),
+      entry: entry,
+    ),
   );
 
   final KdbxEntry entry;

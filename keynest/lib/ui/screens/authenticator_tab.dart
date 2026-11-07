@@ -36,6 +36,7 @@ class AuthenticatorTab extends StatefulWidget {
     this.onRegisterNavigationHandler,
     this.selectedEntry,
     this.onEntrySelected,
+    this.onAddNewItem,
   });
 
   final bool? isActive;
@@ -43,11 +44,13 @@ class AuthenticatorTab extends StatefulWidget {
   final ValueChanged<KeyNestTabNavigationHandler>? onRegisterNavigationHandler;
   final KdbxEntry? selectedEntry;
   final ValueChanged<KdbxEntry>? onEntrySelected;
+  final VoidCallback? onAddNewItem;
 
   static Future<void> showAddOptions(
     BuildContext context, {
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
+    ValueChanged<KdbxEntry>? onSaved,
   }) async {
     final option = await KeyNestBottomSheet.show<String>(
       context: context,
@@ -219,6 +222,7 @@ class AuthenticatorTab extends StatefulWidget {
             initialFile: initialFile,
             initialGroup: initialGroup,
             initialData: parsedData,
+            onSaved: onSaved,
           ),
         );
       }
@@ -227,6 +231,7 @@ class AuthenticatorTab extends StatefulWidget {
         AddTwoFactorScreen.route(
           initialFile: initialFile,
           initialGroup: initialGroup,
+          onSaved: onSaved,
         ),
       );
     }
@@ -377,19 +382,22 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
   }
 
   Future<void> _onAddTotp() async {
-    if (KeyNestPlatform.isDesktopOrWeb && widget.onEntrySelected != null) {
-      final kdbxBloc = context.read<KdbxBloc>();
-      final scope = KeyNestVaultScope.instance;
-      final newEntry = kdbxBloc.createEntry(
-        file: scope.getSelectedVault(kdbxBloc) ??
-            kdbxBloc.openedFilesKdbx.firstOrNull,
-        group: scope.getCurrentFolder(kdbxBloc, KeyNestTab.twoFactor),
-      );
-      KeyNestItemTypeHelper.setItemType(newEntry, KeyNestItemType.twoFactor);
-      widget.onEntrySelected!(newEntry);
+    if (widget.onAddNewItem != null) {
+      widget.onAddNewItem!();
       return;
     }
-    await AuthenticatorTab.showAddOptions(context);
+    final kdbxBloc = context.read<KdbxBloc>();
+    final scope = KeyNestVaultScope.instance;
+    final activeVault =
+        scope.getSelectedVault(kdbxBloc) ??
+        kdbxBloc.openedFilesKdbx.firstOrNull;
+    final activeFolder = scope.getCurrentFolder(kdbxBloc, KeyNestTab.twoFactor);
+    await AuthenticatorTab.showAddOptions(
+      context,
+      initialFile: activeVault,
+      initialGroup: activeFolder,
+      onSaved: widget.onEntrySelected,
+    );
   }
 
   @override
@@ -733,6 +741,9 @@ class _KeyNestTotpCardItemState extends State<KeyNestTotpCardItem> {
           child: KeyNestCard(
             isSelected: widget.isSelected,
             onTap: () {
+              if (KeyNestPlatform.isDesktopOrWeb && widget.onSelect != null) {
+                widget.onSelect!();
+              }
               final cleanCode = _cachedCode.replaceAll(' ', '');
               if (cleanCode.isNotEmpty &&
                   cleanCode != '------' &&

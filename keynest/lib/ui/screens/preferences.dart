@@ -497,6 +497,17 @@ class _PreferencesBodyState extends State<PreferencesBody>
               subtitle: loc.clearQuickUnlockSubtitle,
               icon: Icons.fingerprint_rounded,
               onTap: () async {
+                final confirmed = await DialogUtils.showConfirmDialog(
+                  context: context,
+                  params: ConfirmDialogParams(
+                    title: loc.clearQuickUnlock,
+                    content:
+                        'Are you sure you want to clear Quick Unlock credentials and close all open vaults?',
+                  ),
+                );
+                if (!confirmed || !context.mounted) {
+                  return;
+                }
                 final kdbxBloc = _kdbxBloc ?? context.read<KdbxBloc>();
                 await kdbxBloc.closeAllFiles(clearQuickUnlock: true);
                 if (context.mounted) {
@@ -1595,6 +1606,17 @@ class _PreferencesBodyState extends State<PreferencesBody>
                   tooltip: 'Disconnect $name',
                   icon: const Icon(Icons.link_off_rounded, size: 20),
                   onPressed: () async {
+                    final confirmed = await DialogUtils.showConfirmDialog(
+                      context: context,
+                      params: ConfirmDialogParams(
+                        title: 'Disconnect $name',
+                        content:
+                            'Are you sure you want to disconnect $name? Your local vault files will not be deleted.',
+                      ),
+                    );
+                    if (!confirmed || !mounted) {
+                      return;
+                    }
                     await provider.logout();
                     if (mounted) {
                       context.read<CloudStorageBloc>().notifyAuthChanged();

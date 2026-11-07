@@ -330,7 +330,7 @@ msix_config:
   msix_version: 1.7.12.151
 #  certificate_path: C:\<PathToCertificate>\<MyCertificate.pfx>
 #  certificate_password: 1234 (require if using .pfx certificate)
-  publisher: CN=9A3091A5-8ED6-447B-8681-7F59FF7FE2BE
+  publisher: CN=KeyNest
   logo_path: assets/images/app_icon_windows.png
   start_menu_icon_path: assets/images/app_icon_windows.png
   tile_icon_path: assets/images/app_icon_windows.png

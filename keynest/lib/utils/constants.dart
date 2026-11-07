@@ -17,13 +17,14 @@ class AppConstants {
 
   static const contentTypeTextPlain = 'text/plain'; // NON-NLS
 
-  static const keyNestHost = 'keynest.app';
-  static const keyNestUrl = 'https://$keyNestHost';
-  static const keyNestCloudInfoUrl = '$keyNestUrl/docs/';
+  static const keyNestHost = 'github.com';
+  static const keyNestUrl = 'https://github.com/MoshiNop/keynest';
+  static const keyNestCloudInfoUrl =
+      'https://github.com/MoshiNop/keynest#readme';
   static final keyNestInstall = Uri.parse(
-    'https://keynest.app/docs/getting-started/',
+    'https://github.com/MoshiNop/keynest/releases',
   );
-  static const keyNestWebApp = 'https://web.keynest.app';
+  static const keyNestWebApp = 'https://github.com/MoshiNop/keynest';
   static final keyNestWebAppUri = Uri.parse('$keyNestWebApp/');
 
   static const utmCampaign = 'utm_campaign';
@@ -75,5 +76,6 @@ class AssetConstants {
 }
 
 class UrlConstants {
-  static const forumUrl = 'https://forum.keynest.app/'; // NON-NLS
+  static const forumUrl =
+      'https://github.com/MoshiNop/keynest/discussions'; // NON-NLS
 }

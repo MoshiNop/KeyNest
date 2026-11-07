@@ -33,6 +33,7 @@ class NoteDetailsScreen extends StatefulWidget {
     this.isEditing = false,
     this.initialFile,
     this.initialGroup,
+    this.onSaved,
   });
 
   static Route<void> route({
@@ -40,13 +41,16 @@ class NoteDetailsScreen extends StatefulWidget {
     bool isEditing = false,
     KdbxFile? initialFile,
     KdbxGroup? initialGroup,
+    ValueChanged<KdbxEntry>? onSaved,
   }) => KeyNestPageRoute(
     settings: const RouteSettings(name: '/noteDetails'),
     builder: (context) => NoteDetailsScreen(
+      key: entry != null ? ValueKey(entry.uuid) : null,
       entry: entry,
       isEditing: isEditing,
       initialFile: initialFile,
       initialGroup: initialGroup,
+      onSaved: onSaved,
     ),
   );
 
@@ -54,12 +58,14 @@ class NoteDetailsScreen extends StatefulWidget {
   final bool isEditing;
   final KdbxFile? initialFile;
   final KdbxGroup? initialGroup;
+  final ValueChanged<KdbxEntry>? onSaved;
 
   @override
   State<NoteDetailsScreen> createState() => _NoteDetailsScreenState();
 }
 
-class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
+class _NoteDetailsScreenState extends State<NoteDetailsScreen>
+    implements KeyNestDetailPaneGuard {
   late bool _isEditing;
   bool _isDirty = false;
   bool _showNotes = false;
@@ -200,6 +206,12 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
       SecurityService.copyNonSensitive(context, value, label: label);
     }
   }
+
+  @override
+  bool get hasUnsavedChanges => _isEditing && _isDirty;
+
+  @override
+  Future<bool> confirmDiscardChanges() => _confirmDiscard();
 
   Future<bool> _confirmDiscard() async {
     if (!_isDirty) {
@@ -355,8 +367,12 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen> {
           );
 
         if (widget.entry == null) {
-          // If this was a newly created note from FAB, pop back or show details
-          Navigator.of(context).pop();
+          if (widget.onSaved != null) {
+            widget.onSaved!(entry);
+          } else {
+            // If this was a newly created note from FAB, pop back or show details
+            Navigator.of(context).pop();
+          }
         } else {
           setState(() {
             _isEditing = false;

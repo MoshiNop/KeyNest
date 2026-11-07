@@ -27,6 +27,9 @@ class KeyNestTextField extends StatefulWidget {
     this.focusNode,
     this.onSubmitted,
     this.autofocus = false,
+    this.validator,
+    this.autovalidateMode,
+    this.onSaved,
   }) : hintText = hintText ?? placeholder,
        leadingIcon = leadingIcon is IconData
            ? Icon(leadingIcon)
@@ -54,13 +57,16 @@ class KeyNestTextField extends StatefulWidget {
   final FocusNode? focusNode;
   final ValueChanged<String>? onSubmitted;
   final bool autofocus;
+  final FormFieldValidator<String>? validator;
+  final AutovalidateMode? autovalidateMode;
+  final FormFieldSetter<String>? onSaved;
 
   @override
   State<KeyNestTextField> createState() => _KeyNestTextFieldState();
 }
 
 class _KeyNestTextFieldState extends State<KeyNestTextField> {
-  late final TextEditingController _controller;
+  late TextEditingController _controller;
   late bool _obscureText;
   bool _hasText = false;
 
@@ -72,6 +78,24 @@ class _KeyNestTextFieldState extends State<KeyNestTextField> {
     _obscureText = widget.isPassword;
     _hasText = _controller.text.isNotEmpty;
     _controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant KeyNestTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.controller != oldWidget.controller) {
+      oldWidget.controller?.removeListener(_onTextChanged);
+      if (oldWidget.controller == null) {
+        _controller.dispose();
+      }
+      _controller =
+          widget.controller ?? TextEditingController(text: widget.initialValue);
+      _hasText = _controller.text.isNotEmpty;
+      _controller.addListener(_onTextChanged);
+    }
+    if (widget.isPassword != oldWidget.isPassword) {
+      _obscureText = widget.isPassword;
+    }
   }
 
   @override
@@ -115,6 +139,7 @@ class _KeyNestTextFieldState extends State<KeyNestTextField> {
     if (widget.isPassword) {
       trailingActions.add(
         IconButton(
+          tooltip: _obscureText ? 'Show password' : 'Hide password',
           icon: Icon(
             _obscureText
                 ? Icons.visibility_outlined
@@ -134,6 +159,7 @@ class _KeyNestTextFieldState extends State<KeyNestTextField> {
     if (widget.showClearButton && _hasText && !widget.readOnly) {
       trailingActions.add(
         IconButton(
+          tooltip: 'Clear text',
           icon: Icon(
             Icons.clear_rounded,
             size: 20.0,
@@ -159,12 +185,19 @@ class _KeyNestTextFieldState extends State<KeyNestTextField> {
       );
     }
 
-    return TextField(
+    final hasExplicitError =
+        widget.isError ||
+        (widget.errorText != null && widget.errorText!.isNotEmpty);
+
+    return TextFormField(
       controller: _controller,
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
       onChanged: widget.onChanged,
-      onSubmitted: widget.onSubmitted,
+      onFieldSubmitted: widget.onSubmitted,
+      validator: widget.validator,
+      autovalidateMode: widget.autovalidateMode,
+      onSaved: widget.onSaved,
       enabled: widget.enabled,
       readOnly: widget.readOnly,
       obscureText: _obscureText,
@@ -177,7 +210,7 @@ class _KeyNestTextFieldState extends State<KeyNestTextField> {
       decoration: InputDecoration(
         labelText: widget.label,
         hintText: widget.hintText,
-        errorText: widget.isError ? widget.errorText : null,
+        errorText: hasExplicitError ? widget.errorText : null,
         hintStyle: theme.textTheme.bodyMedium?.copyWith(
           color: hintColor,
           fontWeight: FontWeight.normal,
@@ -264,6 +297,7 @@ class KeyNestSearchTextField extends StatelessWidget {
       controller: controller,
       onChanged: onChanged,
       hintText: hintText,
+      autofocus: autofocus,
       leadingIcon: const Icon(Icons.search_rounded),
       showClearButton: true,
       textInputAction: TextInputAction.search,

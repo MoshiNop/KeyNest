@@ -94,6 +94,26 @@ class KeyNestTokens {
   static const Color error = lightError;
   static const Color info = brandBlue;
 
+  static Color primaryColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? darkPrimary
+        : lightPrimary;
+  }
+
+  static Color primaryColorFor(bool isDark) {
+    return isDark ? darkPrimary : lightPrimary;
+  }
+
+  static Color errorColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? darkError
+        : lightError;
+  }
+
+  static Color errorColorFor(bool isDark) {
+    return isDark ? darkError : lightError;
+  }
+
   static Color successColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
         ? darkSuccess
