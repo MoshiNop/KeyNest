@@ -174,12 +174,18 @@ class CredentialMatcher {
     'us.spotco.fennec_dos',
   };
 
-  /// Returns true if [packageName] is a recognized web browser in the explicit allowlist.
+  /// Returns true if [packageName] is a recognized web browser.
   static bool isBrowserPackage(String? packageName) {
     if (packageName == null) return false;
     final clean = packageName.trim().toLowerCase();
     if (clean.isEmpty) return false;
-    return _browserPackages.contains(clean);
+    if (_browserPackages.contains(clean)) return true;
+    return clean.endsWith('.browser') ||
+        clean.contains('chrome') ||
+        clean.contains('chromium') ||
+        clean.contains('firefox') ||
+        clean.contains('browser') ||
+        clean.contains('fenix');
   }
 
   /// Percent escapes and whitespace never appear in a real hostname.

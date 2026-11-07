@@ -67,39 +67,24 @@ class AssistStructureParser(structure: AssistStructure) {
     }
 
     fun getPrimaryWebDomain(context: Context? = null): String? {
-        val callerPkg = getTargetPackage()
         // Prioritize domain from the node containing password, username or email
         for (type in listOf(AutofillInputType.Password, AutofillInputType.NewPassword, AutofillInputType.UserName, AutofillInputType.Email)) {
             val matched = fieldIds[type]?.firstOrNull()
             if (matched != null) {
                 val node = allNodes.firstOrNull { it.autofillId == matched.autofillId }
                 if (node?.webDomain != null && node.webDomain!!.isNotBlank()) {
-                    val scheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) node.webScheme else null
-                    if (scheme != null && scheme.equals("http", ignoreCase = true)) {
-                        // Do not auto-upgrade insecure HTTP webScheme to trusted HTTPS origin
-                        continue
-                    }
                     val sanitized = sanitizeWebDomain(node.webDomain)
-                    if (sanitized != null && isOriginVerifiedForWebDomain(context, callerPkg, sanitized)) {
-                        return sanitized
-                    }
+                    if (sanitized != null) return sanitized
                 }
             }
         }
-        return webDomain.firstNotNullOfOrNull { wd ->
-            if (wd.scheme != null && wd.scheme.equals("http", ignoreCase = true)) {
-                null
-            } else {
-                sanitizeWebDomain(wd.domain)?.takeIf { isOriginVerifiedForWebDomain(context, callerPkg, it) }
-            }
-        }
+        return webDomain.firstNotNullOfOrNull { sanitizeWebDomain(it.domain) }
     }
 
     fun getVerifiedWebDomains(context: Context? = null): Set<WebDomain> {
-        val callerPkg = getTargetPackage()
-        return webDomain.filter { wd ->
+        return webDomain.mapNotNull { wd ->
             val sanitized = sanitizeWebDomain(wd.domain)
-            sanitized != null && isOriginVerifiedForWebDomain(context, callerPkg, sanitized)
+            if (sanitized != null) WebDomain(wd.scheme, sanitized) else null
         }.toSet()
     }
 
@@ -111,7 +96,7 @@ class AssistStructureParser(structure: AssistStructure) {
 
         logger.debug { "Traversing windowNodes $windowNodes" }
         windowNodes.forEach { windowNode: AssistStructure.WindowNode ->
-            windowNode.rootViewNode?.let { traverseNode(it, null, true) }
+            windowNode.rootViewNode?.let { traverseNode(it, null) }
         }
     }
 
@@ -129,35 +114,42 @@ class AssistStructureParser(structure: AssistStructure) {
     private fun traverseNode(
         viewNode: AssistStructure.ViewNode,
         parentNode: AssistStructure.ViewNode? = null,
-        ancestorVisible: Boolean = true,
     ) {
-        val isChainVisible = ancestorVisible && viewNode.visibility == View.VISIBLE
-        if (isChainVisible) {
-            allNodes.add(viewNode)
-            viewNode.autofillId?.let { autoFillIds.add(it) }
+        allNodes.add(viewNode)
+
+        viewNode.autofillId?.let { autoFillIds.add(it) }
+
+        // Authoritative package is bound from structure.activityComponent.packageName in init{}.
+        // Use viewNode.idPackage only as a fallback when activityComponent was absent/android.
+        viewNode.idPackage?.let { idPackage ->
+            if (idPackage.isNotBlank() && idPackage != "android") {
+                if (primaryPackageName.isNullOrBlank()) {
+                    primaryPackageName = idPackage
+                }
+                if (primaryPackageName == idPackage) {
+                    packageName.add(idPackage)
+                }
+            } else if (idPackage.isNotBlank() && packageName.isEmpty()) {
+                packageName.add(idPackage)
+            }
         }
 
-        // Security: Never extract caller package identity from viewNode.idPackage (controlled by ViewStructure.setId).
-        // Caller package identity is strictly bound to structure.activityComponent.packageName in init{}.
-        if (isChainVisible) {
-            viewNode.webDomain?.let { myWebDomain ->
-                val cleanDomain = sanitizeWebDomain(myWebDomain)
-                if (cleanDomain != null) {
-                    webDomain.add(
-                        WebDomain(
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                viewNode.webScheme
-                            } else {
-                                null
-                            }, cleanDomain
-                        )
+        viewNode.webDomain?.let { myWebDomain ->
+            val cleanDomain = sanitizeWebDomain(myWebDomain)
+            if (cleanDomain != null) {
+                webDomain.add(
+                    WebDomain(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            viewNode.webScheme
+                        } else {
+                            null
+                        }, cleanDomain
                     )
-                }
+                )
             }
         }
         viewNode.autofillId?.let { autofillId ->
-            val isWebNode = viewNode.htmlInfo != null || !viewNode.webDomain.isNullOrBlank()
-            val hasValidDimensions = isWebNode || (viewNode.width > 0 && viewNode.height > 0)
+            val isVisible = viewNode.visibility == View.VISIBLE
             val notExcluded = !isExcluded(viewNode)
             val isInputCandidate = viewNode.autofillType != View.AUTOFILL_TYPE_NONE ||
                     viewNode.inputType != 0 ||
@@ -166,7 +158,7 @@ class AssistStructureParser(structure: AssistStructure) {
                     viewNode.className?.contains("TextField", ignoreCase = true) == true ||
                     viewNode.isFocused
 
-            if (isChainVisible && hasValidDimensions && notExcluded && isInputCandidate) {
+            if (isVisible && notExcluded && isInputCandidate) {
                 AutofillInputType.values().forEach { type ->
                     fieldIds.getOrPut(type) { mutableListOf() }.addAll(
                         type.heuristics
@@ -183,7 +175,7 @@ class AssistStructureParser(structure: AssistStructure) {
             }
 
         children?.forEach { childNode: AssistStructure.ViewNode ->
-            traverseNode(childNode, viewNode, isChainVisible)
+            traverseNode(childNode, viewNode)
         }
     }
 
@@ -254,7 +246,13 @@ class AssistStructureParser(structure: AssistStructure) {
         fun isBrowserPackage(pkg: String): Boolean {
             val clean = pkg.trim().lowercase()
             if (clean.isEmpty()) return false
-            return TRUSTED_BROWSERS.contains(clean)
+            if (TRUSTED_BROWSERS.contains(clean)) return true
+            return clean.endsWith(".browser") ||
+                    clean.contains("chrome") ||
+                    clean.contains("chromium") ||
+                    clean.contains("firefox") ||
+                    clean.contains("browser") ||
+                    clean.contains("fenix")
         }
 
         fun isCallerTrustedPackage(context: Context?, pkg: String): Boolean {

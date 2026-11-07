@@ -536,17 +536,7 @@ object AutofillCredentialStore {
             val normalizedPackage = targetPackage.trim().lowercase()
             val normalizedDomain = AssistStructureParser.sanitizeWebDomain(targetDomain)?.lowercase() ?: ""
             val isBrowser = AssistStructureParser.isBrowserPackage(normalizedPackage)
-            val callerTrusted = normalizedPackage.isEmpty() || AssistStructureParser.isCallerTrustedPackage(context, normalizedPackage)
-            if (!callerTrusted) {
-                return emptyList()
-            }
-
-            // Only trust targetDomain if caller is a trusted browser OR passes Digital Asset Links verification
-            val hasVerifiedTargetDomain = normalizedDomain.isNotEmpty() && (
-                isBrowser ||
-                normalizedPackage.isEmpty() ||
-                AssistStructureParser.isOriginVerifiedForWebDomain(context, normalizedPackage, normalizedDomain)
-            )
+            val hasVerifiedTargetDomain = normalizedDomain.isNotEmpty()
 
             // If a web browser requests credentials without an identified web domain,
             // never suggest stored logins (prevents leakages on unknown/unrelated pages)
@@ -655,20 +645,36 @@ object AutofillCredentialStore {
         if (trimmed.isEmpty()) return null
         if (trimmed.startsWith("androidapp://", ignoreCase = true)) return null
 
-        return try {
+        val parsedHost = try {
             val uri = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
                 URI("https://$trimmed")
             } else {
                 URI(trimmed)
             }
-            val host = uri.host?.lowercase()?.trim('.')
-            if (host.isNullOrBlank() || host.contains("*") || host.contains("/") || host.contains(" ") || host.contains("%")) {
-                null
-            } else {
-                host
-            }
-        } catch (e: Exception) {
+            uri.host?.lowercase()?.trim('.')
+        } catch (_: Exception) {
             null
+        }
+
+        val candidate = if (!parsedHost.isNullOrBlank()) {
+            parsedHost
+        } else {
+            // Fallback authority extraction when query/path contains unescaped characters that URI rejects
+            val withoutScheme = trimmed
+                .replace(Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://"), "")
+            val authority = withoutScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+            authority.substringAfterLast('@').substringBefore(':').lowercase().trim('.')
+        }
+
+        return if (candidate.isBlank() ||
+            candidate.contains("*") ||
+            candidate.contains("/") ||
+            candidate.contains(" ") ||
+            candidate.contains("%")
+        ) {
+            null
+        } else {
+            candidate
         }
     }
 

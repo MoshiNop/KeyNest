@@ -1112,6 +1112,28 @@ class FlutterMyAutofillService : AutofillService() {
                                 }
                             }
 
+                            // 4. Fallback anchor: ensure dataset has at least one value set if focused input wasn't categorized
+                            if (filledIds.isEmpty()) {
+                                val fallbackTargetId = focusedAutofillId
+                                    ?: candidateInputIds.firstOrNull()
+                                    ?: autoFillIds.firstOrNull()
+                                if (fallbackTargetId != null && filledIds.add(fallbackTargetId)) {
+                                    val fallbackText = identifierVal.ifBlank { entry.username.ifBlank { entry.email ?: "" } }
+                                    val fallbackPresentation = RemoteViewsHelper.viewsWithCredential(
+                                        packageName = packageName,
+                                        title = entry.label,
+                                        subtitle = fallbackText.ifBlank { null },
+                                        iconBytes = entry.iconBytes,
+                                        isLocked = false
+                                    )
+                                    datasetBuilder.setValue(
+                                        fallbackTargetId,
+                                        AutofillValue.forText(fallbackText),
+                                        fallbackPresentation
+                                    )
+                                }
+                            }
+
                             return datasetBuilder.build()
                         }
 

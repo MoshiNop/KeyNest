@@ -508,9 +508,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             }
             "clearCredentials" -> {
                 AutofillCredentialStore.clear()
-                clearPendingSaveData(context)
-                AutofillRequestStore.clear()
-                logger.info { "Cleared AutofillCredentialStore, request store, and pending save data" }
+                logger.info { "Cleared AutofillCredentialStore unlocked session" }
                 result.success(true)
             }
             "clearAllCredentials" -> {

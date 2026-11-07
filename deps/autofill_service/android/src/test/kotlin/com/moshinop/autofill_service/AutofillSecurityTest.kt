@@ -809,6 +809,43 @@ class AutofillSecurityTest {
         // Cleanup
         AutofillCredentialStore.clearAll()
     }
+
+    @Test
+    fun testAccountsGoogleComAndComplexQueryUrlMatching() {
+        val googleEntries = listOf(
+            NativeAutofillEntry(
+                id = "google-1",
+                label = "Google",
+                username = "user1@gmail.com",
+                password = "GooglePassword1!",
+                urls = listOf("https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmail.google.com&hl=en|bn"),
+                registrableDomains = listOf("google.com")
+            ),
+            NativeAutofillEntry(
+                id = "google-2",
+                label = "Gmail",
+                username = "user2@gmail.com",
+                password = "GooglePassword2!",
+                urls = listOf("google.com"),
+                registrableDomains = listOf("google.com")
+            )
+        )
+        AutofillCredentialStore.sync(googleEntries, autoLockSec = 300)
+
+        // Unlocked matching in Chrome on accounts.google.com
+        val unlockedMatches = AutofillCredentialStore.findMatches("com.android.chrome", "accounts.google.com")
+        assertEquals("Both Google entries must match accounts.google.com in Chrome", 2, unlockedMatches.size)
+        assertEquals("Exact host match should rank first", "google-1", unlockedMatches[0].id)
+        assertEquals("google-2", unlockedMatches[1].id)
+
+        // Locked matching in Chrome on accounts.google.com
+        AutofillCredentialStore.clear()
+        val lockedMatches = AutofillCredentialStore.findMatches("com.android.chrome", "accounts.google.com")
+        assertEquals("Locked metadata entries must still match accounts.google.com in Chrome", 2, lockedMatches.size)
+        assertEquals("", lockedMatches[0].password)
+
+        AutofillCredentialStore.clearAll()
+    }
 }
 
 
