@@ -1,5 +1,6 @@
 package com.moshinop.keynest;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipDescription;
@@ -7,6 +8,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.UriPermission;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -57,7 +59,13 @@ public class MainActivity extends FlutterFragmentActivity {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            getWindow().setHideOverlayWindows(true);
+            try {
+                if (checkSelfPermission(Manifest.permission.HIDE_OVERLAY_WINDOWS) == PackageManager.PERMISSION_GRANTED) {
+                    getWindow().setHideOverlayWindows(true);
+                }
+            } catch (Throwable t) {
+                logger.warn("Unable to setHideOverlayWindows: " + t);
+            }
         }
         super.onCreate(savedInstanceState);
         Intent intent = getIntent();

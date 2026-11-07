@@ -6,6 +6,7 @@ import 'package:keynest/l10n-generated/app_localizations.dart';
 import 'package:keynest/ui/screens/about.dart';
 import 'package:keynest/ui/screens/preferences.dart';
 import 'package:keynest/utils/dialog_utils.dart';
+import 'package:keynest/utils/platform.dart';
 import 'package:provider/provider.dart';
 
 class PlatformMenuBarWrapper extends StatelessWidget {
@@ -20,11 +21,13 @@ class PlatformMenuBarWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!KeyNestPlatform.isMacOS) {
+      return child;
+    }
     final deps = context.read<Deps>();
-    final openedFiles = context.watch<OpenedKdbxFiles?>();
+    final openedFiles = context.watch<OpenedKdbxFiles>();
     final hasOpenVaults =
-        (openedFiles?.isNotEmpty ?? false) ||
-        deps.kdbxBloc.openedFilesKdbx.isNotEmpty;
+        openedFiles.isNotEmpty || deps.kdbxBloc.openedFilesKdbx.isNotEmpty;
     final loc = AppLocalizations.of(context);
     return PlatformMenuBar(
       menus: [

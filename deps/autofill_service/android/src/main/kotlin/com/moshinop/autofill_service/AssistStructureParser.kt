@@ -266,6 +266,10 @@ class AssistStructureParser(structure: AssistStructure) {
                 if (selfDebuggable) return true
                 val callerInfo = context.packageManager.getApplicationInfo(clean, 0)
                 (callerInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0
+            } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+                // On Android 11+ (API 30+), package visibility filtering may hide packages not in <queries>.
+                // Do not treat package visibility filtering as an untrusted debuggable caller.
+                true
             } catch (_: Exception) {
                 false
             }
