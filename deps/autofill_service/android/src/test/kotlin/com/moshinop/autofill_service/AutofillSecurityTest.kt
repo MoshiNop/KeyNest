@@ -846,6 +846,50 @@ class AutofillSecurityTest {
 
         AutofillCredentialStore.clearAll()
     }
+
+    @Test
+    fun testSuggestionClickPreservesFastFillTokenAndSelectedEntryAcrossVaultLock() {
+        AutofillCredentialStore.clearAll()
+        val entries = listOf(
+            NativeAutofillEntry(
+                id = "entry-gh-1",
+                label = "GitHub",
+                username = "octocat",
+                password = "OctocatPassword123!",
+                urls = listOf("https://github.com/login"),
+                registrableDomains = listOf("github.com")
+            )
+        )
+        AutofillCredentialStore.sync(entries, autoLockSec = 300)
+        AutofillCredentialStore.clear() // Vault is now locked, metadata retained
+
+        // Simulate onFillRequest while locked: issue fastFillNonce and record request state
+        AutofillRequestStore.hasActiveRequest = true
+        AutofillRequestStore.activeRequestId = 7
+        AutofillRequestStore.activeSessionTimestamp = System.currentTimeMillis()
+        AutofillRequestStore.targetPackageName = "com.android.chrome"
+        AutofillRequestStore.targetWebDomain = "github.com"
+        AutofillRequestStore.pendingAuthLevel = "dataset"
+        val nonce = AutofillRequestStore.issueFastFillToken(7, "entry-gh-1")
+        AutofillRequestStore.selectedEntryId = "entry-gh-1"
+
+        // Simulate MainActivity startup calling getSessionTokens() / clear() while locked
+        assertNull(AutofillCredentialStore.getSessionTokens())
+        AutofillCredentialStore.clear()
+
+        // Active autofill request, selectedEntryId, and fastFillNonce MUST remain intact!
+        assertTrue("Active request must survive credential store lock", AutofillRequestStore.hasActiveRequest)
+        assertEquals("Selected entry ID must survive credential store lock", "entry-gh-1", AutofillRequestStore.selectedEntryId)
+        assertTrue("Fast-fill token must remain verifiable before consumption", AutofillRequestStore.verifyFastFillToken(nonce, 7, "entry-gh-1"))
+        assertFalse("Forged entry ID must be rejected", AutofillRequestStore.verifyFastFillToken(nonce, 7, "other-entry"))
+
+        // Once autofill completes, consuming the token succeeds once and prevents replay
+        assertTrue(AutofillRequestStore.consumeFastFillToken(nonce, 7, "entry-gh-1"))
+        assertFalse(AutofillRequestStore.verifyFastFillToken(nonce, 7, "entry-gh-1"))
+
+        AutofillCredentialStore.clearAll()
+        assertFalse(AutofillRequestStore.hasActiveRequest)
+    }
 }
 
 

@@ -20,6 +20,7 @@ import 'package:keynest/env/_base.dart';
 import 'package:keynest/env/development.dart';
 import 'package:keynest/env/production.dart';
 import 'package:keynest/l10n-generated/app_localizations.dart';
+import 'package:keynest/services/autofill_resume_helper.dart';
 import 'package:keynest/services/keynest_preferences_service.dart';
 import 'package:keynest/services/security_service.dart';
 import 'package:keynest/theme.dart';
@@ -269,7 +270,7 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
           if (nav == null) {
             return;
           }
-          SecurityLifecycleManager.instance.checkAutoLock();
+          await SecurityLifecycleManager.instance.checkAutoLockAsync();
           // Remove any stale autofill sheets before presenting new request
           nav.popUntil((route) => route.isFirst);
           var isUnlocked = _deps.kdbxBloc.openedFilesKdbx.isNotEmpty;
@@ -279,19 +280,26 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
           }
           if (isUnlocked) {
             QuickUnlockStorage.touchSession();
-            nav.pushAndRemoveUntil(
-              MainAppScaffold.route(),
-              (_) => false,
-            );
-            nav.push(KeyNestAutofillSheet.route(kdbxBloc: _deps.kdbxBloc));
+            if (nav.context.mounted) {
+              await AutofillResumeHelper.resumeAutofill(
+                nav.context,
+                _deps.kdbxBloc,
+              );
+            }
           } else {
             final hasFiles =
                 _deps.appDataBloc.store.cachedValue?.previousFiles.isNotEmpty ??
                 false;
             if (hasFiles) {
-              nav.push(LockedScreen.route(isAutofill: true));
+              nav.pushAndRemoveUntil(
+                LockedScreen.route(isAutofill: true),
+                (_) => false,
+              );
             } else {
-              nav.push(SelectFileScreen.route(skipQuickUnlock: true));
+              nav.pushAndRemoveUntil(
+                SelectFileScreen.route(skipQuickUnlock: true),
+                (_) => false,
+              );
             }
           }
         }),
@@ -554,7 +562,6 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
           if (initialRoute == '/autofill') {
             if (isUnlocked) {
               return [
-                MainAppScaffold.route(),
                 KeyNestAutofillSheet.route(kdbxBloc: _deps.kdbxBloc),
               ];
             }

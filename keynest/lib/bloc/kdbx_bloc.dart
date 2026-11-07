@@ -1023,7 +1023,7 @@ class KdbxBloc {
     }
     await _mirrorFile(file.openedFile, file.kdbxFile, bytes);
     await _publishAutofillIdentities();
-    await _syncAndroidAutofillStore(immediate: false);
+    await _syncAndroidAutofillStore(immediate: true);
   }
 
   /// Advertises every entry of every enabled vault to iOS.

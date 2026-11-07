@@ -686,10 +686,9 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
 
         val targetPackage = structure?.getTargetPackage()?.takeIf { it.isNotBlank() } ?: AutofillRequestStore.targetPackageName ?: ""
         val primaryDomain = structure?.getPrimaryWebDomain(context) ?: AutofillRequestStore.targetWebDomain ?: ""
-        if (pwDatasets.isNotEmpty() && AutofillCredentialStore.isLocked) {
-            AutofillCredentialStore.isLocked = false
-        }
-        val isStoreLocked = AutofillCredentialStore.isLocked
+        val isStoreLocked = if (pwDatasets.isNotEmpty()) false else !AutofillCredentialStore.hasUnlockedEntries()
+        val sourceIntent = lastIntent ?: act.intent
+        val requestedFillIdentifier = sourceIntent?.getStringExtra("fillIdentifier")
 
         val storeMatches = if (targetPackage.isNotBlank() || primaryDomain.isNotBlank()) {
             AutofillCredentialStore.findMatches(targetPackage, primaryDomain, context)
@@ -793,6 +792,7 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             // 2. Fill username and email fields (from parser + preserved in AutofillRequestStore)
             val emailVal = pw.email?.takeIf { it.isNotBlank() } ?: pw.username
             val userVal = pw.username.ifBlank { pw.email ?: "" }
+            val sharedVal = if (requestedFillIdentifier == "email") emailVal else userVal
 
             val dedicatedEmailIds = allEmailFieldIds.filter { it !in allUserFieldIds }
             val dedicatedUserIds = allUserFieldIds.filter { it !in allEmailFieldIds }
@@ -822,7 +822,26 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
                 if (filledAutofillIds.add(fieldId)) {
                     datasetBuilder.setValue(
                         fieldId,
-                        AutofillValue.forText(userVal),
+                        AutofillValue.forText(sharedVal),
+                        userPresentation
+                    )
+                }
+            }
+
+            // 2b. If no login field was categorized by heuristics but the user focused a non-password/non-OTP input field,
+            // fill that focused input field with the selected login identifier.
+            if (allUserFieldIds.isEmpty() && allEmailFieldIds.isEmpty() && sharedVal.isNotBlank()) {
+                val focusedId = AutofillRequestStore.focusedAutofillId
+                    ?: structure?.allNodes?.firstOrNull { it.isFocused && it.autofillId != null }?.autofillId
+                if (focusedId != null &&
+                    focusedId !in allPwFieldIds &&
+                    focusedId !in allConfirmPwFieldIds &&
+                    focusedId !in allOtpFieldIds &&
+                    filledAutofillIds.add(focusedId)
+                ) {
+                    datasetBuilder.setValue(
+                        focusedId,
+                        AutofillValue.forText(sharedVal),
                         userPresentation
                     )
                 }
@@ -904,7 +923,6 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
             datasetResponseBuilder.addDataset(builtDataset)
         }
 
-        val sourceIntent = lastIntent ?: act.intent
         val authLevel = sourceIntent?.getStringExtra("autofillAuthLevel")
             ?: AutofillRequestStore.pendingAuthLevel
             ?: "response"
@@ -977,6 +995,8 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         }
 
         AutofillCredentialStore.touchActive()
+        extractVerifiedSelectedEntryId(sourceIntent, consume = true)
+        AutofillRequestStore.selectedEntryId = null
         hasCompletedAutofill = true
         logger.info { "Returning authentication result intent: $replyIntent (authLevel=$authLevel, hasDataset=${firstDataset != null})" }
 
@@ -1020,10 +1040,11 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         if (action != "com.moshinop.autofill_service.FILL_ENTRY") {
             return false
         }
-        if (!AutofillCredentialStore.isUnlockedAndActive()) {
+        val entryId = extractVerifiedSelectedEntryId(intent, consume = false) ?: return false
+        AutofillRequestStore.selectedEntryId = entryId
+        if (!AutofillCredentialStore.hasUnlockedEntries()) {
             return false
         }
-        val entryId = extractVerifiedSelectedEntryId(intent, consume = true) ?: return false
         val entry = AutofillCredentialStore.getEntryById(entryId) ?: return false
         val isTotp = intent.getBooleanExtra("isTotp", false)
         if (entry.password.isEmpty() && (!entry.hasTotp || !isTotp)) {
@@ -1057,8 +1078,10 @@ class AutofillServicePluginImpl(val context: Context) : MethodCallHandler,
         var filledSuccessfully = false
         resultWithDatasets(listOf(pwDataset), object : Result {
             override fun success(result: Any?) {
-                filledSuccessfully = true
-                logger.info { "Fast-fill succeeded for entry $entryId without re-prompting." }
+                filledSuccessfully = result == true
+                if (filledSuccessfully) {
+                    logger.info { "Fast-fill succeeded for entry $entryId without re-prompting." }
+                }
             }
             override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
                 filledSuccessfully = false

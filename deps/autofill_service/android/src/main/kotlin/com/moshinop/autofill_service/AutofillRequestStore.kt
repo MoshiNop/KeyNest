@@ -111,6 +111,22 @@ object AutofillRequestStore {
     private val secureRandom = SecureRandom()
     private val fastFillGrants = ConcurrentHashMap<String, FastFillGrant>()
 
+    private fun encodeUrlBase64(bytes: ByteArray): String {
+        return try {
+            Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP)
+        } catch (_: Throwable) {
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+        }
+    }
+
+    private fun decodeUrlBase64(str: String): ByteArray {
+        return try {
+            Base64.decode(str, Base64.URL_SAFE or Base64.NO_WRAP)
+        } catch (_: Throwable) {
+            java.util.Base64.getUrlDecoder().decode(str)
+        }
+    }
+
     /**
      * Issues a 256-bit one-time capability nonce bound to [requestId] and [entryId]
      * for authenticating `FILL_ENTRY` intents on exported `MainActivity`.
@@ -120,7 +136,7 @@ object AutofillRequestStore {
         fastFillGrants.entries.removeIf { (_, grant) -> (now - grant.createdAt) >= REQUEST_TTL_MS }
         val bytes = ByteArray(32)
         secureRandom.nextBytes(bytes)
-        val token = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP)
+        val token = encodeUrlBase64(bytes)
         fastFillGrants[token] = FastFillGrant(
             requestId = requestId,
             entryId = entryId,
@@ -143,12 +159,13 @@ object AutofillRequestStore {
             return false
         }
         val candidateBytes = try {
-            Base64.decode(token, Base64.URL_SAFE or Base64.NO_WRAP)
+            decodeUrlBase64(token)
         } catch (_: Exception) {
             return false
         }
         val tokenValid = MessageDigest.isEqual(grant.tokenBytes, candidateBytes)
-        return tokenValid && grant.requestId == requestId && grant.entryId == entryId
+        val reqMatches = requestId < 0 || grant.requestId == requestId
+        return tokenValid && reqMatches && grant.entryId == entryId
     }
 
     /**
@@ -160,12 +177,13 @@ object AutofillRequestStore {
         val now = System.currentTimeMillis()
         if ((now - grant.createdAt) >= REQUEST_TTL_MS) return false
         val candidateBytes = try {
-            Base64.decode(token, Base64.URL_SAFE or Base64.NO_WRAP)
+            decodeUrlBase64(token)
         } catch (_: Exception) {
             return false
         }
         val tokenValid = MessageDigest.isEqual(grant.tokenBytes, candidateBytes)
-        return tokenValid && grant.requestId == requestId && grant.entryId == entryId
+        val reqMatches = requestId < 0 || grant.requestId == requestId
+        return tokenValid && reqMatches && grant.entryId == entryId
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -184,8 +202,14 @@ object AutofillRequestStore {
         overrideConfirmPwIds: List<AutofillId>? = null,
         overrideOtpIds: List<AutofillId>? = null
     ) {
+        val isSameContext = (packageName.isNotBlank() && packageName == targetPackageName) ||
+                (webDomain.isNotBlank() && webDomain == targetWebDomain)
         activeRequestId = requestId
-        selectedEntryId = entryId
+        if (entryId != null) {
+            selectedEntryId = entryId
+        } else if (!isSameContext) {
+            selectedEntryId = null
+        }
         activeSessionTimestamp = System.currentTimeMillis()
         pendingAuthLevel = authLevel
         targetPackageName = packageName

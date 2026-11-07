@@ -167,7 +167,8 @@ class AutofillResumeHelper {
             final quality = matcher.matchBest(requests, allUrls);
             if (quality == CredentialMatchQuality.host ||
                 quality == CredentialMatchQuality.registrableDomain ||
-                quality == CredentialMatchQuality.application) {
+                quality == CredentialMatchQuality.application ||
+                quality == CredentialMatchQuality.associatedApplication) {
               matchingEntries.add(entry);
             }
           }
@@ -214,7 +215,8 @@ class AutofillResumeHelper {
           final isMatchingOrigin =
               quality == CredentialMatchQuality.host ||
               quality == CredentialMatchQuality.registrableDomain ||
-              quality == CredentialMatchQuality.application;
+              quality == CredentialMatchQuality.application ||
+              quality == CredentialMatchQuality.associatedApplication;
           if (!isMatchingOrigin) {
             if (context.mounted) {
               final confirmed = await _confirmOriginMismatch(

@@ -473,7 +473,7 @@ class FlutterMyAutofillService : AutofillService() {
         if (AutofillCredentialStore.isAutoLockExpired()) {
             AutofillCredentialStore.clear()
         }
-        if (AutofillCredentialStore.isLocked) {
+        if (!AutofillCredentialStore.hasUnlockedEntries()) {
             AutofillRequestStore.saveRequest(
                 authLevel = "dataset",
                 packageName = targetPackage,

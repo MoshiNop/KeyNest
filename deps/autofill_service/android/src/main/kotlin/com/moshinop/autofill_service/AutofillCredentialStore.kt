@@ -359,6 +359,12 @@ object AutofillCredentialStore {
         }
     }
 
+    fun hasUnlockedEntries(): Boolean {
+        synchronized(lock) {
+            return isUnlockedAndActive() && _entries.isNotEmpty()
+        }
+    }
+
     fun clear() {
         synchronized(lock) {
             _entries.clear()
@@ -368,9 +374,8 @@ object AutofillCredentialStore {
             lastUnlockedTimestamp = 0L
             lastActiveTimestamp = 0L
             isLocked = true
-            AutofillRequestStore.clear()
-            // Non-sensitive _metadataEntries are safely retained so suggestions
-            // can still be displayed while locked without exposing secrets
+            // Non-sensitive _metadataEntries and active AutofillRequestStore context are safely
+            // retained so locked suggestions and in-flight suggestion taps can complete unlock.
         }
     }
 
@@ -381,6 +386,7 @@ object AutofillCredentialStore {
     fun clearAll(context: Context? = null) {
         synchronized(lock) {
             clear()
+            AutofillRequestStore.clear()
             _sessionTokens = null
             _metadataEntries.clear()
             if (context != null) {
@@ -404,7 +410,7 @@ object AutofillCredentialStore {
 
     fun getEntries(): List<NativeAutofillEntry> {
         synchronized(lock) {
-            return if (isUnlockedAndActive()) {
+            return if (isUnlockedAndActive() && _entries.isNotEmpty()) {
                 _entries.toList()
             } else {
                 _metadataEntries.map { it.copy(password = "", otp = null, otpSecret = null) }
@@ -525,7 +531,7 @@ object AutofillCredentialStore {
      */
     fun findMatches(targetPackage: String, targetDomain: String, context: Context? = null): List<NativeAutofillEntry> {
         synchronized(lock) {
-            val sourceEntries = if (isUnlockedAndActive()) {
+            val sourceEntries = if (isUnlockedAndActive() && _entries.isNotEmpty()) {
                 touchActive()
                 _entries
             } else {

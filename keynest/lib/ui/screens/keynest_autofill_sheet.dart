@@ -211,7 +211,11 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (meta != null) {
         for (final domain in meta.webDomains) {
           if (domain.domain.isNotEmpty) {
-            reqs.add(CredentialRequest.web('https://${domain.domain}'));
+            final scheme =
+                (domain.scheme != null && domain.scheme!.trim().isNotEmpty)
+                ? domain.scheme!.trim().toLowerCase()
+                : 'https';
+            reqs.add(CredentialRequest.web('$scheme://${domain.domain}'));
           }
         }
 
@@ -219,6 +223,33 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
           if (pkg.isNotEmpty) {
             reqs.add(CredentialRequest.application(pkg));
           }
+        }
+      }
+
+      if (!reqInfo.forcePicker &&
+          reqInfo.selectedEntryId != null &&
+          widget.kdbxBloc.autofillEnabledFilesKdbx.isNotEmpty) {
+        KdbxEntry? selectedEntry;
+        for (final file in widget.kdbxBloc.autofillEnabledFilesKdbx) {
+          for (final entry in file.body.rootGroup.getAllEntries()) {
+            if (!entry.isInRecycleBin() &&
+                entry.uuid.uuid == reqInfo.selectedEntryId) {
+              selectedEntry = entry;
+              break;
+            }
+          }
+          if (selectedEntry != null) {
+            break;
+          }
+        }
+        if (selectedEntry != null && mounted) {
+          _metadata = meta;
+          _requests = reqs;
+          await widget.kdbxBloc.syncAndroidAutofillStore(immediate: true);
+          if (mounted) {
+            await _fillEntry(selectedEntry);
+          }
+          return;
         }
       }
 
@@ -525,7 +556,8 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       final isMatchingOrigin =
           quality == CredentialMatchQuality.host ||
           quality == CredentialMatchQuality.registrableDomain ||
-          quality == CredentialMatchQuality.application;
+          quality == CredentialMatchQuality.application ||
+          quality == CredentialMatchQuality.associatedApplication;
 
       if (!isMatchingOrigin) {
         final confirmed = await _confirmOriginMismatch(entry);
@@ -575,7 +607,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (mounted) {
         if (!_hasFilled) {
           widget.onClose?.call();
-        } else {
+        } else if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       }
@@ -603,7 +635,7 @@ class _KeyNestAutofillSheetState extends State<KeyNestAutofillSheet> {
       if (mounted) {
         if (!_hasFilled) {
           widget.onClose?.call();
-        } else {
+        } else if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       }
