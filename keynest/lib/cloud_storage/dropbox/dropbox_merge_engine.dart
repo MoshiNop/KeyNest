@@ -167,6 +167,20 @@ class DropboxVaultMergeEngine {
       localMeta.defaultUserNameChanged.set(remoteUserChanged);
     }
 
+    // Recycle bin: if only the remote side has one, adopt it so the merged
+    // 'Trash' group is recognised as the recycle bin (otherwise deleteEntry
+    // creates a second Trash and entries in the first look "not deleted").
+    final localBinUuid = localMeta.recycleBinUUID.get();
+    final remoteBinUuid = remoteMeta.recycleBinUUID.get();
+    if ((localBinUuid == null || localBinUuid.isNil) &&
+        remoteBinUuid != null &&
+        !remoteBinUuid.isNil) {
+      localMeta.recycleBinUUID.set(remoteBinUuid);
+      localMeta.recycleBinEnabled.set(
+        remoteMeta.recycleBinEnabled.get() ?? true,
+      );
+    }
+
     // Merge Custom Icons on Database
     for (final icon in remoteMeta.customIcons.values) {
       if (!localMeta.customIcons.containsKey(icon.uuid)) {

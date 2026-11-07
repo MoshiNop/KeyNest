@@ -129,8 +129,14 @@ class TestEnv extends Env {
   TestEnv(this.secrets) : super(EnvType.development);
 
   @override
-  Future<AppInfo> getAppInfo() {
-    throw UnimplementedError();
+  Future<AppInfo> getAppInfo() async {
+    return AppInfo(
+      (b) => b
+        ..appName = 'KeyNest Test'
+        ..packageName = 'com.moshinop.keynest.test'
+        ..version = '1.0.0'
+        ..buildNumber = 1,
+    );
   }
 
   @override

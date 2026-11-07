@@ -669,16 +669,19 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen>
               final kdbxBloc = context.read<KdbxBloc>();
               final navigator = Navigator.of(context);
               final scaffoldMessenger = ScaffoldMessenger.of(context);
+              final isTrash = KeyNestItemTypeHelper.isEntryInTrash(entry);
               final confirm = await DialogUtils.showConfirmDialog(
                 context: context,
                 params: ConfirmDialogParams(
-                  title: 'Delete Note',
-                  content: 'Are you sure you want to delete this note?',
-                  positiveButtonText: 'Delete',
+                  title: isTrash ? 'Delete Permanently' : 'Delete Note',
+                  content: isTrash
+                      ? 'Are you sure you want to permanently delete this note? This action cannot be undone.'
+                      : 'Are you sure you want to delete this note?',
+                  positiveButtonText: isTrash ? 'Delete Permanently' : 'Delete',
                 ),
               );
               if (confirm == true && mounted) {
-                if (KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+                if (isTrash) {
                   entry.file.deletePermanently(entry);
                 } else {
                   entry.file.deleteEntry(entry);
@@ -690,9 +693,13 @@ class _NoteDetailsScreenState extends State<NoteDetailsScreen>
                   navigator.pop();
                   scaffoldMessenger.clearSnackBars();
                   scaffoldMessenger.showSnackBar(
-                    const SnackBar(
-                      content: Text('Note deleted successfully'),
-                      duration: Duration(milliseconds: 1800),
+                    SnackBar(
+                      content: Text(
+                        isTrash
+                            ? 'Note permanently deleted'
+                            : 'Note deleted successfully',
+                      ),
+                      duration: const Duration(milliseconds: 1800),
                     ),
                   );
                 }

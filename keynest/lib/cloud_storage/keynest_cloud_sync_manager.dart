@@ -563,17 +563,42 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
             source.provider.id == provider.id) {
           await kdbxBloc.waitForPendingSaves();
 
+          Uint8List? lastLocalRead;
           Future<Uint8List> getCloudWorkingBytes() async {
             await kdbxBloc.waitForPendingSaves();
             final working = await source.readWorkingCopyBytes();
             if (working != null && working.isNotEmpty) {
-              return working;
+              return lastLocalRead = working;
             }
             if (source.lastContent?.content != null &&
                 source.lastContent!.content.isNotEmpty) {
-              return source.lastContent!.content;
+              return lastLocalRead = source.lastContent!.content;
             }
-            return await openedFile.kdbxFile.save();
+            return lastLocalRead = await openedFile.kdbxFile.save();
+          }
+
+          // Applies synced bytes onto the live vault in place, using the local
+          // bytes the engine started from as merge base so edits made while
+          // the sync was in flight are never reverted.
+          Future<void> applySynced(Uint8List bytes) async {
+            final syncedContent = await source.markWorkingCopySynced(bytes);
+            await kdbxBloc.applySyncedBytesWithBase(
+              openedFile,
+              bytes,
+              syncedContent: syncedContent,
+              baseBytes: lastLocalRead,
+            );
+          }
+
+          // After an upload / up-to-date check: only mark the working copy as
+          // synced if nothing new was saved locally since the engine read it.
+          Future<void> finalizeUploaded() async {
+            final uploaded = lastLocalRead;
+            final latestBytes = await getCloudWorkingBytes();
+            if (uploaded != null && !ByteUtils.eq(uploaded, latestBytes)) {
+              return; // newer local save pending; its own sync will upload it
+            }
+            await applySynced(latestBytes);
           }
 
           if (provider is GoogleDriveProvider) {
@@ -596,29 +621,14 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
               vaultId: vaultId,
               vaultFilename: remoteFilename,
               getLocalBytes: getCloudWorkingBytes,
-              saveLocalBytes: (bytes) async {
-                final syncedContent = await source.markWorkingCopySynced(bytes);
-                await kdbxBloc.applySyncedBytes(
-                  openedFile,
-                  bytes,
-                  syncedContent: syncedContent,
-                );
-              },
+              saveLocalBytes: applySynced,
               unlockedLocalFile: openedFile.kdbxFile,
               credentials: openedFile.kdbxFile.credentials,
             );
 
             if (syncRes.status == GoogleDriveSyncStatus.upToDate ||
                 syncRes.status == GoogleDriveSyncStatus.uploaded) {
-              final latestBytes = await getCloudWorkingBytes();
-              final syncedContent = await source.markWorkingCopySynced(
-                latestBytes,
-              );
-              await kdbxBloc.applySyncedBytes(
-                openedFile,
-                latestBytes,
-                syncedContent: syncedContent,
-              );
+              await finalizeUploaded();
             }
 
             KeyNestSyncStatus status;
@@ -658,29 +668,14 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
               vaultId: vaultId,
               vaultFilename: remoteFilename,
               getLocalBytes: getCloudWorkingBytes,
-              saveLocalBytes: (bytes) async {
-                final syncedContent = await source.markWorkingCopySynced(bytes);
-                await kdbxBloc.applySyncedBytes(
-                  openedFile,
-                  bytes,
-                  syncedContent: syncedContent,
-                );
-              },
+              saveLocalBytes: applySynced,
               unlockedLocalFile: openedFile.kdbxFile,
               credentials: openedFile.kdbxFile.credentials,
             );
 
             if (syncRes.status == SyncStatus.upToDate ||
                 syncRes.status == SyncStatus.uploaded) {
-              final latestBytes = await getCloudWorkingBytes();
-              final syncedContent = await source.markWorkingCopySynced(
-                latestBytes,
-              );
-              await kdbxBloc.applySyncedBytes(
-                openedFile,
-                latestBytes,
-                syncedContent: syncedContent,
-              );
+              await finalizeUploaded();
             }
 
             KeyNestSyncStatus status;
@@ -743,10 +738,11 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
               mergedBytes,
               newMeta,
             );
-            await kdbxBloc.applySyncedBytes(
+            await kdbxBloc.applySyncedBytesWithBase(
               openedFile,
               mergedBytes,
               syncedContent: syncedContent,
+              baseBytes: localBytes,
             );
           }
 
@@ -767,7 +763,8 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
         }
 
         // Resolves the latest flushed bytes from source asynchronously without UI blocking
-        Future<Uint8List> getLatestBytes() async {
+        Uint8List? lastLatestRead;
+        Future<Uint8List> readLatestBytes() async {
           await kdbxBloc.waitForPendingSaves();
           if (source.lastContent?.content != null &&
               source.lastContent!.content.isNotEmpty) {
@@ -787,23 +784,26 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
           return compute((_) => openedFile.kdbxFile.save(), null);
         }
 
+        Future<Uint8List> getLatestBytes() async =>
+            lastLatestRead = await readLatestBytes();
+
+        Future<void> writeSyncedLocal(Uint8List bytes) async {
+          final savedContent = await source.contentWrite(bytes, metadata: null);
+          await kdbxBloc.applySyncedBytesWithBase(
+            openedFile,
+            bytes,
+            syncedContent: savedContent,
+            baseBytes: lastLatestRead,
+          );
+        }
+
         // Vault is local or from another source: sync to this provider's KeyNest folder
         if (provider is GoogleDriveProvider) {
           final syncRes = await provider.syncEngine.syncVault(
             vaultId: vaultId,
             vaultFilename: remoteFilename,
             getLocalBytes: getLatestBytes,
-            saveLocalBytes: (bytes) async {
-              final savedContent = await source.contentWrite(
-                bytes,
-                metadata: null,
-              );
-              await kdbxBloc.applySyncedBytes(
-                openedFile,
-                bytes,
-                syncedContent: savedContent,
-              );
-            },
+            saveLocalBytes: writeSyncedLocal,
             unlockedLocalFile: openedFile.kdbxFile,
             credentials: openedFile.kdbxFile.credentials,
           );
@@ -837,17 +837,7 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
             vaultId: vaultId,
             vaultFilename: remoteFilename,
             getLocalBytes: getLatestBytes,
-            saveLocalBytes: (bytes) async {
-              final savedContent = await source.contentWrite(
-                bytes,
-                metadata: null,
-              );
-              await kdbxBloc.applySyncedBytes(
-                openedFile,
-                bytes,
-                syncedContent: savedContent,
-              );
-            },
+            saveLocalBytes: writeSyncedLocal,
             unlockedLocalFile: openedFile.kdbxFile,
             credentials: openedFile.kdbxFile.credentials,
           );
@@ -1039,10 +1029,11 @@ class KeyNestCloudSyncManager extends ChangeNotifier {
           mergedBytes,
           metadata: null,
         );
-        await kdbxBloc.applySyncedBytes(
+        await kdbxBloc.applySyncedBytesWithBase(
           openedFile,
           mergedBytes,
           syncedContent: savedContent,
+          baseBytes: localBytes,
         );
         return VaultSyncResult(
           vaultId: vaultId,

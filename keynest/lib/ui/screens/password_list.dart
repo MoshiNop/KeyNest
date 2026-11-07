@@ -568,12 +568,22 @@ class GroupFilter {
           return groups.expand((g) => g.entries);
         } else if (showActive) {
           return groups
-              .where((g) => g == groupSelected.group || g.file.recycleBin != g)
-              .expand((g) => g.entries);
+              .where(
+                (g) =>
+                    g == groupSelected.group ||
+                    !KeyNestItemTypeHelper.isTrashOrRecycleBin(g),
+              )
+              .expand((g) => g.entries)
+              .where((e) => !KeyNestItemTypeHelper.isEntryInTrash(e));
         } else if (showRecycleBin) {
           return groups
-              .where((g) => g.file.recycleBin == g)
-              .expand((g) => g.entries);
+              .where(
+                (g) =>
+                    g == groupSelected.group ||
+                    KeyNestItemTypeHelper.isTrashOrRecycleBin(g),
+              )
+              .expand((g) => g.entries)
+              .where((e) => KeyNestItemTypeHelper.isEntryInTrash(e));
         } else {
           throw StateError(
             'Impossible. (showRecycleBin: $showRecycleBin,'
@@ -585,16 +595,14 @@ class GroupFilter {
     return files.expand((f) {
       if (showRecycleBin && showActive) {
         return f.body.rootGroup.getAllEntries();
+      } else if (showRecycleBin) {
+        return f.body.rootGroup
+            .getAllEntries()
+            .where((e) => KeyNestItemTypeHelper.isEntryInTrash(e));
       } else {
-        final recycleBin = f.recycleBin;
-        if (showRecycleBin) {
-          return recycleBin?.entries ?? [];
-        } else {
-          final allGroups = f.body.rootGroup.getAllGroups();
-          return allGroups
-              .where((g) => g != recycleBin && !g.isInRecycleBin())
-              .expand((e) => e.entries);
-        }
+        return f.body.rootGroup
+            .getAllEntries()
+            .where((e) => !KeyNestItemTypeHelper.isEntryInTrash(e));
       }
     });
   }
@@ -844,6 +852,8 @@ class _PasswordListContentState extends State<PasswordListContent>
       return;
     }
     final count = _selectedEntries.length;
+    final allInTrash =
+        _selectedEntries.every(KeyNestItemTypeHelper.isEntryInTrash);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -857,8 +867,10 @@ class _PasswordListContentState extends State<PasswordListContent>
                 color: KeyNestPalette.error.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(
-                Icons.delete_outline_rounded,
+              child: Icon(
+                allInTrash
+                    ? Icons.delete_forever_rounded
+                    : Icons.delete_outline_rounded,
                 color: KeyNestPalette.error,
                 size: 22,
               ),
@@ -866,7 +878,9 @@ class _PasswordListContentState extends State<PasswordListContent>
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Delete $count ${count == 1 ? 'Entry' : 'Entries'}?',
+                allInTrash
+                    ? 'Permanently Delete $count ${count == 1 ? 'Entry' : 'Entries'}?'
+                    : 'Delete $count ${count == 1 ? 'Entry' : 'Entries'}?',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
@@ -876,8 +890,10 @@ class _PasswordListContentState extends State<PasswordListContent>
           ],
         ),
         content: Text(
-          'Are you sure you want to delete $count selected ${count == 1 ? 'item' : 'items'}? '
-          'They will be moved to the Recycle Bin (or permanently deleted if recycle bin is disabled).',
+          allInTrash
+              ? 'Are you sure you want to permanently delete $count selected ${count == 1 ? 'item' : 'items'}? This action cannot be undone.'
+              : 'Are you sure you want to delete $count selected ${count == 1 ? 'item' : 'items'}? '
+                  'They will be moved to the Recycle Bin (or permanently deleted if recycle bin is disabled).',
         ),
         actions: [
           TextButton(
@@ -893,9 +909,9 @@ class _PasswordListContentState extends State<PasswordListContent>
               ),
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            child: Text(
+              allInTrash ? 'Delete Permanently' : 'Delete',
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -919,7 +935,9 @@ class _PasswordListContentState extends State<PasswordListContent>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '$count ${count == 1 ? 'item' : 'items'} deleted.',
+            allInTrash
+                ? '$count ${count == 1 ? 'item' : 'items'} permanently deleted.'
+                : '$count ${count == 1 ? 'item' : 'items'} deleted.',
             style: TextStyle(
               color: isDarkSnack ? const Color(0xFF00315D) : Colors.white,
             ),
@@ -1827,7 +1845,7 @@ class _PasswordListContentState extends State<PasswordListContent>
     KdbxFile kdbxFile,
     KdbxGroup group,
   ) async {
-    final isInsideTrash = group.isInRecycleBin();
+    final isInsideTrash = KeyNestItemTypeHelper.isTrashOrRecycleBin(group);
     final folderName = group.name.get() ?? 'Folder';
 
     if (isInsideTrash) {
@@ -1861,6 +1879,7 @@ class _PasswordListContentState extends State<PasswordListContent>
           KeyNestVaultScope.instance.setCurrentFolder(parent);
           kdbxFile.deletePermanently(group);
           await kdbxBloc.saveFile(kdbxFile);
+          KeyNestVaultScope.instance.notifyScopeChanged();
           if (mounted) {
             setState(() {});
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1913,6 +1932,7 @@ class _PasswordListContentState extends State<PasswordListContent>
         KeyNestVaultScope.instance.setCurrentFolder(parent);
         kdbxFile.deleteGroup(group);
         await kdbxBloc.saveFile(kdbxFile);
+        KeyNestVaultScope.instance.notifyScopeChanged();
         if (mounted) {
           setState(() {});
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2980,7 +3000,7 @@ class _PasswordListContentState extends State<PasswordListContent>
               if (g == g.file.recycleBin) {
                 return true;
               }
-              return !g.isInRecycleBin();
+              return !KeyNestItemTypeHelper.isTrashOrRecycleBin(g);
             }),
           )
         : <KdbxGroup>[];

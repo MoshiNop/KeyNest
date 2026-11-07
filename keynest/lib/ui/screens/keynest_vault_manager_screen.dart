@@ -748,7 +748,8 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
     final isFolderCollapsed = _collapsedFolders.contains(groupUuid);
     final hasSubgroups = group.groups.isNotEmpty;
     final isRecycleBin = kdbxFile.recycleBin == group;
-    final isInsideTrash = !isRecycleBin && group.isInRecycleBin();
+    final isInsideTrash =
+        !isRecycleBin && KeyNestItemTypeHelper.isTrashOrRecycleBin(group);
     final groupName = group.name.get() ?? 'Folder';
     final entriesCount = group.entries.length;
 
@@ -2226,11 +2227,13 @@ class _KeyNestVaultManagerScreenState extends State<KeyNestVaultManagerScreen> {
         List<KdbxGroup>.from(
           recycleBin.groups,
         ).forEach(kdbxFile.deletePermanently);
-        List<KdbxEntry>.from(
-          recycleBin.entries,
-        ).forEach(kdbxFile.deletePermanently);
+        for (final e in List<KdbxEntry>.from(recycleBin.entries)) {
+          kdbxFile.deletePermanently(e);
+          KeyNestItemTypeHelper.invalidateCache(e);
+        }
 
         await kdbxBloc.saveFile(kdbxFile);
+        KeyNestVaultScope.instance.notifyScopeChanged();
         if (mounted) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
           ScaffoldMessenger.of(context).showSnackBar(

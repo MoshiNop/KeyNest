@@ -1437,10 +1437,7 @@ class _KeyNestRecentlyDeletedScreenState
     final trashEntries = <KdbxEntry>[];
     for (final file in openedFiles) {
       for (final e in file.body.rootGroup.getAllEntries()) {
-        final cat = e.getString(KdbxKey('ItemCategory'))?.getText() ?? '';
-        final isDeleted =
-            e.getString(KdbxKey('IsDeleted'))?.getText() == 'true';
-        if (e.isInRecycleBin() || cat == 'Trash' || isDeleted) {
+        if (KeyNestItemTypeHelper.isEntryInTrash(e)) {
           trashEntries.add(e);
         }
       }
@@ -1479,21 +1476,36 @@ class _KeyNestRecentlyDeletedScreenState
                   ),
                 );
                 if (confirm == true && mounted) {
+                  final affectedFiles = <KdbxFile>{};
                   for (final e in trashEntries) {
-                    e.file.deletePermanently(e);
+                    if (e.parent != null) {
+                      affectedFiles.add(e.file);
+                      e.file.deletePermanently(e);
+                      KeyNestItemTypeHelper.invalidateCache(e);
+                    }
                   }
                   for (final file in openedFiles) {
                     final recycleBin = file.recycleBin;
                     if (recycleBin != null) {
+                      affectedFiles.add(file);
                       List<KdbxGroup>.from(
                         recycleBin.groups,
                       ).forEach(file.deletePermanently);
+                      List<KdbxEntry>.from(
+                        recycleBin.entries,
+                      ).forEach((re) {
+                        file.deletePermanently(re);
+                        KeyNestItemTypeHelper.invalidateCache(re);
+                      });
                     }
                   }
                   setState(() {});
-                  for (final file in openedFiles) {
+                  for (final file in affectedFiles) {
                     await kdbxBloc.saveFile(file);
                   }
+                  try {
+                    KeyNestVaultScope.instance.notifyScopeChanged();
+                  } catch (_) {}
                   if (mounted) {
                     setState(() {});
                     ScaffoldMessenger.of(context)
@@ -1622,7 +1634,11 @@ class _KeyNestRecentlyDeletedScreenState
                         // Restore Button
                         TextButton(
                           onPressed: () async {
-                            if (e.isInRecycleBin()) {
+                            if (e.parent == null) return;
+                            if (e.isInRecycleBin() ||
+                                KeyNestItemTypeHelper.isTrashOrRecycleBin(
+                                  e.parent,
+                                )) {
                               e.file.move(e, e.file.body.rootGroup);
                             }
                             e.removeString(KdbxKey('IsDeleted'));
@@ -1635,8 +1651,12 @@ class _KeyNestRecentlyDeletedScreenState
                                 PlainValue('General'),
                               );
                             }
+                            KeyNestItemTypeHelper.invalidateCache(e);
                             setState(() {});
                             await kdbxBloc.saveFile(e.file);
+                            try {
+                              KeyNestVaultScope.instance.notifyScopeChanged();
+                            } catch (_) {}
                             if (mounted) {
                               setState(() {});
                               ScaffoldMessenger.of(context)
@@ -1683,9 +1703,17 @@ class _KeyNestRecentlyDeletedScreenState
                               ),
                             );
                             if (confirm == true && mounted) {
-                              e.file.deletePermanently(e);
-                              setState(() {});
-                              await kdbxBloc.saveFile(e.file);
+                              if (e.parent != null) {
+                                final f = e.file;
+                                f.deletePermanently(e);
+                                KeyNestItemTypeHelper.invalidateCache(e);
+                                setState(() {});
+                                await kdbxBloc.saveFile(f);
+                                try {
+                                  KeyNestVaultScope.instance
+                                      .notifyScopeChanged();
+                                } catch (_) {}
+                              }
                               if (mounted) {
                                 setState(() {});
                                 ScaffoldMessenger.of(context)

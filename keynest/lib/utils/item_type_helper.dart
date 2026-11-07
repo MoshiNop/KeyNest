@@ -102,14 +102,11 @@ class KeyNestItemTypeHelper {
 
   static final Expando<_CachedItemClassification> _classificationCache =
       Expando<_CachedItemClassification>('itemTypeClassificationCache');
-  static final Expando<_CachedTrashState> _trashCache =
-      Expando<_CachedTrashState>('itemTypeTrashCache');
 
   /// Invalidates the cached classification for [entry] (or all entries if null).
   static void invalidateCache([KdbxEntry? entry]) {
     if (entry != null) {
       _classificationCache[entry] = null;
-      _trashCache[entry] = null;
     }
   }
 
@@ -441,32 +438,12 @@ class KeyNestItemTypeHelper {
   }
 
   /// Returns whether [entry] has been deleted or moved to trash.
-  static bool isEntryInTrash(KdbxEntry entry) {
-    final parent = entry.parent;
-    final recycleBin = entry.file.recycleBin;
-    final parentName = parent?.name.get();
-    final catRef = entry.getString(KdbxKey(itemCategoryKey));
-    final deletedRef = entry.getString(KdbxKey('IsDeleted'));
-    final cached = _trashCache[entry];
-    if (cached != null &&
-        identical(cached.parent, parent) &&
-        identical(cached.recycleBin, recycleBin) &&
-        cached.parentName == parentName &&
-        identical(cached.catRef, catRef) &&
-        identical(cached.deletedRef, deletedRef)) {
-      return cached.isTrash;
-    }
-    final computed = _computeIsEntryInTrash(entry);
-    _trashCache[entry] = _CachedTrashState(
-      isTrash: computed,
-      parent: parent,
-      recycleBin: recycleBin,
-      parentName: parentName,
-      catRef: catRef,
-      deletedRef: deletedRef,
-    );
-    return computed;
-  }
+  ///
+  /// Computed directly (a short parent walk): a cache keyed on the direct
+  /// parent went stale when an *ancestor* folder was moved to Trash, which
+  /// made the first permanent delete only move the entry to Trash again.
+  static bool isEntryInTrash(KdbxEntry entry) =>
+      _computeIsEntryInTrash(entry);
 
   static bool _computeIsEntryInTrash(KdbxEntry entry) {
     if (entry.parent == null) {
@@ -723,17 +700,26 @@ class KeyNestItemTypeHelper {
     return movedEntries;
   }
 
-  /// Safely deletes multiple [entries] from their respective vaults (moving to recycle bin if enabled).
-  /// Batch-saves each affected vault once.
+  /// Safely deletes multiple [entries] from their respective vaults.
+  /// Entries already in Trash are deleted permanently; others are moved to
+  /// the recycle bin. Batch-saves each affected vault once.
   static Future<void> bulkDeleteEntries({
     required Iterable<KdbxEntry> entries,
     KdbxBloc? kdbxBloc,
   }) async {
     final affectedFiles = <KdbxFile>{};
 
-    for (final entry in entries) {
+    for (final entry in entries.toList()) {
+      if (entry.parent == null) {
+        continue; // already removed
+      }
       affectedFiles.add(entry.file);
-      entry.file.deleteEntry(entry);
+      if (isEntryInTrash(entry)) {
+        entry.file.deletePermanently(entry);
+      } else {
+        entry.file.deleteEntry(entry);
+      }
+      invalidateCache(entry);
     }
 
     for (final file in affectedFiles) {
@@ -878,20 +864,3 @@ class _CachedItemClassification {
   final int stringCount;
 }
 
-class _CachedTrashState {
-  const _CachedTrashState({
-    required this.isTrash,
-    required this.parent,
-    required this.recycleBin,
-    required this.parentName,
-    required this.catRef,
-    required this.deletedRef,
-  });
-
-  final bool isTrash;
-  final KdbxGroup? parent;
-  final KdbxGroup? recycleBin;
-  final String? parentName;
-  final StringValue? catRef;
-  final StringValue? deletedRef;
-}

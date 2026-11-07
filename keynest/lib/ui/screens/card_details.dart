@@ -260,17 +260,21 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                 final kdbxBloc = context.read<KdbxBloc>();
                 final navigator = Navigator.of(context);
                 final scaffoldMessenger = ScaffoldMessenger.of(context);
+                final isTrash =
+                    KeyNestItemTypeHelper.isEntryInTrash(widget.entry);
                 final confirm = await DialogUtils.showConfirmDialog(
                   context: context,
                   params: ConfirmDialogParams(
-                    title: 'Delete Card',
-                    content:
-                        'Are you sure you want to delete this payment card?',
-                    positiveButtonText: 'Delete',
+                    title: isTrash ? 'Delete Permanently' : 'Delete Card',
+                    content: isTrash
+                        ? 'Are you sure you want to permanently delete this card? This action cannot be undone.'
+                        : 'Are you sure you want to delete this payment card?',
+                    positiveButtonText:
+                        isTrash ? 'Delete Permanently' : 'Delete',
                   ),
                 );
                 if (confirm == true && mounted) {
-                  if (KeyNestItemTypeHelper.isEntryInTrash(widget.entry)) {
+                  if (isTrash) {
                     widget.entry.file.deletePermanently(widget.entry);
                   } else {
                     widget.entry.file.deleteEntry(widget.entry);
@@ -282,9 +286,13 @@ class _CardDetailsScreenState extends State<CardDetailsScreen> {
                     navigator.pop();
                     scaffoldMessenger.clearSnackBars();
                     scaffoldMessenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Card deleted successfully'),
-                        duration: Duration(milliseconds: 1800),
+                      SnackBar(
+                        content: Text(
+                          isTrash
+                              ? 'Card permanently deleted'
+                              : 'Card deleted successfully',
+                        ),
+                        duration: const Duration(milliseconds: 1800),
                       ),
                     );
                   }

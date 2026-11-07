@@ -599,17 +599,21 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
                 final kdbxBloc = context.read<KdbxBloc>();
                 final navigator = Navigator.of(context);
                 final scaffoldMessenger = ScaffoldMessenger.of(context);
+                final isTrash = KeyNestItemTypeHelper.isEntryInTrash(entry);
                 final confirm = await DialogUtils.showConfirmDialog(
                   context: context,
                   params: ConfirmDialogParams(
-                    title: 'Delete Entry',
-                    content: 'Are you sure you want to delete this entry?',
-                    positiveButtonText: 'Delete',
+                    title: isTrash ? 'Delete Permanently' : 'Delete Entry',
+                    content: isTrash
+                        ? 'Are you sure you want to permanently delete this entry? This action cannot be undone.'
+                        : 'Are you sure you want to delete this entry?',
+                    positiveButtonText:
+                        isTrash ? 'Delete Permanently' : 'Delete',
                   ),
                 );
                 if (confirm == true && mounted) {
                   subscriptions.cancelSubscriptions();
-                  if (KeyNestItemTypeHelper.isEntryInTrash(entry)) {
+                  if (isTrash) {
                     entry.file.deletePermanently(entry);
                   } else {
                     entry.file.deleteEntry(entry);
@@ -622,7 +626,11 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
                     scaffoldMessenger.clearSnackBars();
                     scaffoldMessenger.showSnackBar(
                       SnackBar(
-                        content: Text(loc.deletedEntry),
+                        content: Text(
+                          isTrash
+                              ? 'Entry permanently deleted.'
+                              : loc.deletedEntry,
+                        ),
                         duration: const Duration(milliseconds: 1800),
                       ),
                     );
