@@ -4067,21 +4067,28 @@ class PasswordEntryTile extends StatelessWidget {
             if (!isSelectionMode)
               StatefulBuilder(
                 builder: (context, setFavState) {
-                  final isFav =
-                      vm.entry.getString(KdbxKey('is_favorite'))?.getText() ==
-                      'true';
+                  final isFav = KeyNestItemTypeHelper.isFavorite(vm.entry);
                   return KeyNestPressScale(
-                    onTap: () {
-                      setFavState(() {
-                        if (isFav) {
-                          vm.entry.removeString(KdbxKey('is_favorite'));
-                        } else {
-                          vm.entry.setString(
-                            KdbxKey('is_favorite'),
-                            PlainValue('true'),
-                          );
+                    onTap: () async {
+                      final kdbxBloc = context.read<KdbxBloc>();
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
+                      try {
+                        await KeyNestItemTypeHelper.toggleFavorite(
+                          vm.entry,
+                          kdbxBloc,
+                        );
+                        if (context.mounted) {
+                          setFavState(() {});
                         }
-                      });
+                      } catch (e) {
+                        scaffoldMessenger
+                          ..clearSnackBars()
+                          ..showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to save favorite: $e'),
+                            ),
+                          );
+                      }
                     },
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
@@ -4110,26 +4117,25 @@ class PasswordEntryTile extends StatelessWidget {
     if (filterQuery == null || filterQuery.trim().isEmpty) {
       return TextSpan(text: text);
     }
-    final lcText = text.toLowerCase();
-    final lcFilterTerms = filterQuery
-        .toLowerCase()
+    final filterTerms = filterQuery
+        .trim()
         .split(RegExp(r'\s+'))
         .where((e) => e.isNotEmpty)
         .toList();
-    if (lcFilterTerms.isEmpty) {
+    if (filterTerms.isEmpty) {
       return TextSpan(text: text);
     }
-    final regexPattern = lcFilterTerms.map((e) => RegExp.escape(e)).join('|');
+    final regexPattern = filterTerms.map(RegExp.escape).join('|');
     if (regexPattern.isEmpty) {
       return TextSpan(text: text);
     }
-    final filterRegexp = RegExp(regexPattern);
+    final filterRegexp = RegExp(regexPattern, caseSensitive: false);
     var previousMatchEnd = 0;
     final spans = <TextSpan>[];
     final highlightColor = isDark
         ? KeyNestPalette.primaryDark
         : KeyNestPalette.primary;
-    for (final match in filterRegexp.allMatches(lcText)) {
+    for (final match in filterRegexp.allMatches(text)) {
       if (match.start > previousMatchEnd) {
         spans.add(
           TextSpan(text: text.substring(previousMatchEnd, match.start)),

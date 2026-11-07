@@ -17,30 +17,32 @@ class KeyNestSearchHighlight {
       return TextSpan(text: text, style: defaultStyle);
     }
 
-    final lcText = text.toLowerCase();
-    final lcFilterTerms = query
-        .toLowerCase()
+    final filterTerms = query
+        .trim()
         .split(RegExp(r'\s+'))
         .where((e) => e.isNotEmpty)
         .toList();
 
-    if (lcFilterTerms.isEmpty) {
+    if (filterTerms.isEmpty) {
       return TextSpan(text: text, style: defaultStyle);
     }
 
-    final regexPattern = lcFilterTerms.map((e) => RegExp.escape(e)).join('|');
+    final regexPattern = filterTerms.map(RegExp.escape).join('|');
     if (regexPattern.isEmpty) {
       return TextSpan(text: text, style: defaultStyle);
     }
 
-    final filterRegexp = RegExp(regexPattern);
+    // Match case-insensitively directly on `text` (never `text.toLowerCase()`)
+    // so Unicode characters whose UTF-16 length changes on lowercasing (e.g. `İ`)
+    // never produce out-of-bounds indices on `text.substring(...)`.
+    final filterRegexp = RegExp(regexPattern, caseSensitive: false);
     var previousMatchEnd = 0;
     final spans = <TextSpan>[];
     final color =
         highlightColor ??
         (isDark ? KeyNestPalette.primaryDark : KeyNestPalette.primary);
 
-    for (final match in filterRegexp.allMatches(lcText)) {
+    for (final match in filterRegexp.allMatches(text)) {
       if (match.start > previousMatchEnd) {
         spans.add(
           TextSpan(

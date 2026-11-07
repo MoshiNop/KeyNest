@@ -91,6 +91,7 @@ extension KeyNestStandardFieldExt on KeyNestStandardField {
     switch (this) {
       case KeyNestStandardField.password:
       case KeyNestStandardField.totp:
+      case KeyNestStandardField.cardNumber:
       case KeyNestStandardField.cvv:
       case KeyNestStandardField.pin:
         return true;

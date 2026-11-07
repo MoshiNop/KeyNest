@@ -76,6 +76,11 @@ class TotpQrData {
   static TotpQrData? _parseOtpAuthUri(String uriString) {
     try {
       final uri = Uri.parse(uriString);
+      // Only time-based TOTP (`otpauth://totp/...`) is supported; counter-based
+      // HOTP (`otpauth://hotp/...`) must not be computed as TOTP.
+      if (uri.host.toLowerCase() != 'totp') {
+        return null;
+      }
       final query = uri.queryParameters;
 
       // Extract secret

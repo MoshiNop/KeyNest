@@ -98,6 +98,7 @@ class KeyNestAutofillSaveDialog extends StatefulWidget {
 class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
   bool _obscurePassword = true;
   bool _isSaving = false;
+  String? _saveError;
   late TextEditingController _titleController;
   late TextEditingController _usernameController;
   late TextEditingController _passwordController;
@@ -280,7 +281,12 @@ class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
   Future<void> _handleSave() async {
     setState(() {
       _isSaving = true;
+      _saveError = null;
     });
+
+    KdbxEntry? createdEntry;
+    KdbxFile? createdInFile;
+    var savedSuccessfully = false;
 
     try {
       if (_saveMode == SaveMode.updateExisting) {
@@ -324,6 +330,8 @@ class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
           file: file,
           group: group,
         );
+        createdEntry = newEntry;
+        createdInFile = file;
 
         if (_titleController.text.trim().isNotEmpty) {
           newEntry.setString(
@@ -357,14 +365,27 @@ class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
       }
 
       await AutofillService().clearPendingSaveRequest();
+      savedSuccessfully = true;
     } catch (e, stack) {
       _logger.warning('Failed to save autofill credential', e, stack);
+      if (createdEntry != null && createdInFile != null) {
+        try {
+          createdInFile.deletePermanently(createdEntry);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {
+          _saveError = 'Failed to save credential: $e';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
           _isSaving = false;
         });
-        widget.onDismiss?.call();
+        if (savedSuccessfully) {
+          widget.onDismiss?.call();
+        }
       }
     }
   }
@@ -768,6 +789,41 @@ class _KeyNestAutofillSaveDialogState extends State<KeyNestAutofillSaveDialog> {
 
                 // Destination Vault & Folder Picker
                 _buildDestinationPicker(isDark),
+              ],
+
+              if (_saveError != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        size: 18,
+                        color: Colors.redAccent,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _saveError!,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
 
               // Action Buttons

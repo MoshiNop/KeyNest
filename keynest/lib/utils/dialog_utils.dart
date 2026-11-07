@@ -518,50 +518,19 @@ class SimplePromptDialog extends StatefulWidget with DialogMixin<String> {
   String get name => '/dialog/prompt/simple';
 }
 
-class _SimplePromptDialogState extends State<SimplePromptDialog>
-    with WidgetsBindingObserver {
-  TextEditingController? _controller;
-  AppLifecycleState? _previousState;
-  String? _previousClipboard;
+class _SimplePromptDialogState extends State<SimplePromptDialog> {
+  late final TextEditingController _controller;
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialValue);
-    WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _readClipboard();
-      }
-    });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    _controller.dispose();
     super.dispose();
-  }
-
-  Future<void> _readClipboard({bool setIfChanged = false}) async {
-    final text = await getClipboardText();
-    if (setIfChanged && text != _previousClipboard && text != null) {
-      _controller!.text = text;
-      _controller!.selection = TextSelection(
-        baseOffset: 0,
-        extentOffset: text.length,
-      );
-    }
-    _previousClipboard = text;
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    _logger.fine('lifecycle state changed to $state (was: $_previousState)');
-    if (state == AppLifecycleState.resumed) {
-      _readClipboard(setIfChanged: true);
-    }
-    _previousState = state;
   }
 
   @override
@@ -578,7 +547,7 @@ class _SimplePromptDialogState extends State<SimplePromptDialog>
               tooltip: loc.promptDialogPasteActionTooltip,
               icon: const FaIcon(FontAwesomeIcons.paste),
               onPressed: () async {
-                _controller!.text =
+                _controller.text =
                     await getClipboardText() ?? CharConstants.empty;
               },
             ),
@@ -592,7 +561,7 @@ class _SimplePromptDialogState extends State<SimplePromptDialog>
                 ),
                 autofocus: true,
                 onEditingComplete: () {
-                  Navigator.of(context).pop(_controller!.text);
+                  Navigator.of(context).pop(_controller.text);
                 },
               ),
             ),
@@ -608,7 +577,7 @@ class _SimplePromptDialogState extends State<SimplePromptDialog>
         ),
         TextButton(
           onPressed: () {
-            Navigator.of(context).pop(_controller!.text);
+            Navigator.of(context).pop(_controller.text);
           },
           child: Text(matLoc.okButtonLabel),
         ),

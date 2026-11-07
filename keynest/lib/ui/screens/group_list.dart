@@ -83,8 +83,12 @@ class GroupList extends StatelessWidget {
                       title: loc.newGroupDialogTitle,
                       labelText: loc.newGroupDialogInputLabel,
                     ).show(context);
-                    if (newName != null) {
-                      parent!.file.createGroup(parent: parent!, name: newName);
+                    if (newName != null && newName.trim().isNotEmpty) {
+                      parent!.file.createGroup(
+                        parent: parent!,
+                        name: newName.trim(),
+                      );
+                      await kdbxBloc.saveFile(parent!.file);
                     }
                   },
                 ),
@@ -144,8 +148,10 @@ class GroupList extends StatelessWidget {
                     case GroupListLongPressAction.delete:
                       _logger.fine('We should delete ${group.name(loc)}');
                       final oldParent = group.group.parent;
+                      final messenger = ScaffoldMessenger.of(context);
                       group.file.deleteGroup(group.group);
-                      ScaffoldMessenger.of(context)
+                      await kdbxBloc.saveFile(group.file);
+                      messenger
                         ..clearSnackBars()
                         ..showSnackBar(
                           SnackBar(
@@ -153,8 +159,9 @@ class GroupList extends StatelessWidget {
                             duration: const Duration(milliseconds: 2500),
                             action: SnackBarAction(
                               label: loc.undoButtonLabel,
-                              onPressed: () {
+                              onPressed: () async {
                                 oldParent!.file.move(group.group, oldParent);
+                                await kdbxBloc.saveFile(oldParent.file);
                               },
                             ),
                           ),
@@ -761,6 +768,8 @@ class GroupListFlatList extends StatelessWidget {
                   ).push(GroupEditScreen.route(newGroup));
                   if (saved != true) {
                     group.file.kdbxFile.deletePermanently(newGroup);
+                  } else if (group.file.kdbxFile.dirtyObjects.isNotEmpty) {
+                    await group.kdbxBloc.saveFile(group.file.kdbxFile);
                   }
                   analytics.events.trackGroupCreate();
                   onRefresh?.call();
@@ -778,6 +787,7 @@ class GroupListFlatList extends StatelessWidget {
                       loc.deleteGroupErrorBodyContainsGroup,
                       routeAppend: 'deleteGroupError',
                     );
+                    return;
                   } else if (group.group.entries.isNotEmpty) {
                     analytics.events.trackGroupDelete(
                       GroupDeleteResult.hasEntries,
@@ -791,10 +801,12 @@ class GroupListFlatList extends StatelessWidget {
                     return;
                   }
                   final oldParent = group.group.parent;
+                  final messenger = ScaffoldMessenger.of(context);
                   group.file.kdbxFile.deleteGroup(group.group);
+                  await group.kdbxBloc.saveFile(group.file.kdbxFile);
                   analytics.events.trackGroupDelete(GroupDeleteResult.deleted);
                   onRefresh?.call();
-                  ScaffoldMessenger.of(context)
+                  messenger
                     ..clearSnackBars()
                     ..showSnackBar(
                       SnackBar(
@@ -802,8 +814,9 @@ class GroupListFlatList extends StatelessWidget {
                         duration: const Duration(milliseconds: 2500),
                         action: SnackBarAction(
                           label: loc.undoButtonLabel,
-                          onPressed: () {
+                          onPressed: () async {
                             oldParent!.file.move(group.group, oldParent);
+                            await group.kdbxBloc.saveFile(oldParent.file);
                             analytics.events.trackGroupDelete(
                               GroupDeleteResult.undo,
                             );
@@ -818,10 +831,15 @@ class GroupListFlatList extends StatelessWidget {
                     context,
                   ).push(GroupEditScreen.route(group.group));
                   if (saved == true) {
+                    if (group.file.kdbxFile.dirtyObjects.isNotEmpty) {
+                      await group.kdbxBloc.saveFile(group.file.kdbxFile);
+                    }
                     onRefresh?.call();
                   }
                   break;
                 case GroupAction.deletePermanently:
+                  final messenger = ScaffoldMessenger.of(context);
+                  final deletedMsg = loc.permanentlyDeletedEntrySnackBar;
                   final result = await DialogUtils.showConfirmDialog(
                     context: context,
                     params: ConfirmDialogParams(
@@ -835,8 +853,11 @@ class GroupListFlatList extends StatelessWidget {
                     return;
                   }
                   group.group.file.deletePermanently(group.group);
+                  await group.kdbxBloc.saveFile(group.file.kdbxFile);
                   analytics.events.trackPermanentlyDeleteGroup();
-                  context.showSnackBar(loc.permanentlyDeletedEntrySnackBar);
+                  messenger
+                    ..clearSnackBars()
+                    ..showSnackBar(SnackBar(content: Text(deletedMsg)));
                   onRefresh?.call();
                   break;
               }

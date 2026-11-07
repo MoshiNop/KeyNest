@@ -550,28 +550,20 @@ class _KeyNestAppState extends State<KeyNestApp> with StreamSubscriberMixin {
                   as Route<dynamic>;
 
           if (initialRoute == '/autofill') {
-            final autofillRoute =
-                (isUnlocked
-                        ? KeyNestAutofillSheet.route(kdbxBloc: _deps.kdbxBloc)
-                        : (hasPreviousFiles
-                              ? LockedScreen.route(isAutofill: true)
+            if (isUnlocked) {
+              return [
+                MainAppScaffold.route(),
+                KeyNestAutofillSheet.route(kdbxBloc: _deps.kdbxBloc),
+              ];
+            }
+            final lockedAutofillRoute =
+                (hasPreviousFiles
+                        ? LockedScreen.route(isAutofill: true)
+                        : (isFirstRun && widget.env.featureOnboarding
+                              ? OnboardingScreen.route()
                               : SelectFileScreen.route(skipQuickUnlock: true)))
                     as Route<dynamic>;
-            final safeBaseRoute =
-                (isUnlocked
-                        ? MainAppScaffold.route()
-                        : (hasPreviousFiles
-                              ? MainAppScaffold.route()
-                              : (isFirstRun && widget.env.featureOnboarding
-                                    ? OnboardingScreen.route()
-                                    : SelectFileScreen.route(
-                                        skipQuickUnlock: true,
-                                      ))))
-                    as Route<dynamic>;
-            return [
-              safeBaseRoute,
-              autofillRoute,
-            ];
+            return [lockedAutofillRoute];
           }
           if (initialRoute.startsWith(AppConstants.routeOpenFile)) {
             final uri = Uri.parse(initialRoute);

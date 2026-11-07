@@ -70,8 +70,10 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
   final GlobalKey<FormState> _formKey = GlobalKey();
   final TextEditingController _databaseName = TextEditingController();
   final TextEditingController _password = TextEditingController();
+  final TextEditingController _confirmPassword = TextEditingController();
   final TextEditingController _customPathController = TextEditingController();
   final FocusNode _passwordFocus = FocusNode();
+  final FocusNode _confirmPasswordFocus = FocusNode();
 
   Result? _strength;
 
@@ -101,8 +103,10 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
   void dispose() {
     _databaseName.dispose();
     _password.dispose();
+    _confirmPassword.dispose();
     _customPathController.dispose();
     _passwordFocus.dispose();
+    _confirmPasswordFocus.dispose();
     _keyFileController.dispose();
     super.dispose();
   }
@@ -145,6 +149,17 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
             ),
           );
           _passwordFocus.requestFocus();
+          return;
+        }
+        if (_confirmPassword.text != _password.text) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Please confirm your master password so both fields match.',
+              ),
+            ),
+          );
+          _confirmPasswordFocus.requestFocus();
           return;
         }
 
@@ -356,7 +371,8 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
                     controller: _password,
                     focusNode: _passwordFocus,
                     autofocus: true,
-                    onFieldSubmitted: (val) => _submitCallback()?.call(),
+                    onFieldSubmitted: (val) =>
+                        _confirmPasswordFocus.requestFocus(),
                     autovalidateMode: AutovalidateMode.onUserInteraction,
                     onChanged: (value) {
                       final userInput = _databaseName.text.pathCase.split(
@@ -376,6 +392,24 @@ class _CreateFileState extends State<CreateFile> with FutureTaskStateMixin {
                     validator: (val) {
                       if (val == null || val.isEmpty) {
                         return loc.masterPasswordMissingCreate;
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  PasswordInputField(
+                    labelText: 'Confirm Master Password',
+                    controller: _confirmPassword,
+                    focusNode: _confirmPasswordFocus,
+                    autofocus: false,
+                    onFieldSubmitted: (val) => _submitCallback()?.call(),
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: (val) {
+                      if (val == null || val.isEmpty) {
+                        return 'Please confirm your master password.';
+                      }
+                      if (val != _password.text) {
+                        return 'Passwords do not match.';
                       }
                       return null;
                     },

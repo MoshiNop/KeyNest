@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:kdbx/kdbx.dart';
+import 'package:kdbx/src/kdbx_entry.dart'; // ignore: implementation_imports
 import 'package:keynest/bloc/kdbx_bloc.dart';
 import 'package:keynest/theme.dart';
 import 'package:keynest/ui/design_system/design_system.dart';
@@ -43,6 +44,7 @@ class AddPaymentCardScreen extends StatefulWidget {
       'Title',
       'Cardholder',
       'Password',
+      'CardNumber',
       'Expiry',
       'CVV',
       'PIN',
@@ -54,9 +56,15 @@ class AddPaymentCardScreen extends StatefulWidget {
       'CardGradient',
       'CardNamePos',
       'ItemCategory',
+      'KeyNest_Category',
       'RecordType',
       'IsDeleted',
+      'ItemType',
+      'KeyNest_ItemType',
       'KeyNest.ItemType',
+      'Tags',
+      'is_favorite',
+      'IsFavorite',
       'UserName',
       'URL',
       'Notes',
@@ -69,11 +77,19 @@ class AddPaymentCardScreen extends StatefulWidget {
 }
 
 class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
+  final TextEditingController _titleController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _numberController = TextEditingController();
   final TextEditingController _expiryController = TextEditingController();
   final TextEditingController _cvvController = TextEditingController();
   final TextEditingController _pinController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+
+  String _initialHolder = '';
+  bool _notesWasProtected = false;
+  final Set<String> _protectedCustomKeys = <String>{};
+  bool _isDirty = false;
+  bool _didCompleteSave = false;
 
   bool _isCvvMasked = true;
   bool _isPinMasked = true;
@@ -122,13 +138,21 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
 
     if (widget.existingEntry != null) {
       final e = widget.existingEntry!;
+      _titleController.text =
+          e.getString(KdbxKeyCommon.TITLE)?.getText() ?? '';
       _nameController.text =
           e.getString(KdbxKey('Cardholder'))?.getText() ?? '';
-      _numberController.text =
-          e.getString(KdbxKeyCommon.PASSWORD)?.getText() ?? '';
+      _initialHolder = _nameController.text.trim();
+      final pwNum = e.getString(KdbxKeyCommon.PASSWORD)?.getText() ?? '';
+      _numberController.text = pwNum.isNotEmpty
+          ? pwNum
+          : (e.getString(KdbxKey('CardNumber'))?.getText() ?? '');
       _expiryController.text = e.getString(KdbxKey('Expiry'))?.getText() ?? '';
       _cvvController.text = e.getString(KdbxKey('CVV'))?.getText() ?? '';
       _pinController.text = e.getString(KdbxKey('PIN'))?.getText() ?? '';
+      final notesVal = e.getString(KdbxKey('Notes'));
+      _notesWasProtected = notesVal is ProtectedValue;
+      _notesController.text = notesVal?.getText() ?? '';
       _selectedNetwork = e.getString(KdbxKey('Network'))?.getText() ?? 'Auto';
 
       final colorHex = e.getString(KdbxKey('CardColorHex'))?.getText();
@@ -187,18 +211,62 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
 
       for (final s in e.stringEntries) {
         final k = s.key.key;
-        if (!AddPaymentCardScreen.isCardSystemKey(k) &&
-            s.value?.getText()?.isNotEmpty == true) {
+        if (!AddPaymentCardScreen.isCardSystemKey(k) && s.value != null) {
           final val = s.value!.getText() ?? '';
+          final wasProtected = s.value is ProtectedValue;
+          if (wasProtected) {
+            _protectedCustomKeys.add(k);
+          }
           final kind = KeyNestCustomFieldSheet.resolveFieldKind(
             e,
             k,
             value: val,
-            isProtected: s.value is ProtectedValue,
+            isProtected: wasProtected,
           );
           _customFields.add(CustomFieldModel(key: k, value: val, kind: kind));
         }
       }
+    }
+
+    for (final ctrl in [
+      _titleController,
+      _nameController,
+      _numberController,
+      _expiryController,
+      _cvvController,
+      _pinController,
+      _notesController,
+    ]) {
+      ctrl.addListener(_markDirty);
+    }
+  }
+
+  void _markDirty() {
+    if (!_isDirty && mounted) {
+      setState(() => _isDirty = true);
+    }
+  }
+
+  Future<bool> _confirmDiscardIfNeeded() async {
+    if (!_isDirty || _didCompleteSave) {
+      return true;
+    }
+    final confirm = await DialogUtils.showConfirmDialog(
+      context: context,
+      params: ConfirmDialogParams(
+        title: 'Discard Changes?',
+        content: 'You have unsaved card changes that will be lost. Discard them?',
+        positiveButtonText: 'Discard',
+        negativeButtonText: 'Keep Editing',
+      ),
+    );
+    return confirm == true;
+  }
+
+  Future<void> _handleBackRequest() async {
+    final shouldDiscard = await _confirmDiscardIfNeeded();
+    if (shouldDiscard && mounted) {
+      Navigator.of(context).pop();
     }
   }
 
@@ -224,11 +292,18 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
       } catch (_) {}
       _createdEntry = null;
     }
-    _nameController.dispose();
-    _numberController.dispose();
-    _expiryController.dispose();
-    _cvvController.dispose();
-    _pinController.dispose();
+    for (final ctrl in [
+      _titleController,
+      _nameController,
+      _numberController,
+      _expiryController,
+      _cvvController,
+      _pinController,
+      _notesController,
+    ]) {
+      ctrl.removeListener(_markDirty);
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
@@ -278,12 +353,12 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         );
       return;
     }
-    if (!RegExp(r'^\d{16}$').hasMatch(cleanNumber)) {
+    if (!RegExp(r'^\d{13,19}$').hasMatch(cleanNumber)) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(
           const SnackBar(
-            content: Text('Card number must be exactly 16 digits.'),
+            content: Text('Card number must be 13 to 19 digits.'),
             backgroundColor: KeyNestPalette.error,
             duration: Duration(milliseconds: 2500),
           ),
@@ -323,7 +398,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     final now = DateTime.now();
     final isExpired =
         expYear < now.year || (expYear == now.year && expMonth < now.month);
-    if (isExpired) {
+    if (isExpired && widget.existingEntry == null) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
         ..showSnackBar(
@@ -363,8 +438,10 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     }
 
     setState(() => _isSaving = true);
+    KdbxEntry? historyClone;
 
     try {
+      final isEditingExisting = widget.existingEntry != null;
       final entry =
           widget.existingEntry ??
           (_createdEntry ??= kdbxBloc.createEntry(
@@ -372,11 +449,27 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
             group: _selectedGroup,
           ));
 
+      if (isEditingExisting) {
+        final clonedHistory = entry.cloneInto(
+          entry.parent ?? entry.file.body.rootGroup,
+          toHistoryEntry: true,
+        );
+        historyClone = clonedHistory;
+        entry.history.add(clonedHistory);
+      }
+
       if (_selectedGroup != null && entry.parent != _selectedGroup) {
         entry.file.move(entry, _selectedGroup!);
       }
 
-      final title = '$holder Card';
+      final typedTitle = _titleController.text.trim();
+      final wasDefaultHolderTitle =
+          _initialHolder.isNotEmpty &&
+          typedTitle == '$_initialHolder Card' &&
+          holder != _initialHolder;
+      final title = (typedTitle.isEmpty || wasDefaultHolderTitle)
+          ? '$holder Card'
+          : typedTitle;
 
       entry.setString(KdbxKeyCommon.TITLE, PlainValue(title));
       KeyNestItemTypeHelper.setItemType(entry, KeyNestItemType.card);
@@ -394,6 +487,10 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         ProtectedValue.fromString(cleanNumber),
       );
       entry.setString(
+        KdbxKey('CardNumber'),
+        ProtectedValue.fromString(cleanNumber),
+      );
+      entry.setString(
         KdbxKey('Expiry'),
         PlainValue(rawExpiry),
       );
@@ -408,6 +505,17 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         );
       } else if (widget.existingEntry != null) {
         entry.removeString(KdbxKey('PIN'));
+      }
+      final trimmedNotes = _notesController.text.trim();
+      if (trimmedNotes.isNotEmpty) {
+        entry.setString(
+          KdbxKey('Notes'),
+          _notesWasProtected
+              ? ProtectedValue.fromString(_notesController.text)
+              : PlainValue(_notesController.text),
+        );
+      } else if (widget.existingEntry != null) {
+        entry.removeString(KdbxKey('Notes'));
       }
       entry.setString(
         KdbxKey('Network'),
@@ -455,6 +563,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
 
       for (final custom in _customFields) {
         final isSensitive =
+            _protectedCustomKeys.contains(custom.key) ||
             custom.kind == CustomFieldKind.hidden ||
             custom.kind == CustomFieldKind.pin ||
             custom.kind == CustomFieldKind.authenticator ||
@@ -476,6 +585,8 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
 
       await kdbxBloc.saveFile(entry.file);
       _createdEntry = null;
+      _didCompleteSave = true;
+      _isDirty = false;
 
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -489,6 +600,9 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         Navigator.of(context).pop();
       }
     } catch (e) {
+      if (historyClone != null && widget.existingEntry != null) {
+        widget.existingEntry!.history.remove(historyClone);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
@@ -804,22 +918,30 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
-      appBar: AppBar(
-        title: Text(
-          widget.existingEntry != null ? 'Edit Card' : 'Add Card',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-        ),
-        leading: IconButton(
-          icon: Icon(
-            KeyNestPlatform.isDesktopOrWeb
-                ? Icons.close_rounded
-                : Icons.arrow_back_rounded,
+    return PopScope(
+      canPop: !_isDirty || _didCompleteSave,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
+          return;
+        }
+        await _handleBackRequest();
+      },
+      child: Scaffold(
+        backgroundColor: isDark ? KeyNestPalette.bgDark : KeyNestPalette.bgLight,
+        appBar: AppBar(
+          title: Text(
+            widget.existingEntry != null ? 'Edit Card' : 'Add Card',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
           ),
-          onPressed: () => Navigator.pop(context),
+          leading: IconButton(
+            icon: Icon(
+              KeyNestPlatform.isDesktopOrWeb
+                  ? Icons.close_rounded
+                  : Icons.arrow_back_rounded,
+            ),
+            onPressed: _handleBackRequest,
+          ),
         ),
-      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         child: Column(
@@ -1041,6 +1163,39 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
             ),
             const SizedBox(height: 24),
 
+            // Card Title Input (Optional — preserves custom card titles)
+            _InputFieldContainer(
+              label: 'Card Title (Optional)',
+              icon: Icons.label_outline_rounded,
+              child: TextField(
+                controller: _titleController,
+                maxLines: 1,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Personal Amex, Travel Visa',
+                  isDense: true,
+                  hintStyle: TextStyle(
+                    color:
+                        (isDark
+                                ? KeyNestTokens.darkOnSurface
+                                : KeyNestTokens.lightOnSurface)
+                            .withValues(alpha: 0.38),
+                    fontWeight: FontWeight.normal,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
             // Cardholder Name Input
             _InputFieldContainer(
               label: 'Cardholder Name',
@@ -1107,7 +1262,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                 maxLines: 1,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(16),
+                  LengthLimitingTextInputFormatter(19),
                 ],
                 style: theme.textTheme.bodyLarge?.copyWith(
                   fontWeight: FontWeight.w600,
@@ -1119,7 +1274,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                 ),
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  hintText: '16 digits',
+                  hintText: '13 to 19 digits',
                   isDense: true,
                   hintStyle: TextStyle(
                     color:
@@ -1388,6 +1543,39 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                             .withValues(alpha: 0.38),
                     fontWeight: FontWeight.normal,
                     letterSpacing: 0,
+                  ),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Optional Notes Field
+            _InputFieldContainer(
+              label: 'Notes (Optional)',
+              icon: Icons.notes_rounded,
+              child: TextField(
+                controller: _notesController,
+                minLines: 1,
+                maxLines: 4,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: isDark
+                      ? KeyNestPalette.textPrimaryDark
+                      : KeyNestPalette.textPrimaryLight,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Billing address, customer support number, etc.',
+                  isDense: true,
+                  hintStyle: TextStyle(
+                    color:
+                        (isDark
+                                ? KeyNestTokens.darkOnSurface
+                                : KeyNestTokens.lightOnSurface)
+                            .withValues(alpha: 0.38),
+                    fontWeight: FontWeight.normal,
                   ),
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
@@ -1669,6 +1857,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
       ),
     );
   }

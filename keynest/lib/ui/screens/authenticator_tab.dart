@@ -401,12 +401,16 @@ class _AuthenticatorTabState extends State<AuthenticatorTab>
     final scope = KeyNestVaultScope.instance;
 
     // Find all entries in open vault/folder that have TOTP configured
+    final currentFolder = scope.getCurrentFolder(kdbxBloc, KeyNestTab.twoFactor);
+    final viewingTrash = KeyNestItemTypeHelper.isTrashOrRecycleBin(
+      currentFolder,
+    );
     final candidateEntries = scope.getScopedEntries(
       kdbxBloc,
       tab: KeyNestTab.twoFactor,
     );
     var allEntries = candidateEntries.where((e) {
-      if (KeyNestItemTypeHelper.isEntryInTrash(e)) {
+      if (!viewingTrash && KeyNestItemTypeHelper.isEntryInTrash(e)) {
         return false;
       }
       return EntryTotpHelper.hasTotp(e);

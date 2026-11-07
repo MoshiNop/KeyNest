@@ -7,12 +7,14 @@ import 'package:clock/clock.dart';
 import 'package:collection/collection.dart' show IterableExtension;
 import 'package:file_picker_writable/file_picker_writable.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_async_utils/flutter_async_utils.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:kdbx/kdbx.dart';
+import 'package:kdbx/src/kdbx_entry.dart'; // ignore: implementation_imports
 import 'package:keynest/bloc/analytics.dart';
 import 'package:keynest/bloc/app_data.dart';
 import 'package:keynest/bloc/kdbx/storage_exception.dart';
@@ -99,10 +101,12 @@ class EntryDetailsScreen extends StatefulWidget {
 class _EntrySnapshot {
   _EntrySnapshot({
     required this.strings,
+    required this.binaries,
     required this.icon,
     required this.customIcon,
     required this.tags,
     required this.customData,
+    required this.lastModificationTime,
   });
 
   factory _EntrySnapshot.capture(KdbxEntry entry) {
@@ -112,24 +116,97 @@ class _EntrySnapshot {
         strings[s.key] = s.value!;
       }
     }
+    final binaries = <KdbxKey, KdbxBinary>{};
+    for (final b in entry.binaryEntries) {
+      binaries[b.key] = b.value;
+    }
     final customData = <String, String>{};
     for (final cd in entry.customData.entries) {
       customData[cd.key] = cd.value;
     }
     return _EntrySnapshot(
       strings: strings,
+      binaries: binaries,
       icon: entry.icon.get(),
       customIcon: entry.customIcon,
       tags: entry.tags.get(),
       customData: customData,
+      lastModificationTime: entry.times.lastModificationTime.get(),
     );
   }
 
   final Map<KdbxKey, StringValue> strings;
+  final Map<KdbxKey, KdbxBinary> binaries;
   final KdbxIcon? icon;
   final KdbxCustomIcon? customIcon;
   final String? tags;
   final Map<String, String> customData;
+  final DateTime? lastModificationTime;
+
+  bool hasChangesFrom(KdbxEntry entry) {
+    final currentStrings = <KdbxKey, StringValue>{};
+    for (final s in entry.stringEntries) {
+      if (s.value != null) {
+        currentStrings[s.key] = s.value!;
+      }
+    }
+    if (currentStrings.length != strings.length) {
+      return true;
+    }
+    for (final e in strings.entries) {
+      final cur = currentStrings[e.key];
+      if (cur == null) {
+        return true;
+      }
+      if ((cur.getText() ?? '') != (e.value.getText() ?? '') ||
+          (cur is ProtectedValue) != (e.value is ProtectedValue)) {
+        return true;
+      }
+    }
+
+    final currentBinaries = <KdbxKey, KdbxBinary>{
+      for (final b in entry.binaryEntries) b.key: b.value,
+    };
+    if (currentBinaries.length != binaries.length) {
+      return true;
+    }
+    for (final b in binaries.entries) {
+      final curBin = currentBinaries[b.key];
+      if (curBin == null ||
+          curBin.isProtected != b.value.isProtected ||
+          !listEquals(curBin.value, b.value.value)) {
+        return true;
+      }
+    }
+
+    if (entry.icon.get() != icon ||
+        entry.customIcon?.uuid != customIcon?.uuid ||
+        (entry.tags.get() ?? '') != (tags ?? '')) {
+      return true;
+    }
+
+    final currentCustomData = <String, String>{
+      for (final cd in entry.customData.entries) cd.key: cd.value,
+    };
+    if (currentCustomData.length != customData.length) {
+      return true;
+    }
+    for (final cd in customData.entries) {
+      if (currentCustomData[cd.key] != cd.value) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  KdbxEntry toHistoryEntry(KdbxEntry entry) {
+    final hist = entry.cloneInto(
+      entry.parent ?? entry.file.body.rootGroup,
+      toHistoryEntry: true,
+    );
+    restore(hist);
+    return hist;
+  }
 
   void restore(KdbxEntry entry) {
     final currentKeys = entry.stringEntries.map((e) => e.key).toList();
@@ -141,6 +218,18 @@ class _EntrySnapshot {
     for (final e in strings.entries) {
       entry.setString(e.key, e.value);
     }
+
+    final currentBinKeys = entry.binaryEntries.map((e) => e.key).toList();
+    currentBinKeys.forEach(entry.removeBinary);
+    for (final b in binaries.entries) {
+      entry.file.ctx.addBinary(b.value);
+      entry.createBinary(
+        isProtected: b.value.isProtected,
+        name: b.key.key,
+        bytes: b.value.value,
+      );
+    }
+
     if (icon != null) {
       entry.icon.set(icon!);
     }
@@ -150,15 +239,15 @@ class _EntrySnapshot {
     } else {
       entry.tags.remove();
     }
-    final existingCustomKeys =
-        entry.customData.entries.map((e) => e.key).toList();
-    for (final k in existingCustomKeys) {
-      if (!customData.containsKey(k)) {
-        entry.customData[k] = '';
-      }
-    }
+
+    final restoredCustomData = KdbxCustomData.create();
     for (final e in customData.entries) {
-      entry.customData[e.key] = e.value;
+      restoredCustomData[e.key] = e.value;
+    }
+    entry.customData.overwriteFrom(restoredCustomData);
+
+    if (lastModificationTime != null) {
+      entry.times.lastModificationTime.set(lastModificationTime!);
     }
   }
 }
@@ -193,6 +282,18 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
       isFormDirty = false;
       entryViewModel = EntryViewModel(widget.entry, kdbxBloc);
     });
+  }
+
+  KdbxEntry? _recordRevisionHistoryIfEdited() {
+    if (_isNew || _entrySnapshot == null) {
+      return null;
+    }
+    if (!_entrySnapshot!.hasChangesFrom(widget.entry)) {
+      return null;
+    }
+    final hist = _entrySnapshot!.toHistoryEntry(widget.entry);
+    widget.entry.history.add(hist);
+    return hist;
   }
 
   @override
@@ -377,7 +478,31 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
           ),
         ),
         actions: <Widget>[
-          if (!_isEditing)
+          if (!_isEditing) ...[
+            IconButton(
+              tooltip: KeyNestItemTypeHelper.isFavorite(entry)
+                  ? 'Remove from Favorites'
+                  : 'Add to Favorites',
+              icon: Icon(
+                KeyNestItemTypeHelper.isFavorite(entry)
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: KeyNestItemTypeHelper.isFavorite(entry)
+                    ? Colors.amber
+                    : (isDark
+                          ? KeyNestPalette.textSecondaryDark
+                          : KeyNestPalette.textSecondaryLight),
+              ),
+              onPressed: () async {
+                final kdbxBloc = context.read<KdbxBloc>();
+                await KeyNestItemTypeHelper.toggleFavorite(entry, kdbxBloc);
+                if (mounted) {
+                  setState(() {
+                    entryViewModel = EntryViewModel(entry, kdbxBloc);
+                  });
+                }
+              },
+            ),
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: Center(
@@ -392,8 +517,8 @@ class _EntryDetailsScreenState extends State<EntryDetailsScreen>
                   },
                 ),
               ),
-            )
-          else ...[
+            ),
+          ] else ...[
             if (!_isNew)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
@@ -763,15 +888,24 @@ mixin KdbxObjectSavableStateMixin<T extends StatefulWidget>
       setState(() => isFormDirty = false);
       final kdbxBloc = Provider.of<KdbxBloc>(context, listen: false);
       if (kdbxBloc.fileForKdbxFile(file).fileSource.supportsWrite) {
+        KdbxEntry? recordedHistory;
         try {
           if (kdbxObject is KdbxEntry) {
             KeyNestItemTypeHelper.upgradeEntrySensitiveFields(
               kdbxObject as KdbxEntry,
             );
           }
+          if (this is _EntryDetailsScreenState) {
+            recordedHistory =
+                (this as _EntryDetailsScreenState)
+                    ._recordRevisionHistoryIfEdited();
+          }
           await kdbxBloc.saveFile(file);
           await onFileSaved();
         } on StorageException catch (e, stackTrace) {
+          if (recordedHistory != null && kdbxObject is KdbxEntry) {
+            (kdbxObject as KdbxEntry).history.remove(recordedHistory);
+          }
           _logger.warning('Error while saving database.', e, stackTrace);
           await DialogUtils.showErrorDialog(
             context,
@@ -780,6 +914,9 @@ mixin KdbxObjectSavableStateMixin<T extends StatefulWidget>
           );
           return;
         } catch (e, stackTrace) {
+          if (recordedHistory != null && kdbxObject is KdbxEntry) {
+            (kdbxObject as KdbxEntry).history.remove(recordedHistory);
+          }
           _logger.severe('Error while saving database.', e, stackTrace);
           if (mounted) {
             await DialogUtils.showErrorDialog(
@@ -981,9 +1118,15 @@ class _EntryDetailsState extends State<EntryDetails>
 
   static bool _isInternalMetadataKey(KdbxKey key) {
     const hidden = {
+      'ItemType',
+      'KeyNest_ItemType',
+      'KeyNest.ItemType',
       'RecordType',
       'ItemCategory',
+      'KeyNest_Category',
       'IsDeleted',
+      'is_favorite',
+      'IsFavorite',
       'CardColorHex',
       'CardFinish',
       'CardNetwork',
@@ -1276,12 +1419,15 @@ class _EntryDetailsState extends State<EntryDetails>
                                     }
                                   },
                                 ),
-                                EntryMetaInfo(
-                                  label: loc.entryInfoLastModified,
-                                  value: formatUtils.formatDateFull(
-                                    vm.entry.times.lastModificationTime.get()!,
+                                if (vm.entry.times.lastModificationTime.get() !=
+                                    null)
+                                  EntryMetaInfo(
+                                    label: loc.entryInfoLastModified,
+                                    value: formatUtils.formatDateFull(
+                                      vm.entry.times.lastModificationTime
+                                          .get()!,
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -1623,8 +1769,8 @@ class AttachmentBottomSheet extends StatelessWidget {
           title: Text(loc.entryAttachmentOpenActionLabel),
           onTap: () async {
             analytics.events.trackAttachmentAction('open');
-            Navigator.of(context).pop();
             final kdbxBloc = context.read<KdbxBloc>();
+            Navigator.of(context).pop();
             final provider = await kdbxBloc.attachmentProviderForFileSource(
               entry.file,
             );
@@ -1648,6 +1794,7 @@ class AttachmentBottomSheet extends StatelessWidget {
           onTap: () async {
             analytics.events.trackAttachmentAction('share');
             final kdbxBloc = context.read<KdbxBloc>();
+            final navigator = Navigator.of(context);
             final provider = await kdbxBloc.attachmentProviderForFileSource(
               entry.file,
             );
@@ -1655,16 +1802,18 @@ class AttachmentBottomSheet extends StatelessWidget {
               entry.file,
               attachment.value,
             );
-            final mimeType = lookupMimeType(
-              attachment.key.key,
-              headerBytes: bytes.length > defaultMagicNumbersMaxLength
-                  ? Uint8List.sublistView(
-                      bytes,
-                      0,
-                      defaultMagicNumbersMaxLength,
-                    )
-                  : null,
-            )!;
+            final mimeType =
+                lookupMimeType(
+                  attachment.key.key,
+                  headerBytes: bytes.length > defaultMagicNumbersMaxLength
+                      ? Uint8List.sublistView(
+                          bytes,
+                          0,
+                          defaultMagicNumbersMaxLength,
+                        )
+                      : null,
+                ) ??
+                'application/octet-stream';
             _logger.fine('Opening attachment with mimeType $mimeType');
 
             final tempDir = await PathUtils().getTemporaryDirectory();
@@ -1684,7 +1833,9 @@ class AttachmentBottomSheet extends StatelessWidget {
               unawaited(f.delete());
             }
 
-            Navigator.of(context).pop();
+            if (context.mounted) {
+              navigator.pop();
+            }
           },
         ),
         if (!KeyNestPlatform.isWeb)
@@ -1693,8 +1844,9 @@ class AttachmentBottomSheet extends StatelessWidget {
             title: Text(loc.entryAttachmentSaveActionLabel),
             onTap: () async {
               analytics.events.trackAttachmentAction('saveToDevice');
-              Navigator.of(context).pop();
               final kdbxBloc = context.read<KdbxBloc>();
+              final saveButtonText = loc.saveButtonLabel;
+              Navigator.of(context).pop();
               final provider = await kdbxBloc.attachmentProviderForFileSource(
                 entry.file,
               );
@@ -1713,7 +1865,7 @@ class AttachmentBottomSheet extends StatelessWidget {
               } else {
                 final saveLocation = await getSaveLocation(
                   suggestedName: attachment.key.key,
-                  confirmButtonText: loc.saveButtonLabel,
+                  confirmButtonText: saveButtonText,
                 );
                 if (saveLocation != null) {
                   final outputFile = io.File(saveLocation.path);
@@ -1727,13 +1879,16 @@ class AttachmentBottomSheet extends StatelessWidget {
           title: Text(loc.entryAttachmentRemoveActionLabel),
           onTap: () async {
             analytics.events.trackAttachmentAction('remove');
-            Navigator.of(context).pop();
+            final navigator = Navigator.of(context);
             final confirm = await DialogUtils.showConfirmDialog(
               context: context,
               params: ConfirmDialogParams(
                 content: loc.entryAttachmentRemoveConfirm(attachment.key.key),
               ),
             );
+            if (context.mounted) {
+              navigator.pop();
+            }
             if (confirm) {
               entry.removeBinary(attachment.key);
             }
@@ -2629,10 +2784,19 @@ class _EntryFieldState extends State<EntryField>
     return StringEntryFieldEditor(
       onSaved: (value) {
         final trimmed = value?.trim();
-        final isRemovableOptional = widget.fieldKey == KdbxKey('Notes') ||
-            (widget.fieldKey != KdbxKeyCommon.TITLE &&
-                widget.fieldKey != KdbxKeyCommon.PASSWORD &&
-                widget.fieldKey != KdbxKeyCommon.USER_NAME);
+        final isRecordEntry =
+            KeyNestItemTypeHelper.getItemType(widget.entry) ==
+                KeyNestItemType.record ||
+            widget.entry.getString(KdbxKey('RecordType')) != null ||
+            widget.entry.getString(KdbxKey('ItemCategory'))?.getText() ==
+                'Record';
+        final isRemovableOptional =
+            !isRecordEntry &&
+            widget.commonField != null &&
+            (widget.fieldKey == KdbxKey('Notes') ||
+                (widget.fieldKey != KdbxKeyCommon.TITLE &&
+                    widget.fieldKey != KdbxKeyCommon.PASSWORD &&
+                    widget.fieldKey != KdbxKeyCommon.USER_NAME));
         if (value == null ||
             (trimmed != null && trimmed.isEmpty && isRemovableOptional)) {
           widget.onDeleteField?.call(widget.fieldKey);
@@ -2647,7 +2811,11 @@ class _EntryFieldState extends State<EntryField>
               : PlainValue(value);
           _fieldValue = newValue;
           if (widget.fieldKey == KdbxKey('Tags')) {
-            widget.entry.tags.set(value);
+            if (value.trim().isEmpty) {
+              widget.entry.tags.remove();
+            } else {
+              widget.entry.tags.set(value);
+            }
           }
         }
       },
@@ -2968,8 +3136,21 @@ class _OtpEntryFieldState extends _EntryFieldState with WidgetsBindingObserver {
                         ),
                       ),
                       validator: (val) {
-                        if (val == null || val.trim().isEmpty) {
+                        final trimmed = val?.trim() ?? '';
+                        if (trimmed.isEmpty) {
                           return 'Please enter a secret key';
+                        }
+                        if (trimmed.toLowerCase().startsWith('otpauth://')) {
+                          final uri = Uri.tryParse(trimmed);
+                          if (uri == null || uri.scheme.toLowerCase() != 'otpauth') {
+                            return 'Invalid otpauth:// URI';
+                          }
+                          if (uri.host.toLowerCase() != 'totp') {
+                            return 'Only time-based TOTP URIs (otpauth://totp/...) are supported';
+                          }
+                          if ((uri.queryParameters['secret'] ?? '').trim().isEmpty) {
+                            return 'Missing secret parameter in otpauth:// URI';
+                          }
                         }
                         return null;
                       },
@@ -3086,14 +3267,31 @@ class _OtpEntryFieldState extends _EntryFieldState with WidgetsBindingObserver {
 
     if (updated == true && mounted) {
       final inputSecret = secretController.text.trim();
+      final digits = int.tryParse(digitsController.text.trim()) ?? 6;
+      final period = int.tryParse(periodController.text.trim()) ?? 30;
       String finalUri;
-      if (inputSecret.startsWith(OtpAuth.URI_PREFIX)) {
-        finalUri = inputSecret;
+      if (inputSecret.toLowerCase().startsWith(OtpAuth.URI_PREFIX)) {
+        final parsedUri = Uri.tryParse(inputSecret);
+        if (parsedUri != null) {
+          final updatedParams = <String, String>{
+            ...parsedUri.queryParameters,
+            'digits': digits.toString(),
+            'period': period.toString(),
+            'algorithm': selectedAlgorithm,
+          };
+          finalUri = parsedUri
+              .replace(
+                scheme: 'otpauth',
+                host: 'totp',
+                queryParameters: updatedParams,
+              )
+              .toString();
+        } else {
+          finalUri = inputSecret;
+        }
       } else {
         final cleanSecret = inputSecret.replaceAll(' ', '').toUpperCase();
         final label = Uri.encodeComponent(widget.entry.label ?? 'KeyNest');
-        final digits = int.tryParse(digitsController.text.trim()) ?? 6;
-        final period = int.tryParse(periodController.text.trim()) ?? 30;
         finalUri =
             'otpauth://totp/$label?secret=$cleanSecret&digits=$digits&period=$period&algorithm=$selectedAlgorithm';
       }

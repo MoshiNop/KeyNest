@@ -981,23 +981,28 @@ class OpenFileBottomSheet extends StatelessWidget {
             ),
             subtitle: Text(loc.internalFileSubtitle),
             onTap: () async {
-              Navigator.of(context).pop();
+              final navigator = Navigator.of(context);
+              final parentContext = navigator.context;
+              navigator.pop();
               final rootDirectory = await PathUtils().getAppDocDirectory(
                 ensureCreated: true,
               );
+              if (!parentContext.mounted) {
+                return;
+              }
               _logger.fine('Opening picker for $rootDirectory');
               final filePath = await FilesystemPicker.open(
-                context: context,
+                context: parentContext,
                 rootDirectory: rootDirectory,
                 fsType: FilesystemType.file,
                 allowedExtensions: [AppConstants.kdbxExtension],
                 fileTileSelectMode: FileTileSelectMode.wholeTile,
               );
-              if (filePath == null) {
+              if (filePath == null || !parentContext.mounted) {
                 _logger.fine('User canceled FilesystemPicker.');
                 return;
               }
-              await Navigator.of(context).push(
+              await navigator.push(
                 CredentialsScreen.route(
                   FileSourceLocal(
                     FileSourceLocal.localFile(filePath),
@@ -1211,12 +1216,16 @@ class _SelectUrlDialogState extends State<SelectUrlDialog> {
 
   String? Function(String? urlString) _parseUrl(AppLocalizations loc) {
     return (urlString) {
+      final trimmed = urlString?.trim() ?? '';
+      if (trimmed.isEmpty) {
+        return loc.loadFromUrlErrorEnterFullUrl;
+      }
       try {
-        final uri = Uri.parse(urlString!);
-        if (!uri.scheme.startsWith(nonNls('http'))) {
+        final uri = Uri.parse(trimmed);
+        if (!uri.scheme.startsWith(nonNls('http')) || uri.host.isEmpty) {
           // NON-NLS
           _logger.fine(
-            'User entered url with invalid schema ${FormatUtils.anonymizeUrl(urlString)}',
+            'User entered url with invalid schema ${FormatUtils.anonymizeUrl(trimmed)}',
           );
           return loc.loadFromUrlErrorEnterFullUrl;
         }
@@ -1224,7 +1233,7 @@ class _SelectUrlDialogState extends State<SelectUrlDialog> {
         return null;
       } on FormatException catch (e) {
         _logger.fine(
-          'User entered invalid url ${FormatUtils.anonymizeUrl(urlString!)}',
+          'User entered invalid url ${FormatUtils.anonymizeUrl(trimmed)}',
           e,
         );
         return loc.loadFromUrlErrorInvalidUrl;
@@ -1266,8 +1275,6 @@ class _SelectUrlDialogState extends State<SelectUrlDialog> {
               Navigator.of(
                 context,
               ).pop(FileSourceUrl(_enteredUrl, uuid: AppDataBloc.createUuid()));
-            } else {
-              Navigator.of(context).pop();
             }
           },
           child: Text(matLoc.okButtonLabel),

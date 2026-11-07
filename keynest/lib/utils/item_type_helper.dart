@@ -17,8 +17,33 @@ enum KeyNestItemType {
 /// and user-defined organizational categories (ItemCategory).
 class KeyNestItemTypeHelper {
   static const String itemTypeKey = 'ItemType';
+  static const String legacyItemTypeKey = 'KeyNest_ItemType';
+  static const String dotLegacyItemTypeKey = 'KeyNest.ItemType';
   static const String itemCategoryKey = 'ItemCategory';
   static const String recordTypeKey = 'RecordType';
+
+  /// Returns whether [entry] is marked as a favorite.
+  static bool isFavorite(KdbxEntry entry) {
+    return entry.getString(KdbxKey('is_favorite'))?.getText() == 'true' ||
+        entry.getString(KdbxKey('IsFavorite'))?.getText() == 'true';
+  }
+
+  /// Toggles the favorite flag on [entry] and persists the change to disk via [kdbxBloc].
+  static Future<bool> toggleFavorite(KdbxEntry entry, KdbxBloc kdbxBloc) async {
+    final currentlyFav = isFavorite(entry);
+    final nextFav = !currentlyFav;
+    if (nextFav) {
+      entry.setString(KdbxKey('is_favorite'), PlainValue('true'));
+    } else {
+      entry.removeString(KdbxKey('is_favorite'));
+      entry.removeString(KdbxKey('IsFavorite'));
+    }
+    entry.times.lastModificationTime.set(DateTime.now().toUtc());
+    invalidateCache(entry);
+    await kdbxBloc.saveFile(entry.file);
+    KeyNestVaultScope.instance.notifyScopeChanged();
+    return nextFav;
+  }
 
   /// Returns whether a field key or custom field represents sensitive information
   /// that must be stored as a [ProtectedValue].
@@ -77,7 +102,8 @@ class KeyNestItemTypeHelper {
 
   static final Expando<_CachedItemClassification> _classificationCache =
       Expando<_CachedItemClassification>('itemTypeClassificationCache');
-  static final Expando<bool> _trashCache = Expando<bool>('itemTypeTrashCache');
+  static final Expando<_CachedTrashState> _trashCache =
+      Expando<_CachedTrashState>('itemTypeTrashCache');
 
   /// Invalidates the cached classification for [entry] (or all entries if null).
   static void invalidateCache([KdbxEntry? entry]) {
@@ -241,11 +267,11 @@ class KeyNestItemTypeHelper {
   }
 
   static KeyNestItemType _computeItemType(KdbxEntry entry) {
-    final typeStr = entry
-        .getString(KdbxKey(itemTypeKey))
-        ?.getText()
-        ?.trim()
-        .toLowerCase();
+    final rawType =
+        entry.getString(KdbxKey(itemTypeKey))?.getText() ??
+        entry.getString(KdbxKey(legacyItemTypeKey))?.getText() ??
+        entry.getString(KdbxKey(dotLegacyItemTypeKey))?.getText();
+    final typeStr = rawType?.trim().toLowerCase();
     if (typeStr != null && typeStr.isNotEmpty) {
       switch (typeStr) {
         case 'card':
@@ -258,6 +284,7 @@ class KeyNestItemTypeHelper {
         case 'record':
           return KeyNestItemType.record;
         case '2fa':
+        case 'twofactor':
         case 'two_factor':
         case 'authenticator':
           return KeyNestItemType.twoFactor;
@@ -415,7 +442,30 @@ class KeyNestItemTypeHelper {
 
   /// Returns whether [entry] has been deleted or moved to trash.
   static bool isEntryInTrash(KdbxEntry entry) {
-    return _computeIsEntryInTrash(entry);
+    final parent = entry.parent;
+    final recycleBin = entry.file.recycleBin;
+    final parentName = parent?.name.get();
+    final catRef = entry.getString(KdbxKey(itemCategoryKey));
+    final deletedRef = entry.getString(KdbxKey('IsDeleted'));
+    final cached = _trashCache[entry];
+    if (cached != null &&
+        identical(cached.parent, parent) &&
+        identical(cached.recycleBin, recycleBin) &&
+        cached.parentName == parentName &&
+        identical(cached.catRef, catRef) &&
+        identical(cached.deletedRef, deletedRef)) {
+      return cached.isTrash;
+    }
+    final computed = _computeIsEntryInTrash(entry);
+    _trashCache[entry] = _CachedTrashState(
+      isTrash: computed,
+      parent: parent,
+      recycleBin: recycleBin,
+      parentName: parentName,
+      catRef: catRef,
+      deletedRef: deletedRef,
+    );
+    return computed;
   }
 
   static bool _computeIsEntryInTrash(KdbxEntry entry) {
@@ -826,4 +876,22 @@ class _CachedItemClassification {
   final String? recordType;
   final DateTime? modTime;
   final int stringCount;
+}
+
+class _CachedTrashState {
+  const _CachedTrashState({
+    required this.isTrash,
+    required this.parent,
+    required this.recycleBin,
+    required this.parentName,
+    required this.catRef,
+    required this.deletedRef,
+  });
+
+  final bool isTrash;
+  final KdbxGroup? parent;
+  final KdbxGroup? recycleBin;
+  final String? parentName;
+  final StringValue? catRef;
+  final StringValue? deletedRef;
 }

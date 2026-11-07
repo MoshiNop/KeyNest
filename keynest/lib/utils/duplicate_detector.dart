@@ -47,6 +47,7 @@ class KeyNestDuplicateDetector {
       'IsFavorite',
       'ItemCategory',
       'ItemType',
+      'KeyNest_ItemType',
       'KeyNest.ItemType',
       'RecordType',
       'CardColorHex',
@@ -87,6 +88,33 @@ class KeyNestDuplicateDetector {
     }
 
     return text.trim();
+  }
+
+  /// Normalizes a URL for complete-duplicate comparison by stripping protocol,
+  /// leading `www.`, and trailing slashes while preserving path & query string
+  /// so distinct sub-paths (e.g. `github.com/orgA` vs `github.com/orgB`) do not
+  /// collide as 100% duplicates.
+  static String normalizeUrlPreservingPath(String? raw) {
+    if (raw == null) return '';
+    var text = raw.trim();
+    if (text.isEmpty) return '';
+
+    final lower = text.toLowerCase();
+    if (lower.startsWith('https://')) {
+      text = text.substring(8);
+    } else if (lower.startsWith('http://')) {
+      text = text.substring(7);
+    }
+
+    if (text.toLowerCase().startsWith('www.')) {
+      text = text.substring(4);
+    }
+
+    while (text.endsWith('/')) {
+      text = text.substring(0, text.length - 1);
+    }
+
+    return text.trim().toLowerCase();
   }
 
   /// Normalizes generic text strings (lowercase and trimmed).
@@ -182,8 +210,12 @@ class KeyNestDuplicateDetector {
         final passB = b.getString(KdbxKeyCommon.PASSWORD)?.getText() ?? '';
         if (passA != passB) return false;
 
-        final urlA = normalizeUrl(a.getString(KdbxKeyCommon.URL)?.getText());
-        final urlB = normalizeUrl(b.getString(KdbxKeyCommon.URL)?.getText());
+        final urlA = normalizeUrlPreservingPath(
+          a.getString(KdbxKeyCommon.URL)?.getText(),
+        );
+        final urlB = normalizeUrlPreservingPath(
+          b.getString(KdbxKeyCommon.URL)?.getText(),
+        );
         if (urlA != urlB) return false;
 
         final notesA = normalizeNotes(a.getString(KdbxKey('Notes'))?.getText());
@@ -299,13 +331,19 @@ class KeyNestDuplicateDetector {
       if (textA != textB) return false;
     }
 
-    // 4. Binary Attachments
+    // 4. Binary Attachments (compare filename, byte length, and exact byte content)
     final aBinaries = a.binaryEntries.toList();
     final bBinaries = b.binaryEntries.toList();
     if (aBinaries.length != bBinaries.length) return false;
     for (final bEntry in aBinaries) {
       final matching = b.getBinary(bEntry.key);
       if (matching == null) return false;
+      final bytesA = bEntry.value.value;
+      final bytesB = matching.value;
+      if (bytesA.length != bytesB.length) return false;
+      for (int i = 0; i < bytesA.length; i++) {
+        if (bytesA[i] != bytesB[i]) return false;
+      }
     }
 
     return true;
