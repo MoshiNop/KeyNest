@@ -640,7 +640,7 @@ object AutofillCredentialStore {
                 val pendingEntry = sourceEntries.firstOrNull { it.id == pending.entryId }
                 if (pendingEntry != null) {
                     // For web requests, ensure pending entry genuinely matches this domain before prioritizing
-                    if (!hasTargetDomain || resultList.any { it.id == pendingEntry.id }) {
+                    if (!hasVerifiedTargetDomain || resultList.any { it.id == pendingEntry.id }) {
                         resultList.removeAll { it.id == pendingEntry.id }
                         resultList.add(0, pendingEntry)
                     }
