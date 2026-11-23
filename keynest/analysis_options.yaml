@@ -3,11 +3,6 @@
 # see https://github.com/dart-lang/pedantic#enabled-lints.
 include: package:flutter_lints/flutter.yaml
 
-plugins:
-  string_literal_finder:
-    path: /Users/herbert/dev/dart/string_literal_finder/packages/string_literal_finder
-
-
 analyzer:
 #  FIXME: externalize / annotate all strings so this can be enabled.
 #  plugins:
